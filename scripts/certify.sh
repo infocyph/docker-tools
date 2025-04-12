@@ -1,12 +1,7 @@
 #!/bin/bash
 
-# Output directory for certificates
 CERT_DIR="/etc/mkcert"
 
-##############################################
-# Function: get_domains_from_dirs
-#   Returns unique domains (one per line) based on *.conf filenames
-##############################################
 get_domains_from_files() {
     local domains=()
     local file
@@ -20,20 +15,10 @@ get_domains_from_files() {
     echo "${domains[@]}" | tr ' ' '\n' | sort -u
 }
 
-##############################################
-# Function: run_mkcert
-#   Wrapper for mkcert command
-##############################################
 run_mkcert() {
     mkcert "$@" &> /dev/null
 }
 
-##############################################
-# Function: validate_certificate
-#   Checks if a certificate file exists, is in valid PEM format, not expired,
-#   and that all domains in CERT_DOMAINS are present in its SAN.
-#   Returns 0 if valid; nonzero otherwise.
-##############################################
 validate_certificate() {
     local cert_file="$1"
     if [ ! -f "$cert_file" ]; then
@@ -92,14 +77,6 @@ validate_certificate() {
     return 0
 }
 
-
-##############################################
-# Function: generate_certificates
-#   Loops over a set of certificate definitions.
-#   For each, checks if the certificate file exists and is valid.
-#   If not, uses mkcert to generate it.
-#   For client certificates, a .p12 bundle is created using OpenSSL.
-##############################################
 generate_certificates() {
     declare -A CERT_FILES=(
         ["Nginx (Server)"]="nginx-server.pem nginx-server-key.pem"
@@ -164,7 +141,6 @@ generate_certificates() {
 CONF_FILES=($(find /etc/share/vhosts -type f -name '*.conf'))
 CERT_DOMAINS=$(get_domains_from_files "${CONF_FILES[@]}")
 
-# Generate output content and pipe it into boxes & lolcat for pretty output
 echo "=============================================================="
 echo ""
 echo "[~] List of domains:"

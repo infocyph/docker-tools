@@ -10,11 +10,13 @@ SHELL ["/bin/bash", "-c"]
 RUN curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64" && \
     mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert && \
     chmod +x /usr/local/bin/mkcert && \
-    mkdir -p /etc/mkcert /etc/share/rootCA /etc/share/vhosts
+    mkdir -p /etc/mkcert /etc/share/rootCA /etc/share/vhosts/apache /etc/share/vhosts/nginx
 ENV DIR=/usr/local/bin
 RUN curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
 COPY scripts/certify.sh /usr/local/bin/certify
+COPY scripts/mkhost.sh /usr/local/bin/mkhost
+COPY scripts/http-templates/ /etc/http-templates/
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
-RUN chmod +x /usr/local/bin/gitx /usr/local/bin/certify && chmod -R 755 /etc/share/vhosts
+RUN chmod +x /usr/local/bin/gitx /usr/local/bin/certify /usr/local/bin/mkhost && chmod -R 755 /etc/share/vhosts
 WORKDIR /app
 CMD ["/bin/bash", "-c", "/usr/local/bin/certify && tail -f /dev/null"]

@@ -125,6 +125,7 @@ function prompt_for_client_max_body_size() {
 function prompt_for_php_version() {
   echo -e "${CYAN}Choose the PHP version:${NC}"
   PS3="$(echo -e "${YELLOW}👉 Select PHP version: ${NC}") "
+  local PHP_VERSION
   select PHP_VERSION in "7.3" "7.4" "8.0" "8.1" "8.2" "8.3" "8.4"; do
     if [[ -n "$PHP_VERSION" ]]; then
       PHP_CONTAINER_PROFILE="php${PHP_VERSION//./}"
@@ -219,3 +220,6 @@ function configure_server() {
 }
 
 configure_server
+unset "$DOMAIN_NAME" "$SERVER_TYPE" "$ENABLE_HTTPS" "$ENABLE_REDIRECTION" \
+      "$KEEP_HTTP" "$DOC_ROOT" "$CLIENT_MAX_BODY_SIZE" "CLIENT_MAX_BODY_SIZE_APACHE" "$ENABLE_CLIENT_VERIFICATION" \
+      "$PHP_CONTAINER_PROFILE" "$PHP_CONTAINER" "$PHP_APACHE_CONTAINER_PROFILE" "$PHP_APACHE_CONTAINER" "$APACHE_CONTAINER"

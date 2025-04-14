@@ -16,6 +16,9 @@
 | Docker Hub       | `docker.io/infocyph/tools` |
 | GitHub Container | `ghcr.io/infocyph/tools`   |
 
+<!-- VERSION:START -->
+<!-- VERSION:END -->
+
 ---
 
 ## 🚀 Features

@@ -66,36 +66,3 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
           github-token: ${{ secrets.GH_TOKEN }}
-  update_version:
-    name: Update version file and README version block
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-
-      - name: Create version.txt
-        run: |
-          echo "Version: $(date '+%Y-%m-%d %H:%M:%S') - ${{ github.workflow }} (${{ github.run_number }}/${{ github.run_id }})" > version.txt
-          cat version.txt
-
-      - name: Update README.md version block
-        run: |
-          DATE=$(date "+%Y-%m-%d %H:%M:%S")
-          awk 'BEGIN {inside=0}
-               /<!-- VERSION:START -->/ {print; print "Image Last updated on: " ENVIRON["DATE"]; inside=1; next}
-               /<!-- VERSION:END -->/ {print; inside=0; next}
-               {if (!inside) print}' README.md > README.tmp
-          mv README.tmp README.md
-          cat README.md
-
-      - name: Commit
-        run: |
-          if [[ $(git status --porcelain) ]]; then
-            git config user.name github-actions
-            git config user.email github-actions@github.com
-            git add version.txt README.md
-            git commit -m "${{github.workflow}} (${{github.run_number}}/${{github.run_id}})"
-            git push
-          fi

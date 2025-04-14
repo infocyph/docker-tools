@@ -33,18 +33,19 @@
 
 ## 🛠️ Preinstalled Utilities
 
-| Tool                | Purpose                                 |
-|---------------------|-----------------------------------------|
-| `mkcert`            | Generate local CA-signed SSL certs      |
-| `openssl`           | Certificate inspection, bundling        |
-| `lazydocker`        | TUI-based Docker management             |
-| `curl`/`wget`       | Web endpoint testing                    |
-| `jq`                | JSON manipulation                       |
-| `nmap`              | Network scanner                         |
-| `net-tools`         | IP, ARP, routing, and ifconfig commands |
-| `ncdu`              | Disk usage visualizer                   |
-| `tree`              | Directory structure visualizer          |
-| `bash`, `coreutils` | POSIX compatibility and scripting       |
+| Tool                | Purpose                                   |
+|---------------------|-------------------------------------------|
+| `mkcert`            | Generate local CA-signed SSL certs        |
+| `mkhost`            | Generate nginx, apache host configuration |
+| `openssl`           | Certificate inspection, bundling          |
+| `lazydocker`        | TUI-based Docker management               |
+| `curl`/`wget`       | Web endpoint testing                      |
+| `jq`                | JSON manipulation                         |
+| `nmap`              | Network scanner                           |
+| `net-tools`         | IP, ARP, routing, and ifconfig commands   |
+| `ncdu`              | Disk usage visualizer                     |
+| `tree`              | Directory structure visualizer            |
+| `bash`, `coreutils` | POSIX compatibility and scripting         |
 
 ---
 

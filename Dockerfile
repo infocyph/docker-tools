@@ -21,6 +21,8 @@ COPY scripts/certify.sh /usr/local/bin/certify
 COPY scripts/mkhost.sh /usr/local/bin/mkhost
 COPY scripts/http-templates/ /etc/http-templates/
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
-RUN chmod +x /usr/local/bin/gitx /usr/local/bin/certify /usr/local/bin/mkhost && chmod -R 755 /etc/share/vhosts
+RUN chmod +x /usr/local/bin/gitx /usr/local/bin/certify /usr/local/bin/mkhost && \
+    touch /etc/environment && \
+    chmod -R 755 /etc/share/vhosts && chmod 644 /etc/environment
 WORKDIR /app
 CMD ["/bin/bash", "-c", "/usr/local/bin/certify && tail -f /dev/null"]

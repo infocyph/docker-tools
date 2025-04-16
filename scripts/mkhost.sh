@@ -155,17 +155,22 @@ function generate_conf_from_template() {
       "$template_file" >>"$output_file"
 }
 
+update_env() {
+  local key="$1" value="$2" file="/etc/environment"
+  grep -q "^${key}=" "$file" && sudo sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+}
+
 function create_configuration() {
   local CONFIG_NGINX="/etc/share/vhosts/nginx/${DOMAIN_NAME}.conf"
   local CONFIG_APACHE="/etc/share/vhosts/apache/${DOMAIN_NAME}.conf"
   local CONFIG_FILE
   local base_template_path="/etc/http-templates"
-  local profile_to_add="${PHP_CONTAINER_PROFILE}"
 
   if [[ "$SERVER_TYPE" == "Nginx" ]]; then
     CONFIG_FILE=$CONFIG_NGINX
   elif [[ "$SERVER_TYPE" == "Apache" ]]; then
     CONFIG_FILE=$CONFIG_APACHE
+    update_env "APACHE_ACTIVE" "apache"
   else
     echo -e "${RED}Invalid server type: $SERVER_TYPE${NC}"
     return 1
@@ -185,14 +190,18 @@ function create_configuration() {
 
   [ -f "$directory/$CONFIG_NGINX" ] && chmod 644 "$directory/$CONFIG_NGINX"
   [ -f "$directory/$CONFIG_FILE" ] && chmod 644 "$directory/$CONFIG_FILE"
+  update_env "ACTIVE_PHP_PROFILE" "${PHP_CONTAINER_PROFILE}"
 
   echo -e "\n${GREEN}Configuration for ${DOMAIN_NAME} has been saved.${NC}"
-
-  echo "$profile_to_add"
 }
 
 function show_step() {
   echo -ne "${YELLOW}Step $1 of $2: ${NC}"
+}
+
+get_env() {
+  local key="$1"
+  grep -E "^${key}=" /etc/environment | cut -d'=' -f2-
 }
 
 function configure_server() {
@@ -219,7 +228,27 @@ function configure_server() {
   create_configuration
 }
 
-configure_server
-unset "$DOMAIN_NAME" "$SERVER_TYPE" "$ENABLE_HTTPS" "$ENABLE_REDIRECTION" \
-      "$KEEP_HTTP" "$DOC_ROOT" "$CLIENT_MAX_BODY_SIZE" "CLIENT_MAX_BODY_SIZE_APACHE" "$ENABLE_CLIENT_VERIFICATION" \
-      "$PHP_CONTAINER_PROFILE" "$PHP_CONTAINER" "$PHP_APACHE_CONTAINER_PROFILE" "$PHP_APACHE_CONTAINER" "$APACHE_CONTAINER"
+configure_server() {
+  create_configuration
+}
+
+case "$1" in
+  "--RESET")
+    update_env "APACHE_ACTIVE" ""
+    update_env "ACTIVE_PHP_PROFILE" ""
+    ;;
+  "--ACTIVE_PHP_PROFILE")
+    get_env "ACTIVE_PHP_PROFILE"
+    ;;
+  "--APACHE_ACTIVE")
+    get_env "APACHE_ACTIVE"
+    ;;
+  *)
+    configure_server
+    unset "$DOMAIN_NAME" "$SERVER_TYPE" "$ENABLE_HTTPS" "$ENABLE_REDIRECTION" \
+          "$KEEP_HTTP" "$DOC_ROOT" "$CLIENT_MAX_BODY_SIZE" "CLIENT_MAX_BODY_SIZE_APACHE" "$ENABLE_CLIENT_VERIFICATION" \
+          "$PHP_CONTAINER_PROFILE" "$PHP_CONTAINER" "$PHP_APACHE_CONTAINER_PROFILE" "$PHP_APACHE_CONTAINER" "$APACHE_CONTAINER"
+    ;;
+esac
+
+

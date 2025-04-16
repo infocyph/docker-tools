@@ -228,10 +228,6 @@ function configure_server() {
   create_configuration
 }
 
-configure_server() {
-  create_configuration
-}
-
 case "$1" in
   "--RESET")
     update_env "APACHE_ACTIVE" ""
@@ -250,5 +246,3 @@ case "$1" in
           "$PHP_CONTAINER_PROFILE" "$PHP_CONTAINER" "$PHP_APACHE_CONTAINER_PROFILE" "$PHP_APACHE_CONTAINER" "$APACHE_CONTAINER"
     ;;
 esac
-
-

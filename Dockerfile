@@ -5,8 +5,6 @@ LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.authors="infocyph,abmmhasan"
 ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH"
 ENV CAROOT=/etc/share/rootCA
-ENV ACTIVE_PHP_PROFILE=""
-ENV APACHE_ACTIVE=""
 RUN apk update && \
     apk add --no-cache curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree nmap openssl ncurses && \
     rm -rf /var/cache/apk/*
@@ -23,6 +21,9 @@ COPY scripts/http-templates/ /etc/http-templates/
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 RUN chmod +x /usr/local/bin/gitx /usr/local/bin/certify /usr/local/bin/mkhost && \
     touch /etc/environment && \
-    chmod -R 755 /etc/share/vhosts && chmod 644 /etc/environment
+    chmod -R 755 /etc/share/vhosts && \
+    chmod 644 /etc/environment && \
+    echo 'ACTIVE_PHP_PROFILE=""' >> /etc/environment && \
+    echo 'APACHE_ACTIVE=""' >> /etc/environment
 WORKDIR /app
 CMD ["/bin/bash", "-c", "/usr/local/bin/certify && tail -f /dev/null"]

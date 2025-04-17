@@ -156,8 +156,8 @@ function generate_conf_from_template() {
 }
 
 update_env() {
-  local key="$1" value="$2" file="/etc/environment"
-  grep -q "^${key}=" "$file" && sudo sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  local key="$1" value="$2"
+  sed -i "s|^${key}=.*|${key}=${value}|" "/etc/environment"
 }
 
 function create_configuration() {
@@ -200,8 +200,7 @@ function show_step() {
 }
 
 get_env() {
-  local key="$1"
-  grep -E "^${key}=" /etc/environment | cut -d'=' -f2-
+  grep -E "^$1=" /etc/environment | cut -d'=' -f2-
 }
 
 function configure_server() {

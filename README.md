@@ -16,9 +16,6 @@
 | Docker Hub       | `docker.io/infocyph/tools` |
 | GitHub Container | `ghcr.io/infocyph/tools`   |
 
-<!-- VERSION:START -->
-<!-- VERSION:END -->
-
 ---
 
 ## 🚀 Features
@@ -31,6 +28,7 @@
 - Interactive Docker TUI via [`lazydocker`](https://github.com/jesseduffield/lazydocker)  
 - Host volumes supported for cert persistence and dynamic vhost domain input
 - Bundles `.p12` client certificates
+- Set timezone via environment variable `TZ`
 
 ---
 

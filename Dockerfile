@@ -6,7 +6,7 @@ LABEL org.opencontainers.image.authors="infocyph,abmmhasan"
 ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH"
 ENV CAROOT=/etc/share/rootCA
 RUN apk update && \
-    apk add --no-cache curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree nmap openssl ncurses && \
+    apk add --no-cache curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree nmap openssl ncurses tzdata && \
     rm -rf /var/cache/apk/*
 SHELL ["/bin/bash", "-c"]
 RUN curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64" && \

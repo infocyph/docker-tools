@@ -35,14 +35,14 @@ RUN chmod +x /usr/local/bin/gitx /usr/local/bin/certify /usr/local/bin/mkhost /u
       echo '#!/bin/sh'; \
       echo 'if [ -n "$PS1" ] && [ -z "${BANNER_SHOWN-}" ]; then'; \
       echo '  export BANNER_SHOWN=1'; \
-      echo '  show-banner "RUNNER (SUPERVISOR)"'; \
+      echo '  show-banner "Tools"'; \
       echo 'fi'; \
     } > /etc/profile.d/banner-hook.sh && \
     chmod +x /etc/profile.d/banner-hook.sh && \
     { \
       echo 'if [ -n "$PS1" ] && [ -z "${BANNER_SHOWN-}" ]; then'; \
       echo '  export BANNER_SHOWN=1'; \
-      echo '  show-banner "RUNNER (SUPERVISOR)"'; \
+      echo '  show-banner "Tools"'; \
       echo 'fi'; \
     } >> /root/.bashrc
 WORKDIR /app

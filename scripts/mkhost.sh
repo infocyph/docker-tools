@@ -104,7 +104,7 @@ function prompt_for_client_verification() {
 }
 
 function prompt_for_doc_root() {
-  read -e -r -p "$(echo -e "${CYAN}Enter the relative DocumentRoot (e.g., /site):${NC} ")" DOC_ROOT
+  read -e -r -p "$(echo -e "${CYAN}Enter the relative DocumentRoot (e.g., /site/public):${NC} ")" DOC_ROOT
   DOC_ROOT=$(validate_input "$DOC_ROOT" "DocumentRoot cannot be empty. Please enter a valid DocumentRoot:")
   DOC_ROOT=$(echo "$DOC_ROOT" | xargs)
 }

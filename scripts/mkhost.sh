@@ -104,7 +104,7 @@ function prompt_for_client_verification() {
 }
 
 function prompt_for_doc_root() {
-  read -e -r -p "$(echo -e "${CYAN}Enter the relative DocumentRoot (e.g., /site):${NC} ")" DOC_ROOT
+  read -e -r -p "$(echo -e "${CYAN}Enter the relative DocumentRoot (e.g., /site/public):${NC} ")" DOC_ROOT
   DOC_ROOT=$(validate_input "$DOC_ROOT" "DocumentRoot cannot be empty. Please enter a valid DocumentRoot:")
   DOC_ROOT=$(echo "$DOC_ROOT" | xargs)
 }
@@ -176,20 +176,20 @@ function create_configuration() {
     return 1
   fi
   if [[ "$ENABLE_REDIRECTION" == "y" ]]; then
-    generate_conf_from_template "$base_template_path/redirect.nginx.conf" "$directory/$CONFIG_NGINX"
+    generate_conf_from_template "$base_template_path/redirect.nginx.conf" "$CONFIG_NGINX"
   elif [[ "$KEEP_HTTP" == "y" || "$ENABLE_HTTPS" == "n" ]]; then
-    [[ "$SERVER_TYPE" == "Apache" ]] && generate_conf_from_template "$base_template_path/proxy-http.nginx.conf" "$directory/$CONFIG_NGINX"
-    generate_conf_from_template "$base_template_path/http.${SERVER_TYPE,,}.conf" "$directory/$CONFIG_FILE"
+    [[ "$SERVER_TYPE" == "Apache" ]] && generate_conf_from_template "$base_template_path/proxy-http.nginx.conf" "$CONFIG_NGINX"
+    generate_conf_from_template "$base_template_path/http.${SERVER_TYPE,,}.conf" "$CONFIG_FILE"
   fi
 
   if [[ "$ENABLE_HTTPS" == "y" ]]; then
-    [[ "$SERVER_TYPE" == "Apache" ]] && generate_conf_from_template "$base_template_path/proxy-https.nginx.conf" "$directory/$CONFIG_NGINX"
-    generate_conf_from_template "$base_template_path/https.${SERVER_TYPE,,}.conf" "$directory/$CONFIG_FILE"
+    [[ "$SERVER_TYPE" == "Apache" ]] && generate_conf_from_template "$base_template_path/proxy-https.nginx.conf" "$CONFIG_NGINX"
+    generate_conf_from_template "$base_template_path/https.${SERVER_TYPE,,}.conf" "$CONFIG_FILE"
     certify
   fi
 
-  [ -f "$directory/$CONFIG_NGINX" ] && chmod 644 "$directory/$CONFIG_NGINX"
-  [ -f "$directory/$CONFIG_FILE" ] && chmod 644 "$directory/$CONFIG_FILE"
+  [ -f "$CONFIG_NGINX" ] && chmod 644 "$CONFIG_NGINX"
+  [ -f "$CONFIG_FILE" ] && chmod 644 "$CONFIG_FILE"
   update_env "ACTIVE_PHP_PROFILE" "${PHP_CONTAINER_PROFILE}"
 
   echo -e "\n${GREEN}Configuration for ${DOMAIN_NAME} has been saved.${NC}"

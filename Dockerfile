@@ -7,7 +7,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH"
 ENV CAROOT=/etc/share/rootCA
 RUN apk update && \
     apk add --no-cache curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
-    nmap openssl ncurses tzdata figlet musl-locales gawk && \
+    nmap openssl ncurses tzdata figlet musl-locales gawk sqlite && \
     rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
 ENV LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8
@@ -24,7 +24,9 @@ COPY scripts/http-templates/ /etc/http-templates/
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/ChromaCat/chromacat /usr/local/bin/chromacat
-RUN chmod +x /usr/local/bin/gitx /usr/local/bin/certify /usr/local/bin/mkhost /usr/local/bin/show-banner /usr/local/bin/chromacat && \
+ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Sqlite/sqlitex /usr/local/bin/sqlitex
+RUN chmod +x /usr/local/bin/gitx /usr/local/bin/certify /usr/local/bin/mkhost \
+    /usr/local/bin/show-banner /usr/local/bin/chromacat /usr/local/bin/sqlitex && \
     touch /etc/environment && \
     chmod -R 755 /etc/share/vhosts && \
     chmod 644 /etc/environment && \

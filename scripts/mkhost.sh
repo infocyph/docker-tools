@@ -166,6 +166,8 @@ function create_configuration() {
   local CONFIG_FILE
   local base_template_path="/etc/http-templates"
 
+  rm -f "$CONFIG_NGINX" "$CONFIG_APACHE"
+
   if [[ "$SERVER_TYPE" == "Nginx" ]]; then
     CONFIG_FILE=$CONFIG_NGINX
   elif [[ "$SERVER_TYPE" == "Apache" ]]; then

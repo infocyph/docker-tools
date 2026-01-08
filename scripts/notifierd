@@ -12,37 +12,33 @@ mkfifo "$FIFO"
 
 echo "[notifier] ready fifo=$FIFO tcp=0.0.0.0:$PORT" >&2
 
-# TCP listener (other containers send one line: token<TAB>timeout<TAB>urgency<TAB>title<TAB>body)
-# Writes directly into FIFO. fork => multiple clients.
 socat -u "TCP-LISTEN:${PORT},fork,reuseaddr" "FILE:${FIFO}" >/dev/null 2>&1 &
 
-# Consume FIFO forever and emit standardized log lines
 while IFS=$'\n' read -r line < "$FIFO"; do
   [[ -z "${line:-}" ]] && continue
 
   IFS=$'\t' read -r in_token timeout urgency title body <<< "$line"
 
-  # Auth
+  # Token placeholder → treat as empty
+  [[ "${in_token:-}" == "-" ]] && in_token=""
+
+  # Auth only if TOKEN is configured
   if [[ -n "$TOKEN" && "$in_token" != "$TOKEN" ]]; then
     echo "[notifier] rejected (bad token)" >&2
     continue
   fi
 
-  # Defaults + validation
   timeout="${timeout:-2500}"
   urgency="${urgency:-normal}"
 
   [[ "$timeout" =~ ^[0-9]{1,6}$ ]] || timeout="2500"
   case "$urgency" in low|normal|critical) ;; *) urgency="normal" ;; esac
 
-  # Sanitize (keep protocol stable)
   title="${title//$'\n'/ }"; title="${title//$'\r'/ }"; title="${title//$'\t'/ }"
   body="${body//$'\n'/ }";  body="${body//$'\r'/ }";  body="${body//$'\t'/ }"
 
-  # Cap length to avoid log spam
   title="${title:0:80}"
   body="${body:0:220}"
 
-  # This is what host watcher will parse from docker logs
   echo -e "${PREFIX}\t${timeout}\t${urgency}\t${title}\t${body}"
 done

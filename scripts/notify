@@ -5,6 +5,8 @@ HOST="${NOTIFY_HOST:-127.0.0.1}"
 PORT="${NOTIFY_TCP_PORT:-9901}"
 TOKEN="${NOTIFY_TOKEN:-}"
 
+[[ -z "$TOKEN" ]] && TOKEN='-'
+
 timeout="2500"
 urgency="normal"
 
@@ -12,9 +14,9 @@ usage() { echo "Usage: notify [-t ms] [-u low|normal|critical] <title> <body>" >
 
 while getopts ":t:u:" opt; do
   case "$opt" in
-    t) timeout="$OPTARG" ;;
-    u) urgency="$OPTARG" ;;
-    *) usage ;;
+  t) timeout="$OPTARG" ;;
+  u) urgency="$OPTARG" ;;
+  *) usage ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -24,10 +26,8 @@ shift $((OPTIND - 1))
 title="$1"
 body="$2"
 
-# Flatten tabs/newlines so it's always one-line protocol
 title="${title//$'\n'/ }"; title="${title//$'\r'/ }"; title="${title//$'\t'/ }"
 body="${body//$'\n'/ }";  body="${body//$'\r'/ }";  body="${body//$'\t'/ }"
 
-# Send one line over TCP
 printf "%s\t%s\t%s\t%s\t%s\n" "$TOKEN" "$timeout" "$urgency" "$title" "$body" \
   | nc -w 1 "$HOST" "$PORT"

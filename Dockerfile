@@ -33,8 +33,8 @@ RUN curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scrip
 
 COPY scripts/certify.sh /usr/local/bin/certify
 COPY scripts/mkhost.sh /usr/local/bin/mkhost
-COPY scripts/notifierd /usr/local/bin/notifierd
-COPY scripts/notify /usr/local/bin/notify
+COPY scripts/notifierd.sh /usr/local/bin/notifierd
+COPY scripts/notify.sh /usr/local/bin/notify
 COPY scripts/http-templates/ /etc/http-templates/
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-HOST="${NOTIFY_HOST:-notifier}"
+HOST="${NOTIFY_HOST:-127.0.0.1}"
 PORT="${NOTIFY_TCP_PORT:-9901}"
 TOKEN="${NOTIFY_TOKEN:-}"
 

@@ -71,4 +71,4 @@ RUN chmod +x \
       echo 'fi'; \
     } >> /root/.bashrc
 WORKDIR /app
-CMD ["/bin/bash", "-c", "/usr/local/bin/certify && exec /usr/local/bin/notifierd"]
+CMD ["/bin/bash", "-c", "/usr/local/bin/certify || true; exec /usr/local/bin/notifierd"]

@@ -104,9 +104,14 @@ function prompt_for_client_verification() {
 }
 
 function prompt_for_doc_root() {
-  read -e -r -p "$(echo -e "${CYAN}Enter the relative DocumentRoot (e.g., /site/public):${NC} ")" DOC_ROOT
-  DOC_ROOT=$(validate_input "$DOC_ROOT" "DocumentRoot cannot be empty. Please enter a valid DocumentRoot:")
-  DOC_ROOT=$(echo "$DOC_ROOT" | xargs)
+  local input
+  read -e -r -p "$(echo -e "${CYAN}Enter the relative DocumentRoot (e.g., /site/public):${NC} ")" input
+  input="$(validate_input "$input" "DocumentRoot cannot be empty. Please enter a valid DocumentRoot:")"
+  input="$(echo "$input" | xargs)"
+  [[ "$input" == /* ]] || input="/$input"
+  while [[ "$input" == *"//"* ]]; do input="${input//\/\//\/}"; done
+  [[ "$input" != "/" ]] && input="${input%/}"
+  DOC_ROOT="$input"
 }
 
 function prompt_for_client_max_body_size() {

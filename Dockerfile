@@ -35,6 +35,7 @@ COPY scripts/certify.sh /usr/local/bin/certify
 COPY scripts/mkhost.sh /usr/local/bin/mkhost
 COPY scripts/notifierd.sh /usr/local/bin/notifierd
 COPY scripts/notify.sh /usr/local/bin/notify
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/http-templates/ /etc/http-templates/
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner
@@ -49,7 +50,8 @@ RUN chmod +x \
       /usr/local/bin/chromacat \
       /usr/local/bin/sqlitex \
       /usr/local/bin/notifierd \
-      /usr/local/bin/notify && \
+      /usr/local/bin/notify \
+      /usr/local/bin/entrypoint && \
     touch /etc/environment && \
     chmod -R 755 /etc/share/vhosts && \
     chmod 644 /etc/environment && \
@@ -70,5 +72,7 @@ RUN chmod +x \
       echo '  show-banner "Tools"'; \
       echo 'fi'; \
     } >> /root/.bashrc
+
 WORKDIR /app
-CMD ["/bin/bash", "-c", "/usr/local/bin/certify || true; exec /usr/local/bin/notifierd"]
+ENTRYPOINT ["/usr/local/bin/entrypoint"]
+CMD ["/usr/local/bin/notifierd"]

@@ -12,12 +12,13 @@ BODY_MAX="${NOTIFY_BODY_MAX:-300}"
 
 echo "[notifier] ready tcp=0.0.0.0:${PORT}" >&2
 
-# socat writes every received line to stdout; we parse it directly.
-# Use stdbuf if available to reduce buffering.
-socat_cmd=(socat -u "TCP-LISTEN:${PORT},fork,reuseaddr" STDOUT)
+# socat emits received bytes to stdout; we parse line-by-line.
+# Use stdbuf when available to reduce buffering.
+socat_cmd=(socat -u -T 2 "TCP-LISTEN:${PORT},fork,reuseaddr" STDOUT)
 command -v stdbuf >/dev/null 2>&1 && socat_cmd=(stdbuf -oL -eL "${socat_cmd[@]}")
 
-"${socat_cmd[@]}" 2>/dev/null | while IFS= read -r line; do
+# IMPORTANT: no pipeline -> no subshell loop
+while IFS= read -r line; do
   [[ -z "${line:-}" ]] && continue
 
   # Protocol (6 fields): token \t timeout \t urgency \t source \t title \t body
@@ -37,12 +38,11 @@ command -v stdbuf >/dev/null 2>&1 && socat_cmd=(stdbuf -oL -eL "${socat_cmd[@]}"
   [[ "$timeout" =~ ^[0-9]{1,6}$ ]] || timeout="2500"
   case "$urgency" in low|normal|critical) ;; *) urgency="normal" ;; esac
 
-  # Sanitize (one-line protocol)
+  # Sanitize to keep one-line protocol stable
   source="${source//$'\n'/ }"; source="${source//$'\r'/ }"; source="${source//$'\t'/ }"
   title="${title//$'\n'/ }";   title="${title//$'\r'/ }";   title="${title//$'\t'/ }"
   body="${body//$'\n'/ }";     body="${body//$'\r'/ }";     body="${body//$'\t'/ }"
 
-  # Prefix title with source + caps
   title="[$source] $title"
   title="${title:0:${TITLE_MAX}}"
   body="${body:0:${BODY_MAX}}"
@@ -50,4 +50,4 @@ command -v stdbuf >/dev/null 2>&1 && socat_cmd=(stdbuf -oL -eL "${socat_cmd[@]}"
   # Emit to stdout for host watcher (5 fields):
   # PREFIX \t timeout \t urgency \t title \t body
   printf '%s\t%s\t%s\t%s\t%s\n' "$PREFIX" "$timeout" "$urgency" "$title" "$body"
-done
+done < <("${socat_cmd[@]}")

@@ -30,7 +30,7 @@ body="$2"
 [[ "$timeout" =~ ^[0-9]{1,6}$ ]] || timeout="2500"
 case "$urgency" in low|normal|critical) ;; *) urgency="normal" ;; esac
 
-# sanitize (one-line protocol)
+# Sanitize (one-line protocol)
 SOURCE="${SOURCE//$'\n'/ }"; SOURCE="${SOURCE//$'\r'/ }"; SOURCE="${SOURCE//$'\t'/ }"
 title="${title//$'\n'/ }";   title="${title//$'\r'/ }";   title="${title//$'\t'/ }"
 body="${body//$'\n'/ }";     body="${body//$'\r'/ }";     body="${body//$'\t'/ }"
@@ -39,10 +39,15 @@ body="${body//$'\n'/ }";     body="${body//$'\r'/ }";     body="${body//$'\t'/ }
 payload="$(printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$TOKEN" "$timeout" "$urgency" "$SOURCE" "$title" "$body")"
 
 # Prefer netcat-openbsd behaviour if present; otherwise fall back.
-# -w: overall timeout (seconds), -q: quit after EOF (seconds)
-if nc -h 2>&1 | grep -q -- 'OpenBSD'; then
+# -w: overall timeout (seconds)
+# -q: quit after EOF (seconds) (OpenBSD + some others)
+if nc -h 2>&1 | grep -qi -- 'openbsd'; then
   printf '%s' "$payload" | nc -w 1 -q 0 127.0.0.1 "$PORT" >/dev/null 2>&1 || true
 else
-  # busybox/traditional: -w exists but -q may not; keep it simple
-  printf '%s' "$payload" | nc -w 1 127.0.0.1 "$PORT" >/dev/null 2>&1 || true
+  # Try -N if supported (some netcat builds), else plain -w
+  if nc -h 2>&1 | grep -q -- ' -N '; then
+    printf '%s' "$payload" | nc -w 1 -N 127.0.0.1 "$PORT" >/dev/null 2>&1 || true
+  else
+    printf '%s' "$payload" | nc -w 1 127.0.0.1 "$PORT" >/dev/null 2>&1 || true
+  fi
 fi

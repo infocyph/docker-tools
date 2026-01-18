@@ -131,7 +131,7 @@ function prompt_for_php_version() {
   echo -e "${CYAN}Choose the PHP version:${NC}"
   PS3="$(echo -e "${YELLOW}👉 Select PHP version: ${NC}") "
   local PHP_VERSION
-  select PHP_VERSION in "7.3" "7.4" "8.0" "8.1" "8.2" "8.3" "8.4"; do
+  select PHP_VERSION in "8.5" "8.4" "8.3" "8.2" "8.1" "8.0" "7.4" "7.3"; do
     if [[ -n "$PHP_VERSION" ]]; then
       PHP_CONTAINER_PROFILE="php${PHP_VERSION//./}"
       PHP_APACHE_CONTAINER_PROFILE="php${PHP_VERSION//./}apache"

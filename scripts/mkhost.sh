@@ -289,7 +289,7 @@ services:
       - PORT=${NODE_PORT}
       - HOST=0.0.0.0
     env_file:
-      - "../../.env"
+      - .env
     networks:
       frontend: {}
       backend: {}

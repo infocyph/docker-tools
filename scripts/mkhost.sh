@@ -475,6 +475,17 @@ create_node_compose() {
   local CONFIG_DOCKER_NODE="/etc/share/vhosts/node/${token}.yaml"
   rm -f "$CONFIG_DOCKER_NODE"
 
+  # If NODE_CMD was set in the UI, bake it into compose as a literal default.
+  # Otherwise keep it as runtime override (empty by default).
+  local node_cmd_line='- NODE_CMD=\${NODE_CMD:-}'
+  if [[ -n "${NODE_CMD:-}" ]]; then
+    # escape backslashes + double quotes to stay valid YAML
+    local esc
+    esc="${NODE_CMD//\\/\\\\}"
+    esc="${esc//\"/\\\"}"
+    node_cmd_line="- NODE_CMD=\${NODE_CMD:-\"${esc}\"}"
+  fi
+
   cat >"$CONFIG_DOCKER_NODE" <<YAML
 services:
   ${svc}:
@@ -496,8 +507,8 @@ services:
       - TZ=\${TZ:-}
       - PORT=3000
       - HOST=0.0.0.0
-      # Optional overrides
-      - NODE_CMD=\${NODE_CMD:-}
+      # Optional overrides (baked default if provided)
+      ${node_cmd_line}
       - NPM_AUDIT=\${NPM_AUDIT:-0}
       - NPM_FUND=\${NPM_FUND:-0}
     env_file:
@@ -523,12 +534,9 @@ YAML
   chmod 644 "$CONFIG_DOCKER_NODE"
   update_env "ACTIVE_NODE_PROFILE" "$profile"
 
-  # Persist NODE_CMD (optional override) so node-entry can use it
-  update_env "NODE_CMD" "${NODE_CMD:-}"
-
   echo -e "${GREEN}Node compose generated:${NC} ${token}"
   echo -e "${GREEN}Node service:${NC} $svc  ${GREEN}profile:${NC} $profile  ${GREEN}port:${NC} 3000"
-  [[ -n "${NODE_CMD:-}" ]] && echo -e "${YELLOW}Node override command saved:${NC} ${NODE_CMD}"
+  [[ -n "${NODE_CMD:-}" ]] && echo -e "${YELLOW}Node override command baked into compose:${NC} ${NODE_CMD}"
 }
 
 ###############################################################################
@@ -666,10 +674,6 @@ case "$1" in
   update_env "APACHE_ACTIVE" ""
   update_env "ACTIVE_PHP_PROFILE" ""
   update_env "ACTIVE_NODE_PROFILE" ""
-  update_env "NODE_CMD" ""
-  ;;
-"--NODE_CMD")
-  get_env "NODE_CMD"
   ;;
 "--ACTIVE_PHP_PROFILE")
   get_env "ACTIVE_PHP_PROFILE"

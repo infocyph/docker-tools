@@ -486,6 +486,10 @@ services:
       - TZ=\${TZ:-}
       - PORT=3000
       - HOST=0.0.0.0
+      # Optional overrides
+      - NODE_CMD=\${NODE_CMD:-}
+      - NPM_AUDIT=\${NPM_AUDIT:-0}
+      - NPM_FUND=\${NPM_FUND:-0}
     env_file:
       - .env
     networks:
@@ -497,9 +501,9 @@ services:
       - "../../configuration/ssh:/home/\${USER}/.ssh:ro"
     depends_on:
       - server-tools
-    command: ["sh","-lc","exec ${NODE_CMD}"]
+    command: ["/usr/local/bin/node-entry"]
     healthcheck:
-      test: ["CMD-SHELL", "node -e \\"const net=require('net');const p=process.env.PORT||3000;const s=net.connect(p,'127.0.0.1');s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));\\""]
+      test: ["CMD-SHELL", "node -e \"const net=require('net');const h=process.env.HOST||'127.0.0.1';const p=+process.env.PORT||3000;const s=net.connect(p,h);s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));\""]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -509,7 +513,7 @@ YAML
   chmod 644 "$CONFIG_DOCKER_NODE"
   update_env "ACTIVE_NODE_PROFILE" "$profile"
 
-  echo -e "${GREEN}Node compose generated:${NC} $CONFIG_DOCKER_NODE"
+  echo -e "${GREEN}Node compose generated:${NC} ${token}"
   echo -e "${GREEN}Node service:${NC} $svc  ${GREEN}profile:${NC} $profile  ${GREEN}port:${NC} 3000"
 }
 

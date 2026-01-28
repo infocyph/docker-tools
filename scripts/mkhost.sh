@@ -416,10 +416,20 @@ prompt_for_node_version() {
   echo -e "${GREEN}Selected Node version: $NODE_VERSION${NC}"
 }
 
-prompt_for_node_command() {
-  local def="npm run dev"
-  read -e -r -p "$(echo -e "${CYAN}Node start command (default: ${def}):${NC} ")" NODE_CMD
-  NODE_CMD="$(echo "${NODE_CMD:-$def}" | xargs)"
+###############################################################################
+# OPTIONAL Node command override:
+# Default: empty => node-entry auto-detects (dev/start/server.js/index.js)
+###############################################################################
+prompt_for_node_command_optional() {
+  NODE_CMD=""
+  local ans
+  read -e -r -p "$(echo -e "${CYAN}Custom Node start command? (y/N):${NC} ")" ans
+  ans="${ans,,}"
+  [[ "$ans" =~ ^(y|yes)$ ]] || return 0
+
+  read -e -r -p "$(echo -e "${CYAN}Enter Node start command (e.g., npm run dev / npm start / node server.js):${NC} ")" NODE_CMD
+  NODE_CMD="$(echo "${NODE_CMD:-}" | xargs)"
+  [[ -n "$NODE_CMD" ]] || NODE_CMD=""
 }
 
 ###############################################################################
@@ -513,8 +523,12 @@ YAML
   chmod 644 "$CONFIG_DOCKER_NODE"
   update_env "ACTIVE_NODE_PROFILE" "$profile"
 
+  # Persist NODE_CMD (optional override) so node-entry can use it
+  update_env "NODE_CMD" "${NODE_CMD:-}"
+
   echo -e "${GREEN}Node compose generated:${NC} ${token}"
   echo -e "${GREEN}Node service:${NC} $svc  ${GREEN}profile:${NC} $profile  ${GREEN}port:${NC} 3000"
+  [[ -n "${NODE_CMD:-}" ]] && echo -e "${YELLOW}Node override command saved:${NC} ${NODE_CMD}"
 }
 
 ###############################################################################
@@ -627,8 +641,8 @@ configure_server() {
     prompt_for_php_version
   else
     prompt_for_node_version
-    show_step 9 9
-    prompt_for_node_command
+    show_step 8 9
+    prompt_for_node_command_optional
   fi
 
   if [[ "$ENABLE_HTTPS" == "y" ]]; then
@@ -652,6 +666,10 @@ case "$1" in
   update_env "APACHE_ACTIVE" ""
   update_env "ACTIVE_PHP_PROFILE" ""
   update_env "ACTIVE_NODE_PROFILE" ""
+  update_env "NODE_CMD" ""
+  ;;
+"--NODE_CMD")
+  get_env "NODE_CMD"
   ;;
 "--ACTIVE_PHP_PROFILE")
   get_env "ACTIVE_PHP_PROFILE"

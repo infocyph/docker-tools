@@ -21,76 +21,78 @@ RUN apk add --no-cache curl bash ca-certificates jq \
   && curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
       "https://endoflife.date/api/v1/products/nodejs/" \
       -o "$tmp/node.json" \
-  && jq -n --slurpfile php "$tmp/php.json" --slurpfile node "$tmp/node.json" '
-      def nowiso: (now | todateiso8601);
-      def sort_node: sort_by(.version|tonumber) | reverse;
-      def sort_php:  sort_by(.version) | reverse;
+  && cat > "$tmp/build-versions.jq" <<'JQ'
+def nowiso: (now | todateiso8601);
+def sort_node: sort_by(.version|tonumber) | reverse;
+def sort_php:  sort_by(.version) | reverse;
 
-      def php_releases:  ($php[0].result.releases // []);
-      def node_releases: ($node[0].result.releases // []);
+def php_releases:  ($php[0].result.releases // []);
+def node_releases: ($node[0].result.releases // []);
 
-      def node_current_major:
-        (node_releases
-          | map(select(.isEol == false and .isLts == false))
-          | max_by(.name|tonumber)
-          | .name);
+def node_current_major:
+  (node_releases
+    | map(select(.isEol == false and .isLts == false))
+    | max_by(.name|tonumber)
+    | .name);
 
-      def node_lts_major:
-        (node_releases
-          | map(select(.isEol == false and .isLts == true))
-          | max_by(.name|tonumber)
-          | .name);
+def node_lts_major:
+  (node_releases
+    | map(select(.isEol == false and .isLts == true))
+    | max_by(.name|tonumber)
+    | .name);
 
-      {
-        generated_at: nowiso,
-        sources: {
-          php:  "https://endoflife.date/api/v1/products/php/",
-          node: "https://endoflife.date/api/v1/products/nodejs/"
-        },
+{
+  generated_at: nowiso,
+  sources: {
+    php:  "https://endoflife.date/api/v1/products/php/",
+    node: "https://endoflife.date/api/v1/products/nodejs/"
+  },
 
-        php: {
-          active: (
-            php_releases
-            | map(select(.isMaintained == true))
-            | map({ version: .name, debut: .releaseDate, eol: .eolFrom })
-            | sort_php
-          ),
-          deprecated: (
-            php_releases
-            | map(select(.isMaintained == false))
-            | map({ version: .name, eol: .eolFrom })
-            | sort_php
-          ),
-          all: (
-            php_releases
-            | map({ version: .name, debut: .releaseDate, eol: .eolFrom, maintained: .isMaintained })
-            | sort_php
-          )
-        },
+  php: {
+    active: (
+      php_releases
+      | map(select(.isMaintained == true))
+      | map({ version: .name, debut: .releaseDate, eol: .eolFrom })
+      | sort_php
+    ),
+    deprecated: (
+      php_releases
+      | map(select(.isMaintained == false))
+      | map({ version: .name, eol: .eolFrom })
+      | sort_php
+    ),
+    all: (
+      php_releases
+      | map({ version: .name, debut: .releaseDate, eol: .eolFrom, maintained: .isMaintained })
+      | sort_php
+    )
+  },
 
-        node: {
-          tags: { current: node_current_major, lts: node_lts_major },
+  node: {
+    tags: { current: node_current_major, lts: node_lts_major },
 
-          active: (
-            node_releases
-            | map(select(.isEol == false))
-            | map({ version: .name, label: .label, debut: .releaseDate, eol: .eolFrom, lts: .isLts })
-            | sort_node
-          ),
-          deprecated: (
-            node_releases
-            | map(select(.isEol == true))
-            | map({ version: .name, label: .label, eol: .eolFrom })
-            | sort_node
-          ),
-          all: (
-            node_releases
-            | map({ version: .name, label: .label, debut: .releaseDate, eol: .eolFrom, eolFlag: .isEol, lts: .isLts })
-            | sort_node
-          )
-        }
-      }
-    ' > /out/runtime-versions.json \
+    active: (
+      node_releases
+      | map(select(.isEol == false))
+      | map({ version: .name, label: .label, debut: .releaseDate, eol: .eolFrom, lts: .isLts })
+      | sort_node
+    ),
+    deprecated: (
+      node_releases
+      | map(select(.isEol == true))
+      | map({ version: .name, label: .label, eol: .eolFrom })
+      | sort_node
+    ),
+    all: (
+      node_releases
+      | map({ version: .name, label: .label, debut: .releaseDate, eol: .eolFrom, eolFlag: .isEol, lts: .isLts })
+      | sort_node
+    )
+  }
+}
+JQ \
+  && jq -n --slurpfile php "$tmp/php.json" --slurpfile node "$tmp/node.json" \
+      -f "$tmp/build-versions.jq" > /out/runtime-versions.json \
   && chmod 644 /out/runtime-versions.json \
   && rm -rf "$tmp"
 

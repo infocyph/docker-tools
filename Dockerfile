@@ -13,15 +13,23 @@ RUN apk add --no-cache curl bash ca-certificates jq \
   && curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
       "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash \
   && cp /usr/local/bin/lazydocker /out/lazydocker \
-  && chmod +x /out/lazydocker \
-  && tmp="$(mktemp -d)" \
-  && curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
-      "https://endoflife.date/api/v1/products/php/" \
-      -o "$tmp/php.json" \
-  && curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
-      "https://endoflife.date/api/v1/products/nodejs/" \
-      -o "$tmp/node.json" \
-  && cat > "$tmp/build-versions.jq" <<'JQ'
+  && chmod +x /out/lazydocker
+
+# BuildKit heredoc: generate /out/runtime-versions.json safely
+RUN <<'SH'
+set -euo pipefail
+
+tmp="$(mktemp -d)"
+
+curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
+  "https://endoflife.date/api/v1/products/php/" \
+  -o "$tmp/php.json"
+
+curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
+  "https://endoflife.date/api/v1/products/nodejs/" \
+  -o "$tmp/node.json"
+
+cat > "$tmp/build-versions.jq" <<'JQ'
 def nowiso: (now | todateiso8601);
 def sort_node: sort_by(.version|tonumber) | reverse;
 def sort_php:  sort_by(.version) | reverse;
@@ -90,11 +98,14 @@ def node_lts_major:
     )
   }
 }
-JQ \
-  && jq -n --slurpfile php "$tmp/php.json" --slurpfile node "$tmp/node.json" \
-      -f "$tmp/build-versions.jq" > /out/runtime-versions.json \
-  && chmod 644 /out/runtime-versions.json \
-  && rm -rf "$tmp"
+JQ
+
+jq -n --slurpfile php "$tmp/php.json" --slurpfile node "$tmp/node.json" \
+  -f "$tmp/build-versions.jq" > /out/runtime-versions.json
+
+chmod 644 /out/runtime-versions.json
+rm -rf "$tmp"
+SH
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: runtime/tools image

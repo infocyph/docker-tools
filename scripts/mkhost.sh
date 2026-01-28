@@ -46,8 +46,23 @@ slugify() {
 }
 
 to_env_key() {
-  # "23-alpine" -> "23_alpine"
-  echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+|_+$//g'
+  local v="${1:-}"
+  v="$(echo "$v" | xargs)"
+  v="${v,,}"
+
+  case "$v" in
+  current) echo "CURRENT" ;;
+  lts)     echo "LTS" ;;
+  '' )     echo "" ;;
+  *)
+  # only digits are allowed for majors; keep as-is
+    if [[ "$v" =~ ^[0-9]+$ ]]; then
+      echo "$v"
+    else
+      echo "$v" | sed -E 's/[^0-9]+//g'
+    fi
+    ;;
+  esac
 }
 
 update_env() {

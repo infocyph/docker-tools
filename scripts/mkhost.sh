@@ -493,7 +493,7 @@ services:
       backend: {}
       datastore: {}
     volumes:
-      - "\${PROJECT_DIR:-./../../../application}${DOC_ROOT}:/app"
+      - "\${PROJECT_DIR:-./../application}${DOC_ROOT}:/app"
       - "../../configuration/ssh:/home/\${USER}/.ssh:ro"
     depends_on:
       - server-tools

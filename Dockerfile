@@ -4,18 +4,22 @@
 FROM alpine:latest AS fetch
 SHELL ["/bin/sh", "-euo", "pipefail", "-c"]
 
+# 1) Tools needed to download + build JSON
 RUN apk add --no-cache curl bash ca-certificates jq \
   && update-ca-certificates \
-  && mkdir -p /out \
-  && curl -fsSJL --retry 3 --retry-delay 1 --retry-all-errors \
-      -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" \
-  && chmod +x /out/mkcert \
-  && curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
-      "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash \
-  && cp /usr/local/bin/lazydocker /out/lazydocker \
-  && chmod +x /out/lazydocker
+  && mkdir -p /out
 
-# BuildKit heredoc: generate /out/runtime-versions.json safely
+# 2) mkcert + lazydocker
+ENV DIR=/usr/local/bin
+RUN apk add --no-cache curl bash ca-certificates && update-ca-certificates && \
+  mkdir -p /out && \
+  curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" && \
+  chmod +x /out/mkcert && \
+  curl -fsSL "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash && \
+  cp /usr/local/bin/lazydocker /out/lazydocker && \
+  chmod +x /out/lazydocker
+
+# 3) Build runtime versions JSON (separate step; cached; no Dockerfile parser issues)
 RUN <<'SH'
 set -euo pipefail
 

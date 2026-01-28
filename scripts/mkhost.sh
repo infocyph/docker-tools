@@ -201,27 +201,36 @@ prompt_for_php_version() {
 # Node bits (Alpine tags + major only)
 ###############################################################################
 prompt_for_node_version() {
-  echo -e "${CYAN}Choose the Node version (Alpine tag):${NC}"
+  echo -e "${CYAN}Choose the Node version (tag):${NC}"
   PS3="$(echo -e "${YELLOW}👉 Select Node version: ${NC}") "
 
   local v custom
-  select v in "current-alpine" "lts-alpine" "23-alpine" "25-alpine" "custom"; do
+  select v in "current" "lts" "23" "25" "custom"; do
     case "$v" in
-    current-alpine|lts-alpine|23-alpine|25-alpine)
+    current|lts|23|25)
       NODE_VERSION="$v"
       echo -e "${GREEN}Selected Node version: $NODE_VERSION${NC}"
       break
       ;;
     custom)
       while true; do
-        read -e -r -p "$(echo -e "${CYAN}Enter custom Alpine tag (examples: 21-alpine, 22-alpine, current-alpine):${NC} ")" custom
+        read -e -r -p "$(echo -e "${CYAN}Enter major version only (examples: 22, 24, 26):${NC} ")" custom
         custom="$(echo "${custom:-}" | xargs)"
-        if [[ -n "$custom" && "$custom" =~ ^[A-Za-z0-9._-]+$ ]]; then
+
+        # ONLY digits (major version)
+        if [[ "$custom" =~ ^[0-9]+$ ]]; then
+          # Optional guardrail (adjust if you want)
+          if (( custom < 10 || custom > 99 )); then
+            echo -e "${RED}Invalid major version. Use a realistic number (10-99).${NC}"
+            continue
+          fi
+
           NODE_VERSION="$custom"
           echo -e "${GREEN}Selected Node version: $NODE_VERSION${NC}"
           break
         fi
-        echo -e "${RED}Invalid tag. Use letters/numbers/dot/underscore/dash only.${NC}"
+
+        echo -e "${RED}Invalid input. Only major digits allowed (e.g., 24).${NC}"
       done
       break
       ;;
@@ -287,7 +296,7 @@ services:
     container_name: ${cname}
     hostname: ${svc}
     build:
-      context: ../dockerfiles
+      context: docker/dockerfiles
       dockerfile: node.Dockerfile
       args:
         UID: \${UID:-1000}

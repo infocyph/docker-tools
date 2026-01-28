@@ -46,6 +46,7 @@ COPY --from=fetch /out/lazydocker /usr/local/bin/lazydocker
 
 COPY scripts/certify.sh /usr/local/bin/certify
 COPY scripts/mkhost.sh /usr/local/bin/mkhost
+COPY scripts/delhost.sh /usr/local/bin/delhost
 COPY scripts/notifierd.sh /usr/local/bin/notifierd
 COPY scripts/notify.sh /usr/local/bin/notify
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint
@@ -60,6 +61,7 @@ RUN chmod +x \
       /usr/local/bin/gitx \
       /usr/local/bin/certify \
       /usr/local/bin/mkhost \
+      /usr/local/bin/delhost \
       /usr/local/bin/show-banner \
       /usr/local/bin/chromacat \
       /usr/local/bin/sqlitex \

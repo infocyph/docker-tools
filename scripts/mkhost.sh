@@ -86,16 +86,16 @@ get_env() {
 choose_app_type() {
   echo -e "${CYAN}Choose app type:${NC}"
   PS3="$(echo -e "${YELLOW}👉 Select app type: ${NC}") "
-  select app_type in "PHP (FastCGI)" "Node (Reverse proxy)"; do
+  select app_type in "PHP" "NodeJs"; do
     case "$app_type" in
-    "PHP (FastCGI)")
+    "PHP")
       APP_TYPE="php"
       echo -e "${GREEN}Selected: PHP${NC}"
       break
       ;;
-    "Node (Reverse proxy)")
+    "NodeJs")
       APP_TYPE="node"
-      echo -e "${GREEN}Selected: Node${NC}"
+      echo -e "${GREEN}Selected: NodeJs${NC}"
       break
       ;;
     *)
@@ -220,7 +220,7 @@ prompt_for_node_version() {
   PS3="$(echo -e "${YELLOW}👉 Select Node version: ${NC}") "
 
   local v custom
-  select v in "current" "lts" "23" "25" "custom"; do
+  select v in "current" "lts" "custom"; do
     case "$v" in
     current|lts|23|25)
       NODE_VERSION="$v"

@@ -8,6 +8,34 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 ###############################################################################
+# Runtime versions DB (baked during docker build)
+###############################################################################
+RUNTIME_VERSIONS_DB="${RUNTIME_VERSIONS_DB:-/etc/share/runtime-versions.json}"
+
+have_versions_db() {
+  [[ -r "$RUNTIME_VERSIONS_DB" ]] && command -v jq >/dev/null 2>&1
+}
+
+pick_index() {
+  # pick_index <max> <prompt>
+  local max="$1" prompt="$2" ans
+  while true; do
+    read -e -r -p "$(echo -e "${CYAN}${prompt}${NC} ")" ans
+    ans="$(echo "${ans:-}" | xargs)"
+    [[ "$ans" =~ ^[0-9]+$ ]] || {
+      echo -e "${RED}Enter a number.${NC}"
+      continue
+    }
+    ((ans >= 1 && ans <= max)) || {
+      echo -e "${RED}Out of range (1-${max}).${NC}"
+      continue
+    }
+    echo "$ans"
+    return 0
+  done
+}
+
+###############################################################################
 # Helpers
 ###############################################################################
 validate_domain() {
@@ -52,10 +80,10 @@ to_env_key() {
 
   case "$v" in
   current) echo "CURRENT" ;;
-  lts)     echo "LTS" ;;
-  '' )     echo "" ;;
+  lts) echo "LTS" ;;
+  '') echo "" ;;
   *)
-  # only digits are allowed for majors; keep as-is
+    # only digits are allowed for majors; keep as-is
     if [[ "$v" =~ ^[0-9]+$ ]]; then
       echo "$v"
     else
@@ -193,67 +221,213 @@ prompt_for_client_max_body_size() {
 }
 
 ###############################################################################
-# PHP bits
+# PHP bits (Active/Deprecated/Custom via runtime-versions.json)
 ###############################################################################
+php_is_valid_custom() {
+  local v="$1"
+  [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]] || return 1
+  jq -e --arg v "$v" '.php.all[]? | select(.version == $v)' "$RUNTIME_VERSIONS_DB" >/dev/null 2>&1
+}
+
 prompt_for_php_version() {
-  echo -e "${CYAN}Choose the PHP version:${NC}"
-  PS3="$(echo -e "${YELLOW}👉 Select PHP version: ${NC}") "
-  local PHP_VERSION
-  select PHP_VERSION in "8.5" "8.4" "8.3" "8.2" "8.1" "8.0" "7.4" "7.3"; do
-    if [[ -n "$PHP_VERSION" ]]; then
-      PHP_CONTAINER_PROFILE="php${PHP_VERSION//./}"
-      PHP_APACHE_CONTAINER_PROFILE="php${PHP_VERSION//./}apache"
-      PHP_CONTAINER="PHP_${PHP_VERSION}"
-      PHP_APACHE_CONTAINER="PHP_${PHP_VERSION}_APACHE"
-      echo -e "${GREEN}You have selected PHP version $PHP_VERSION.${NC}"
-      break
+  if ! have_versions_db; then
+    echo -e "${YELLOW}Warning:${NC} $RUNTIME_VERSIONS_DB missing; falling back to static PHP list."
+    echo -e "${CYAN}Choose the PHP version:${NC}"
+    PS3="$(echo -e "${YELLOW}👉 Select PHP version: ${NC}") "
+    local PHP_VERSION
+    select PHP_VERSION in "8.5" "8.4" "8.3" "8.2" "8.1" "8.0" "7.4" "7.3"; do
+      if [[ -n "$PHP_VERSION" ]]; then
+        PHP_CONTAINER_PROFILE="php${PHP_VERSION//./}"
+        PHP_APACHE_CONTAINER_PROFILE="php${PHP_VERSION//./}apache"
+        PHP_CONTAINER="PHP_${PHP_VERSION}"
+        PHP_APACHE_CONTAINER="PHP_${PHP_VERSION}_APACHE"
+        echo -e "${GREEN}You have selected PHP version $PHP_VERSION.${NC}"
+        break
+      fi
+      echo -e "${RED}Invalid option, please select again.${NC}"
+    done
+    return 0
+  fi
+
+  echo -e "${CYAN}PHP versions:${NC}"
+  echo -e "  ${YELLOW}1)${NC} Active (supported)   ${YELLOW}2)${NC} Deprecated (EOL)   ${YELLOW}3)${NC} Custom"
+  local choice
+  choice="$(pick_index 3 "Select option (1-3):")"
+
+  local PHP_VERSION idx custom
+  case "$choice" in
+  1)
+    mapfile -t rows < <(jq -r '.php.active[] | "\(.version)|\(.debut)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
+    if ((${#rows[@]} == 0)); then
+      echo -e "${RED}No active PHP versions found in DB.${NC}"
+      return 1
     fi
-    echo -e "${RED}Invalid option, please select again.${NC}"
-  done
+
+    echo -e "${CYAN}Active PHP branches:${NC}"
+    for i in "${!rows[@]}"; do
+      IFS='|' read -r v debut eol <<<"${rows[$i]}"
+      printf "  %2d) %s   debut=%s   eol=%s\n" "$((i + 1))" "$v" "$debut" "$eol"
+    done
+
+    idx="$(pick_index "${#rows[@]}" "Pick PHP (1-${#rows[@]}):")"
+    IFS='|' read -r PHP_VERSION _ _ <<<"${rows[$((idx - 1))]}"
+    ;;
+  2)
+    mapfile -t rows < <(jq -r '.php.deprecated[] | "\(.version)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
+    if ((${#rows[@]} == 0)); then
+      echo -e "${RED}No deprecated PHP versions found in DB.${NC}"
+      return 1
+    fi
+
+    echo -e "${CYAN}Deprecated PHP branches:${NC}"
+    for i in "${!rows[@]}"; do
+      IFS='|' read -r v eol <<<"${rows[$i]}"
+      printf "  %2d) %s   eol=%s\n" "$((i + 1))" "$v" "$eol"
+    done
+
+    idx="$(pick_index "${#rows[@]}" "Pick PHP (1-${#rows[@]}):")"
+    IFS='|' read -r PHP_VERSION _ <<<"${rows[$((idx - 1))]}"
+    ;;
+  3)
+    while true; do
+      read -e -r -p "$(echo -e "${CYAN}Enter PHP version (Major.Minor, e.g., 8.4):${NC} ")" custom
+      custom="$(echo "${custom:-}" | xargs)"
+      if php_is_valid_custom "$custom"; then
+        PHP_VERSION="$custom"
+        break
+      fi
+      echo -e "${RED}Invalid / unknown PHP version. Must exist in $RUNTIME_VERSIONS_DB.${NC}"
+    done
+    ;;
+  esac
+
+  PHP_CONTAINER_PROFILE="php${PHP_VERSION//./}"
+  PHP_APACHE_CONTAINER_PROFILE="php${PHP_VERSION//./}apache"
+  PHP_CONTAINER="PHP_${PHP_VERSION}"
+  PHP_APACHE_CONTAINER="PHP_${PHP_VERSION}_APACHE"
+  echo -e "${GREEN}You have selected PHP version $PHP_VERSION.${NC}"
 }
 
 ###############################################################################
-# Node bits (Alpine tags + major only)
+# Node bits (Active/Deprecated/Custom + CURRENT/LTS tags via runtime-versions.json)
 ###############################################################################
+node_is_valid_custom() {
+  local v="$1"
+  [[ "$v" =~ ^[0-9]+$ ]] || return 1
+  jq -e --arg v "$v" '.node.all[]? | select(.version == $v)' "$RUNTIME_VERSIONS_DB" >/dev/null 2>&1
+}
+
 prompt_for_node_version() {
-  echo -e "${CYAN}Choose the Node version (tag):${NC}"
-  PS3="$(echo -e "${YELLOW}👉 Select Node version: ${NC}") "
-
-  local v custom
-  select v in "current" "lts" "custom"; do
-    case "$v" in
-    current|lts|23|25)
-      NODE_VERSION="$v"
-      echo -e "${GREEN}Selected Node version: $NODE_VERSION${NC}"
-      break
-      ;;
-    custom)
-      while true; do
-        read -e -r -p "$(echo -e "${CYAN}Enter major version only (examples: 22, 24, 26):${NC} ")" custom
-        custom="$(echo "${custom:-}" | xargs)"
-
-        # ONLY digits (major version)
-        if [[ "$custom" =~ ^[0-9]+$ ]]; then
-          # Optional guardrail (adjust if you want)
-          if (( custom < 10 || custom > 99 )); then
-            echo -e "${RED}Invalid major version. Use a realistic number (10-99).${NC}"
+  if ! have_versions_db; then
+    echo -e "${YELLOW}Warning:${NC} $RUNTIME_VERSIONS_DB missing; falling back to (current/lts/custom)."
+    echo -e "${CYAN}Choose the Node version (tag):${NC}"
+    PS3="$(echo -e "${YELLOW}👉 Select Node version: ${NC}") "
+    local v custom
+    select v in "current" "lts" "custom"; do
+      case "$v" in
+      current | lts)
+        NODE_VERSION="$v"
+        echo -e "${GREEN}Selected Node version: $NODE_VERSION${NC}"
+        break
+        ;;
+      custom)
+        while true; do
+          read -e -r -p "$(echo -e "${CYAN}Enter major version only (examples: 22, 24, 26):${NC} ")" custom
+          custom="$(echo "${custom:-}" | xargs)"
+          [[ "$custom" =~ ^[0-9]+$ ]] || {
+            echo -e "${RED}Invalid input. Only major digits allowed (e.g., 24).${NC}"
             continue
-          fi
-
+          }
           NODE_VERSION="$custom"
           echo -e "${GREEN}Selected Node version: $NODE_VERSION${NC}"
           break
-        fi
+        done
+        break
+        ;;
+      *)
+        echo -e "${RED}Invalid option, please select again.${NC}"
+        ;;
+      esac
+    done
+    return 0
+  fi
 
-        echo -e "${RED}Invalid input. Only major digits allowed (e.g., 24).${NC}"
-      done
-      break
-      ;;
-    *)
-      echo -e "${RED}Invalid option, please select again.${NC}"
-      ;;
-    esac
-  done
+  local current_major lts_major
+  current_major="$(jq -r '.node.tags.current // ""' "$RUNTIME_VERSIONS_DB")"
+  lts_major="$(jq -r '.node.tags.lts // ""' "$RUNTIME_VERSIONS_DB")"
+
+  echo -e "${CYAN}Node quick tags:${NC}"
+  echo -e "  ${YELLOW}CURRENT${NC} → ${current_major}"
+  echo -e "  ${YELLOW}LTS${NC}     → ${lts_major}"
+  echo
+
+  echo -e "${CYAN}Node versions:${NC}"
+  echo -e "  ${YELLOW}1)${NC} Active (supported)"
+  echo -e "  ${YELLOW}2)${NC} Deprecated (EOL)"
+  echo -e "  ${YELLOW}3)${NC} CURRENT"
+  echo -e "  ${YELLOW}4)${NC} LTS"
+  echo -e "  ${YELLOW}5)${NC} Custom"
+  local choice
+  choice="$(pick_index 5 "Select option (1-5):")"
+
+  local idx custom
+  case "$choice" in
+  1)
+    mapfile -t rows < <(jq -r '.node.active[] | "\(.version)|\(.label)|\(.debut)|\(.eol)|\(.lts)"' "$RUNTIME_VERSIONS_DB")
+    if ((${#rows[@]} == 0)); then
+      echo -e "${RED}No active Node versions found in DB.${NC}"
+      return 1
+    fi
+
+    echo -e "${CYAN}Active Node majors:${NC}"
+    for i in "${!rows[@]}"; do
+      IFS='|' read -r v label debut eol lts <<<"${rows[$i]}"
+      if [[ "$lts" == "true" ]]; then
+        printf "  %2d) %s (LTS)   debut=%s   eol=%s\n" "$((i + 1))" "$label" "$debut" "$eol"
+      else
+        printf "  %2d) %s         debut=%s   eol=%s\n" "$((i + 1))" "$label" "$debut" "$eol"
+      fi
+    done
+
+    idx="$(pick_index "${#rows[@]}" "Pick Node (1-${#rows[@]}):")"
+    IFS='|' read -r NODE_VERSION _ _ _ _ <<<"${rows[$((idx - 1))]}"
+    ;;
+  2)
+    mapfile -t rows < <(jq -r '.node.deprecated[] | "\(.version)|\(.label)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
+    if ((${#rows[@]} == 0)); then
+      echo -e "${RED}No deprecated Node versions found in DB.${NC}"
+      return 1
+    fi
+
+    echo -e "${CYAN}Deprecated Node majors:${NC}"
+    for i in "${!rows[@]}"; do
+      IFS='|' read -r v label eol <<<"${rows[$i]}"
+      printf "  %2d) %s   eol=%s\n" "$((i + 1))" "$label" "$eol"
+    done
+
+    idx="$(pick_index "${#rows[@]}" "Pick Node (1-${#rows[@]}):")"
+    IFS='|' read -r NODE_VERSION _ _ <<<"${rows[$((idx - 1))]}"
+    ;;
+  3)
+    NODE_VERSION="current"
+    ;;
+  4)
+    NODE_VERSION="lts"
+    ;;
+  5)
+    while true; do
+      read -e -r -p "$(echo -e "${CYAN}Enter Node major only (e.g. 24):${NC} ")" custom
+      custom="$(echo "${custom:-}" | xargs)"
+      if node_is_valid_custom "$custom"; then
+        NODE_VERSION="$custom"
+        break
+      fi
+      echo -e "${RED}Invalid / unknown Node major. Must exist in $RUNTIME_VERSIONS_DB.${NC}"
+    done
+    ;;
+  esac
+
+  echo -e "${GREEN}Selected Node version: $NODE_VERSION${NC}"
 }
 
 prompt_for_node_command() {

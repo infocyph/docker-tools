@@ -493,11 +493,11 @@ services:
       backend: {}
       datastore: {}
     volumes:
-      - "\${PROJECT_DIR:-./../../../application}:/app"
+      - "\${PROJECT_DIR:-./../../../application}/${DOMAIN_DIR}:/app"
       - "../../configuration/ssh:/home/\${USER}/.ssh:ro"
     depends_on:
       - server-tools
-    command: ["sh","-lc","cd /app${DOC_ROOT} && exec ${NODE_CMD}"]
+    command: ["sh","-lc","exec ${NODE_CMD}"]
     healthcheck:
       test: ["CMD-SHELL", "node -e \\"const net=require('net');const p=process.env.PORT||3000;const s=net.connect(p,'127.0.0.1');s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));\\""]
       interval: 30s

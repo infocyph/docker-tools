@@ -42,8 +42,11 @@ validate_input() {
 }
 
 slugify() {
-  # domain -> safe token for service/container names
-  # example.com -> example_com
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+|_+$//g'
+}
+
+to_env_key() {
+  # "23-alpine" -> "23_alpine"
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+|_+$//g'
 }
 
@@ -195,28 +198,37 @@ prompt_for_php_version() {
 }
 
 ###############################################################################
-# Node bits
+# Node bits (Alpine tags + major only)
 ###############################################################################
 prompt_for_node_version() {
-  echo -e "${CYAN}Choose the Node version (image tag):${NC}"
+  echo -e "${CYAN}Choose the Node version (Alpine tag):${NC}"
   PS3="$(echo -e "${YELLOW}👉 Select Node version: ${NC}") "
-  local v
-  select v in "current" "22" "20" "18"; do
-    if [[ -n "$v" ]]; then
+
+  local v custom
+  select v in "current-alpine" "lts-alpine" "23-alpine" "25-alpine" "custom"; do
+    case "$v" in
+    current-alpine|lts-alpine|23-alpine|25-alpine)
       NODE_VERSION="$v"
       echo -e "${GREEN}Selected Node version: $NODE_VERSION${NC}"
       break
-    fi
-    echo -e "${RED}Invalid option, please select again.${NC}"
-  done
-}
-
-prompt_for_node_port() {
-  read -e -r -p "$(echo -e "${CYAN}Node app port inside container (default 3000):${NC} ")" NODE_PORT
-  NODE_PORT="${NODE_PORT:-3000}"
-  while [[ ! "$NODE_PORT" =~ ^[0-9]+$ ]] || ((NODE_PORT < 1 || NODE_PORT > 65535)); do
-    echo -e "${RED}Invalid port. Enter 1-65535.${NC}"
-    read -e -r NODE_PORT
+      ;;
+    custom)
+      while true; do
+        read -e -r -p "$(echo -e "${CYAN}Enter custom Alpine tag (examples: 21-alpine, 22-alpine, current-alpine):${NC} ")" custom
+        custom="$(echo "${custom:-}" | xargs)"
+        if [[ -n "$custom" && "$custom" =~ ^[A-Za-z0-9._-]+$ ]]; then
+          NODE_VERSION="$custom"
+          echo -e "${GREEN}Selected Node version: $NODE_VERSION${NC}"
+          break
+        fi
+        echo -e "${RED}Invalid tag. Use letters/numbers/dot/underscore/dash only.${NC}"
+      done
+      break
+      ;;
+    *)
+      echo -e "${RED}Invalid option, please select again.${NC}"
+      ;;
+    esac
   done
 }
 
@@ -242,17 +254,17 @@ generate_conf_from_template() {
     -e "s|{{PHP_CONTAINER}}|$PHP_CONTAINER|g" \
     -e "s|{{CLIENT_VERIFICATION}}|$ENABLE_CLIENT_VERIFICATION|g" \
     -e "s|{{NODE_CONTAINER}}|${NODE_CONTAINER:-}|g" \
-    -e "s|{{NODE_PORT}}|${NODE_PORT:-}|g" \
+    -e "s|{{NODE_PORT}}|3000|g" \
     "$template_file" >>"$output_file"
 }
 
 ###############################################################################
-# Node dynamic compose generator
+# Node dynamic compose generator (PORT always 3000)
 ###############################################################################
 create_node_compose() {
   mkdir -p /etc/share/vhosts/node
 
-  local token domain_token svc cname profile
+  local token domain_token svc cname profile node_key
   domain_token="$(slugify "$DOMAIN_NAME")"
   token="${NODE_DIR_TOKEN:-$domain_token}"
 
@@ -263,6 +275,8 @@ create_node_compose() {
   NODE_SERVICE="$svc"
   NODE_CONTAINER="$svc"
   NODE_PROFILE="$profile"
+
+  node_key="$(to_env_key "$NODE_VERSION")"
 
   local CONFIG_DOCKER_NODE="/etc/share/vhosts/node/${token}.yaml"
   rm -f "$CONFIG_DOCKER_NODE"
@@ -281,15 +295,15 @@ services:
         USERNAME: \${USER}
         NODE_VERSION: ${NODE_VERSION}
         LINUX_PKG: \${LINUX_PKG:-}
-        LINUX_PKG_VERSIONED: \${LINUX_PKG_${NODE_VERSION}:-}
+        LINUX_PKG_VERSIONED: \${LINUX_PKG_${node_key}:-}
         NODE_GLOBAL: \${NODE_GLOBAL:-}
-        NODE_GLOBAL_VERSIONED: \${NODE_GLOBAL_${NODE_VERSION}:-}
+        NODE_GLOBAL_VERSIONED: \${NODE_GLOBAL_${node_key}:-}
     environment:
       - TZ=\${TZ:-}
-      - PORT=${NODE_PORT}
+      - PORT=3000
       - HOST=0.0.0.0
     env_file:
-      - "../../.env"
+      - .env
     networks:
       frontend: {}
       backend: {}
@@ -301,7 +315,7 @@ services:
       - server-tools
     command: ["sh","-lc","cd /app${DOC_ROOT} && exec ${NODE_CMD}"]
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"const net=require('net');const p=process.env.PORT||${NODE_PORT};const s=net.connect(p,'127.0.0.1');s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));\""]
+      test: ["CMD-SHELL", "node -e \\"const net=require('net');const p=process.env.PORT||3000;const s=net.connect(p,'127.0.0.1');s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));\\""]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -309,11 +323,10 @@ services:
 YAML
 
   chmod 644 "$CONFIG_DOCKER_NODE"
-
   update_env "ACTIVE_NODE_PROFILE" "$profile"
 
   echo -e "${GREEN}Node compose generated:${NC} $CONFIG_DOCKER_NODE"
-  echo -e "${GREEN}Node service:${NC} $svc  ${GREEN}profile:${NC} $profile  ${GREEN}port:${NC} $NODE_PORT"
+  echo -e "${GREEN}Node service:${NC} $svc  ${GREEN}profile:${NC} $profile  ${GREEN}port:${NC} 3000"
 }
 
 ###############################################################################
@@ -326,11 +339,10 @@ create_configuration() {
 
   rm -f "$CONFIG_NGINX" "$CONFIG_APACHE"
 
-  # Default
   ENABLE_CLIENT_VERIFICATION="${ENABLE_CLIENT_VERIFICATION:-ssl_verify_client off;}"
 
   if [[ "$APP_TYPE" == "node" ]]; then
-    SERVER_TYPE="Nginx" # Node always via Nginx proxy in your model
+    SERVER_TYPE="Nginx"
   fi
 
   if [[ "$SERVER_TYPE" == "Nginx" ]]; then
@@ -396,7 +408,6 @@ show_step() {
 }
 
 configure_server() {
-  # total steps vary by type, keep it simple & readable
   show_step 1 9
   prompt_for_domain
 
@@ -426,8 +437,6 @@ configure_server() {
   else
     show_step 7 9
     prompt_for_node_version
-    show_step 8 9
-    prompt_for_node_port
     show_step 9 9
     prompt_for_node_command
   fi
@@ -438,7 +447,6 @@ configure_server() {
     ENABLE_CLIENT_VERIFICATION="ssl_verify_client off;"
   fi
 
-  # Node needs compose data BEFORE rendering templates (to fill {{NODE_CONTAINER}}/{{NODE_PORT}})
   if [[ "$APP_TYPE" == "node" ]]; then
     create_node_compose
   fi
@@ -470,6 +478,6 @@ case "$1" in
     "KEEP_HTTP" "DOC_ROOT" "CLIENT_MAX_BODY_SIZE" "CLIENT_MAX_BODY_SIZE_APACHE" \
     "ENABLE_CLIENT_VERIFICATION" "PHP_CONTAINER_PROFILE" "PHP_CONTAINER" \
     "PHP_APACHE_CONTAINER_PROFILE" "PHP_APACHE_CONTAINER" "APACHE_CONTAINER" \
-    "NODE_VERSION" "NODE_PORT" "NODE_CMD" "NODE_PROFILE" "NODE_SERVICE" "NODE_CONTAINER"
+    "NODE_VERSION" "NODE_CMD" "NODE_PROFILE" "NODE_SERVICE" "NODE_CONTAINER"
   ;;
 esac

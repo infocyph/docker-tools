@@ -9,34 +9,17 @@ RUN apk add --no-cache curl bash ca-certificates jq \
   && update-ca-certificates \
   && mkdir -p /out
 
-# 2) mkcert
-RUN curl -fsSJL --retry 3 --retry-delay 1 --retry-all-errors \
-      -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" \
-  && chmod +x /out/mkcert
-
-# 3) lazydocker (keep the upstream installer, but DO NOT assume /usr/local/bin)
-RUN set -euo pipefail; \
-  curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
-    "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash; \
-  LD_BIN=""; \
-  for p in \
-    "/usr/local/bin/lazydocker" \
-    "/usr/bin/lazydocker" \
-    "/bin/lazydocker" \
-    "$HOME/.local/bin/lazydocker" \
-    "/root/.local/bin/lazydocker" \
-    "$(pwd)/lazydocker"; do \
-      if [ -x "$p" ]; then LD_BIN="$p"; break; fi; \
-    done; \
-  if [ -z "$LD_BIN" ]; then \
-    echo "Error: lazydocker installer did not produce a runnable binary in expected locations." >&2; \
-    echo "Hint: installer often uses ~/.local/bin. Check its output for the install path." >&2; \
-    exit 1; \
-  fi; \
-  cp "$LD_BIN" /out/lazydocker; \
+# 2) mkcert + lazydocker
+ENV DIR=/usr/local/bin
+RUN apk add --no-cache curl bash ca-certificates && update-ca-certificates && \
+  mkdir -p /out && \
+  curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" && \
+  chmod +x /out/mkcert && \
+  curl -fsSL "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash && \
+  cp /usr/local/bin/lazydocker /out/lazydocker && \
   chmod +x /out/lazydocker
 
-# 4) Build runtime versions JSON (separate step; cached; no Dockerfile parser issues)
+# 3) Build runtime versions JSON (separate step; cached; no Dockerfile parser issues)
 RUN <<'SH'
 set -euo pipefail
 

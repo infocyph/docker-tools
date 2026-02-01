@@ -6,6 +6,7 @@ die() {
   exit 1
 }
 warn() { echo "Warning: $*" >&2; }
+note() { echo "$*" >&2; }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Editor UX
@@ -18,23 +19,27 @@ export EDITOR="${EDITOR:-nano}"
 # ─────────────────────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
   C_RESET=$'\033[0m'
+  C_BOLD=$'\033[1m'
+  C_DIM=$'\033[2m'
   C_RED=$'\033[31m'
   C_GREEN=$'\033[32m'
   C_YELLOW=$'\033[33m'
   C_CYAN=$'\033[36m'
   C_MAGENTA=$'\033[35m'
 else
-  C_RESET='' C_RED='' C_GREEN='' C_YELLOW='' C_CYAN='' C_MAGENTA=''
+  C_RESET='' C_BOLD='' C_DIM='' C_RED='' C_GREEN='' C_YELLOW='' C_CYAN='' C_MAGENTA=''
 fi
 
 _ok() { printf "%s%s%s" "$C_GREEN" "$*" "$C_RESET"; }
 _bad() { printf "%s%s%s" "$C_RED" "$*" "$C_RESET"; }
-_mid() { printf "%s%s%s" "$C_YELLOW" "$*" "$C_RESET"; }
+_mid() { printf "%s%s%s" "$C_YELLOW""$*" "$C_RESET"; }
 _inf() { printf "%s%s%s" "$C_CYAN" "$*" "$C_RESET"; }
+_dim() { printf "%s%s%s" "$C_DIM" "$*" "$C_RESET"; }
+_bold() { printf "%s%s%s" "$C_BOLD" "$*" "$C_RESET"; }
 _tag() { printf "%s[%s]%s" "$C_MAGENTA" "$*" "$C_RESET"; }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Defaults / Mounts
+# Defaults / Mounts (Model B)
 # ─────────────────────────────────────────────────────────────────────────────
 SOPS_BASE_DIR="${SOPS_BASE_DIR:-/etc/share/sops}"
 SOPS_KEYS_DIR="${SOPS_KEYS_DIR:-$SOPS_BASE_DIR/keys}"
@@ -44,18 +49,16 @@ SOPS_GLOBAL_DIR="${SOPS_GLOBAL_DIR:-$SOPS_BASE_DIR/global}"
 # Encrypted-env “repo mount” (your mounted repo directory)
 SOPS_REPO_DIR="${SOPS_REPO_DIR:-/etc/share/vhosts/sops}"
 
+# Repo-local config
 REPO_LOCAL_YAML="./.sops.yaml"
 
-# New structured global defaults
+# Preferred global defaults (new layout)
 DEFAULT_GLOBAL_KEY="$SOPS_GLOBAL_DIR/age.keys"
 DEFAULT_FALLBACK_YAML="$SOPS_GLOBAL_DIR/.sops.yaml"
 
-# Back-compat (old locations)
+# Back-compat (old layout)
 OLD_GLOBAL_KEY="$SOPS_BASE_DIR/age.keys"
 OLD_FALLBACK_YAML="$SOPS_BASE_DIR/.sops.yaml"
-
-# If user overrides config explicitly, we must respect it
-GLOBAL_FALLBACK_YAML="${SOPS_CONFIG_FILE:-$DEFAULT_FALLBACK_YAML}"
 
 safe_mkdir_p() { mkdir -p "$1" 2>/dev/null || true; }
 
@@ -78,7 +81,31 @@ status_present() { [[ -f "$1" ]] && _ok "present" || _bad "missing"; }
 status_key() { trimmed_file_nonempty "$1" && _ok "ready" || _bad "missing/empty"; }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Path helpers / Safety
+# Project auto-detect (from git root basename)
+# ─────────────────────────────────────────────────────────────────────────────
+find_git_root() {
+  local d="$PWD" i=0
+  while [[ $i -lt 8 ]]; do
+    [[ -d "$d/.git" ]] && {
+      echo "$d"
+      return 0
+    }
+    [[ "$d" == "/" ]] && break
+    d="$(dirname "$d")"
+    i=$((i + 1))
+  done
+  return 1
+}
+
+derive_project_from_git() {
+  local root
+  root="$(find_git_root 2>/dev/null || true)"
+  [[ -n "$root" ]] || return 1
+  basename "$root"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Path helpers
 # ─────────────────────────────────────────────────────────────────────────────
 resolve_alias_path() {
   local p="${1:-}"
@@ -133,13 +160,14 @@ Safe roots:
 Use --unsafe to override."
 }
 
-# Only create under /etc/share/sops if root (matches your rule)
-allow_system_create_or_skip() {
-  local p="$1"
-  if is_under "$SOPS_BASE_DIR" "$p" && ! is_root; then
-    return 1
+default_out_for_dec() {
+  local in="$1" base
+  base="$(basename "$in")"
+  if [[ "$base" == ".env.enc" || "$base" == "env.enc" || "$base" == *.env.enc ]]; then
+    echo "./.env"
+  else
+    echo "./${base}.dec"
   fi
-  return 0
 }
 
 default_out_for_enc() {
@@ -149,16 +177,6 @@ default_out_for_enc() {
     echo "./.env.enc"
   else
     echo "./${base}.enc"
-  fi
-}
-
-default_out_for_dec() {
-  local in="$1" base
-  base="$(basename "$in")"
-  if [[ "$base" == ".env.enc" || "$base" == "env.enc" || "$base" == *.env.enc ]]; then
-    echo "./.env"
-  else
-    echo "./${base}.dec"
   fi
 }
 
@@ -192,40 +210,17 @@ extract_age_pubkey_from_private() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Project auto-detect (git root basename)
-# ─────────────────────────────────────────────────────────────────────────────
-find_git_root() {
-  local d="$PWD" i=0
-  while [[ $i -lt 8 ]]; do
-    [[ -d "$d/.git" ]] && {
-      echo "$d"
-      return 0
-    }
-    [[ "$d" == "/" ]] && break
-    d="$(dirname "$d")"
-    i=$((i + 1))
-  done
-  return 1
-}
-
-derive_project_from_git() {
-  local root
-  root="$(find_git_root 2>/dev/null || true)"
-  [[ -n "$root" ]] || return 1
-  basename "$root"
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Flags
+# Invocation flags (NO word-splitting)
 # ─────────────────────────────────────────────────────────────────────────────
 SENV_PROJECT="${SENV_PROJECT:-}"
 SENV_KEY_FILE="${SENV_KEY_FILE:-}"
 SENV_IN=""
 SENV_OUT=""
 SENV_UNSAFE=0
+POS_ARGS=()
 
 parse_flags() {
-  local rest=()
+  POS_ARGS=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --project=*)
@@ -269,17 +264,15 @@ parse_flags() {
       break
       ;;
     *)
-      rest+=("$1")
+      POS_ARGS+=("$1")
       shift
       ;;
     esac
   done
-  # append any remaining args after --
   while [[ $# -gt 0 ]]; do
-    rest+=("$1")
+    POS_ARGS+=("$1")
     shift
   done
-  printf '%s\0' "${rest[@]}"
 }
 
 ensure_project_default() {
@@ -291,7 +284,7 @@ ensure_project_default() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Choose key / config (with back-compat)
+# Choose key / choose config (with new global/ + back-compat)
 # ─────────────────────────────────────────────────────────────────────────────
 choose_key_file() {
   if [[ -n "${SOPS_AGE_KEY_FILE:-}" ]]; then
@@ -307,7 +300,6 @@ choose_key_file() {
     return
   fi
 
-  # Prefer new global path; if missing but old exists, use old (compat)
   [[ -f "$DEFAULT_GLOBAL_KEY" ]] && {
     echo "$DEFAULT_GLOBAL_KEY"
     return
@@ -320,13 +312,11 @@ choose_key_file() {
 }
 
 choose_global_fallback_yaml_path() {
-  # If user explicitly set SOPS_CONFIG_FILE, that is the global fallback target.
   if [[ -n "${SOPS_CONFIG_FILE:-}" ]]; then
     echo "$SOPS_CONFIG_FILE"
     return
   fi
 
-  # Prefer new global path; if old exists, use old (compat)
   [[ -f "$DEFAULT_FALLBACK_YAML" ]] && {
     echo "$DEFAULT_FALLBACK_YAML"
     return
@@ -335,19 +325,15 @@ choose_global_fallback_yaml_path() {
     echo "$OLD_FALLBACK_YAML"
     return
   }
-
-  # Default target for creation
   echo "$DEFAULT_FALLBACK_YAML"
 }
 
 choose_sops_yaml() {
-  # 1) local repo config
-  [[ -f "$REPO_LOCAL_YAML" ]] && {
+  if [[ -f "$REPO_LOCAL_YAML" ]]; then
     echo "$REPO_LOCAL_YAML"
     return
-  }
+  fi
 
-  # 2) per-project global config (optional)
   if [[ -n "${SENV_PROJECT:-}" ]]; then
     local py="$SOPS_CFG_DIR/${SENV_PROJECT}.sops.yaml"
     [[ -f "$py" ]] && {
@@ -356,21 +342,19 @@ choose_sops_yaml() {
     }
   fi
 
-  # 3) global fallback (new preferred, old supported)
   choose_global_fallback_yaml_path
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Ensure defaults (init behavior)
-# - init: ensure missing global/project configs + key if writable, never overwrites real key
-# - init --local-only: only ensure repo-local ./.sops.yaml (no /etc/share/sops writes)
 # ─────────────────────────────────────────────────────────────────────────────
 ensure_global_fallback_yaml() {
   local target
   target="$(choose_global_fallback_yaml_path)"
 
-  # if someone points SOPS_CONFIG_FILE outside base dir, we still won't create unless root+allowed
-  allow_system_create_or_skip "$target" || return 1
+  if is_under "$SOPS_BASE_DIR" "$target" && ! is_root; then
+    return 1
+  fi
 
   safe_mkdir_p "$(dirname "$target")"
 
@@ -397,7 +381,10 @@ ensure_project_yaml_optional() {
   [[ -n "${SENV_PROJECT:-}" ]] || return 0
   local py="$SOPS_CFG_DIR/${SENV_PROJECT}.sops.yaml"
 
-  allow_system_create_or_skip "$py" || return 1
+  if is_under "$SOPS_BASE_DIR" "$py" && ! is_root; then
+    return 1
+  fi
+
   safe_mkdir_p "$SOPS_CFG_DIR"
 
   if [[ -e "$py" && ! -f "$py" ]]; then
@@ -423,17 +410,18 @@ ensure_key_if_missing_or_empty() {
   local keyf
   keyf="$(choose_key_file)"
 
-  allow_system_create_or_skip "$keyf" || return 1
+  if is_under "$SOPS_BASE_DIR" "$keyf" && ! is_root; then
+    return 1
+  fi
+
   safe_mkdir_p "$(dirname "$keyf")"
 
-  # Never overwrite a real key
   if trimmed_file_nonempty "$keyf"; then
     return 0
   fi
 
   can_write_path "$keyf" || return 1
 
-  # age-keygen refuses if output exists. Always generate temp then mv.
   local tmpkey
   tmpkey="$(mktemp "${keyf}.tmp.XXXXXX")"
   rm -f "$tmpkey" 2>/dev/null || true
@@ -444,25 +432,6 @@ ensure_key_if_missing_or_empty() {
   return 0
 }
 
-ensure_local_yaml_only() {
-  if [[ -e "$REPO_LOCAL_YAML" && ! -f "$REPO_LOCAL_YAML" ]]; then
-    die "Local config path exists but is not a regular file: $REPO_LOCAL_YAML"
-  fi
-  [[ -f "$REPO_LOCAL_YAML" ]] && return 0
-
-  can_write_path "$REPO_LOCAL_YAML" || die "Cannot write local ./.sops.yaml (directory not writable)"
-
-  local keyf pub
-  keyf="$(choose_key_file)"
-  pub="AGE_PUBLIC_KEY_HERE"
-  if trimmed_file_nonempty "$keyf"; then
-    pub="$(age-keygen -y "$keyf")"
-  fi
-
-  write_yaml_template "$REPO_LOCAL_YAML" "$pub"
-  chmod 644 "$REPO_LOCAL_YAML" 2>/dev/null || true
-}
-
 ensure_defaults_global() {
   ensure_project_default
 
@@ -470,17 +439,32 @@ ensure_defaults_global() {
   ensure_project_yaml_optional || true
   ensure_key_if_missing_or_empty || true
 
-  local keyf
+  local keyf pub gf
   keyf="$(choose_key_file)"
+  gf="$(choose_global_fallback_yaml_path)"
+
   if trimmed_file_nonempty "$keyf"; then
-    local pub
     pub="$(age-keygen -y "$keyf")"
-    update_yaml_placeholder_if_writable "$(choose_global_fallback_yaml_path)" "$pub"
+    update_yaml_placeholder_if_writable "$gf" "$pub"
     update_yaml_placeholder_if_writable "$REPO_LOCAL_YAML" "$pub"
     if [[ -n "${SENV_PROJECT:-}" ]]; then
       update_yaml_placeholder_if_writable "$SOPS_CFG_DIR/${SENV_PROJECT}.sops.yaml" "$pub"
     fi
   fi
+}
+
+ensure_local_yaml_only() {
+  ensure_project_default
+
+  if [[ -e "$REPO_LOCAL_YAML" && ! -f "$REPO_LOCAL_YAML" ]]; then
+    die "Local config path exists but is not a regular file: $REPO_LOCAL_YAML"
+  fi
+  [[ -f "$REPO_LOCAL_YAML" ]] && return 0
+
+  can_write_path "$REPO_LOCAL_YAML" || die "cannot write local ./.sops.yaml (directory not writable)"
+
+  write_yaml_template "$REPO_LOCAL_YAML" "AGE_PUBLIC_KEY_HERE"
+  chmod 644 "$REPO_LOCAL_YAML" 2>/dev/null || true
 }
 
 need_key() {
@@ -502,23 +486,21 @@ Selected: $yaml
 
 Fix:
   - Create local config: senv init --local-only
-  - Or create global config: senv init (requires writable $SOPS_GLOBAL_DIR or $SOPS_BASE_DIR)
+  - Or create global config: senv init (requires writable and root under $SOPS_BASE_DIR)
   - Or provide SOPS_CONFIG_FILE to an existing config."
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Commands
-# ─────────────────────────────────────────────────────────────────────────────
 do_keygen() {
   ensure_project_default
   local keyf
   keyf="$(choose_key_file)"
 
-  allow_system_create_or_skip "$keyf" || die "Keygen requires root when writing under $SOPS_BASE_DIR (current user is not root)."
+  if is_under "$SOPS_BASE_DIR" "$keyf" && ! is_root; then
+    die "Keygen requires root when writing under $SOPS_BASE_DIR (current user is not root)."
+  fi
 
   safe_mkdir_p "$(dirname "$keyf")"
 
-  # Deny generation if key exists and has real content (trim-aware)
   if trimmed_file_nonempty "$keyf"; then
     warn "Key already exists and is not empty (refusing to overwrite): $keyf"
     warn "If you intended a different key, use: senv keygen --key <path>  OR  --project <id>"
@@ -554,8 +536,8 @@ do_enc() {
   ensure_config_available_or_fail
   need_key
 
-  local in_raw="${SENV_IN:-${1:-.env}}"
-  local out_raw="${SENV_OUT:-${2:-}}"
+  local in_raw="${SENV_IN:-${1:-${POS_ARGS[0]:-.env}}}"
+  local out_raw="${SENV_OUT:-${2:-${POS_ARGS[1]:-}}}"
 
   local in
   in="$(resolve_alias_path "$in_raw")"
@@ -564,7 +546,7 @@ do_enc() {
 
   local out
   if [[ -z "$out_raw" ]]; then
-    out="$(default_out_for_enc "$in")" # default to current dir
+    out="$(default_out_for_enc "$in")"
   else
     out="$(resolve_alias_path "$out_raw")"
   fi
@@ -578,8 +560,8 @@ do_enc() {
   chmod 600 "$out" 2>/dev/null || true
 
   printf "%s %s\n" "$(_tag enc)" "$(_ok "ok")"
-  printf "%s %s\n" "$(_inf "Input  :")" "$in"
-  printf "%s %s\n" "$(_inf "Output :")" "$out"
+  printf "%s %s\n" "$(_inf "Input   :")" "$in"
+  printf "%s %s\n" "$(_inf "Output  :")" "$out"
 }
 
 do_dec() {
@@ -587,8 +569,8 @@ do_dec() {
   ensure_config_available_or_fail
   need_key
 
-  local in_raw="${SENV_IN:-${1:-.env.enc}}"
-  local out_raw="${SENV_OUT:-${2:-}}"
+  local in_raw="${SENV_IN:-${1:-${POS_ARGS[0]:-.env.enc}}}"
+  local out_raw="${SENV_OUT:-${2:-${POS_ARGS[1]:-}}}"
 
   local in
   in="$(resolve_alias_path "$in_raw")"
@@ -597,7 +579,7 @@ do_dec() {
 
   local out
   if [[ -z "$out_raw" ]]; then
-    out="$(default_out_for_dec "$in")" # default to current dir
+    out="$(default_out_for_dec "$in")"
   else
     out="$(resolve_alias_path "$out_raw")"
   fi
@@ -614,8 +596,8 @@ do_dec() {
   mv -f "$tmp" "$out"
 
   printf "%s %s\n" "$(_tag dec)" "$(_ok "ok")"
-  printf "%s %s\n" "$(_inf "Input  :")" "$in"
-  printf "%s %s\n" "$(_inf "Output :")" "$out"
+  printf "%s %s\n" "$(_inf "Input   :")" "$in"
+  printf "%s %s\n" "$(_inf "Output  :")" "$out"
 }
 
 do_edit() {
@@ -623,7 +605,7 @@ do_edit() {
   ensure_config_available_or_fail
   need_key
 
-  local file_raw="${SENV_IN:-${1:-.env.enc}}"
+  local file_raw="${SENV_IN:-${1:-${POS_ARGS[0]:-.env.enc}}}"
   local file
   file="$(resolve_alias_path "$file_raw")"
   ensure_safe_path_or_die "$file" "Input"
@@ -637,11 +619,9 @@ do_edit() {
   SOPS_AGE_KEY_FILE="$keyf" sops --config "$yaml" "$file"
 }
 
-# Sugar: pull/push for mounted secrets repo (by project directory)
 do_pull() {
   ensure_project_default
   [[ -n "${SENV_PROJECT:-}" ]] || die "pull requires --project <id> (or run inside a git repo for auto-detect)"
-
   [[ -z "${SENV_IN:-}" ]] && SENV_IN="${SENV_PROJECT}/.env.enc"
   [[ -z "${SENV_OUT:-}" ]] && SENV_OUT="./.env"
   do_dec
@@ -650,7 +630,6 @@ do_pull() {
 do_push() {
   ensure_project_default
   [[ -n "${SENV_PROJECT:-}" ]] || die "push requires --project <id> (or run inside a git repo for auto-detect)"
-
   [[ -z "${SENV_IN:-}" ]] && SENV_IN="./.env"
   [[ -z "${SENV_OUT:-}" ]] && SENV_OUT="${SENV_PROJECT}/.env.enc"
   do_enc
@@ -658,20 +637,20 @@ do_push() {
 
 print_info() {
   ensure_project_default
-
   local keyf yaml gf
   keyf="$(choose_key_file)"
   yaml="$(choose_sops_yaml)"
   gf="$(choose_global_fallback_yaml_path)"
 
-  local local_cfg="$REPO_LOCAL_YAML"
   local proj_cfg=""
   [[ -n "${SENV_PROJECT:-}" ]] && proj_cfg="$SOPS_CFG_DIR/${SENV_PROJECT}.sops.yaml"
 
-  printf "%s %s\n" "$(_tag info)" "$([[ "${SENV_UNSAFE:-0}" == "1" ]] && _mid "safe-paths=off" || _ok "safe-paths=on")"
+  printf "%s %s\n" "$(_tag info)" "$([[ "$SENV_UNSAFE" == "1" ]] && _mid "safe-paths=off" || _ok "safe-paths=on")"
   printf "%s %s\n" "$(_inf "Project      :")" "${SENV_PROJECT:-<none>}"
   printf "%s %s\n" "$(_inf "Secrets repo :")" "$SOPS_REPO_DIR"
   printf "%s %s\n" "$(_inf "Base dir     :")" "$SOPS_BASE_DIR"
+  printf "%s %s\n" "$(_inf "Keys dir     :")" "$SOPS_KEYS_DIR"
+  printf "%s %s\n" "$(_inf "Config dir   :")" "$SOPS_CFG_DIR"
   printf "%s %s\n" "$(_inf "Global dir   :")" "$SOPS_GLOBAL_DIR"
 
   printf "%s %s (%s)\n" "$(_inf "Key file     :")" "$keyf" "$(status_key "$keyf")"
@@ -679,7 +658,7 @@ print_info() {
     printf "%s %s\n" "$(_inf "Public key   :")" "$(age-keygen -y "$keyf")"
   fi
 
-  printf "%s %s (%s)\n" "$(_inf "Local config :")" "$local_cfg" "$(status_present "$local_cfg")"
+  printf "%s %s (%s)\n" "$(_inf "Local config :")" "$REPO_LOCAL_YAML" "$(status_present "$REPO_LOCAL_YAML")"
   if [[ -n "$proj_cfg" ]]; then
     printf "%s %s (%s)\n" "$(_inf "Project config:")" "$proj_cfg" "$(status_present "$proj_cfg")"
   fi
@@ -717,6 +696,8 @@ print_init_summary() {
   printf "%s %s\n" "$(_inf "Using config :")" "$yaml"
   if trimmed_file_nonempty "$keyf"; then
     printf "%s %s\n" "$(_inf "Public key   :")" "$(age-keygen -y "$keyf")"
+  else
+    printf "%s %s\n" "$(_mid "Key status   :")" "$(_bad "missing/empty")"
   fi
 
   if [[ "$mode" == "local-only" ]]; then
@@ -742,8 +723,7 @@ init)
     shift || true
   fi
 
-  IFS=$'\0' read -r -d '' -a args < <(parse_flags "$@" && printf '\0')
-  set -- "${args[@]}"
+  parse_flags "$@"
 
   if [[ "$mode" == "local-only" ]]; then
     ensure_local_yaml_only
@@ -759,51 +739,43 @@ init)
   ;;
 
 info)
-  IFS=$'\0' read -r -d '' -a args < <(parse_flags "$@" && printf '\0')
-  set -- "${args[@]}"
+  parse_flags "$@"
   print_info
   ;;
 
 keygen)
-  IFS=$'\0' read -r -d '' -a args < <(parse_flags "$@" && printf '\0')
-  set -- "${args[@]}"
+  parse_flags "$@"
   do_keygen
   ;;
 
 config)
-  IFS=$'\0' read -r -d '' -a args < <(parse_flags "$@" && printf '\0')
-  set -- "${args[@]}"
+  parse_flags "$@"
   do_config
   ;;
 
 enc)
-  IFS=$'\0' read -r -d '' -a args < <(parse_flags "$@" && printf '\0')
-  set -- "${args[@]}"
-  do_enc "$@"
+  parse_flags "$@"
+  do_enc
   ;;
 
 dec)
-  IFS=$'\0' read -r -d '' -a args < <(parse_flags "$@" && printf '\0')
-  set -- "${args[@]}"
-  do_dec "$@"
+  parse_flags "$@"
+  do_dec
   ;;
 
 edit)
-  IFS=$'\0' read -r -d '' -a args < <(parse_flags "$@" && printf '\0')
-  set -- "${args[@]}"
-  do_edit "$@"
+  parse_flags "$@"
+  do_edit
   ;;
 
 pull)
-  IFS=$'\0' read -r -d '' -a args < <(parse_flags "$@" && printf '\0')
-  set -- "${args[@]}"
-  do_pull "$@"
+  parse_flags "$@"
+  do_pull
   ;;
 
 push)
-  IFS=$'\0' read -r -d '' -a args < <(parse_flags "$@" && printf '\0')
-  set -- "${args[@]}"
-  do_push "$@"
+  parse_flags "$@"
+  do_push
   ;;
 
 *)
@@ -813,69 +785,20 @@ Usage:
   senv init --local [--project <id>] [--key <path>] [--unsafe]
   senv init --local-only [--project <id>] [--key <path>] [--unsafe]
 
-  senv info   [--project <id>] [--key <path>] [--unsafe]
+  senv info [--project <id>] [--key <path>] [--unsafe]
   senv keygen [--project <id>] [--key <path>] [--unsafe]
   senv config [--project <id>] [--key <path>] [--unsafe]
 
-  senv enc  [--project <id>] [--key <path>] [--in <file>] [--out <file>] [--unsafe]
-  senv dec  [--project <id>] [--key <path>] [--in <file>] [--out <file>] [--unsafe]
-  senv edit [--project <id>] [--key <path>] [--in <file>] [--unsafe]
+  senv enc  [--project <id>] [--key <path>] [--in <file>] [--out <file>] [in] [out] [--unsafe]
+  senv dec  [--project <id>] [--key <path>] [--in <file>] [--out <file>] [in] [out] [--unsafe]
+  senv edit [--project <id>] [--key <path>] [--in <file>] [file] [--unsafe]
 
   senv push --project <id> [--in <file>] [--out <file>] [--unsafe]
   senv pull --project <id> [--in <file>] [--out <file>] [--unsafe]
 
-Flags:
-  --project <id>   Select project key/config under global dirs
-  --key <path>     Explicit key file path (overrides project/global)
-  --in <file>      Input file (alias rules apply; see IO Rules)
-  --out <file>     Output file (alias rules apply; see IO Rules)
-  --unsafe         Disable safe-path restrictions
-
-keys:
-  - Explicit override:
-      --key <path>  OR  SOPS_AGE_KEY_FILE=<path>
-  - Project key:
-      $SOPS_KEYS_DIR/<project>.age.keys
-  - Global fallback (preferred):
-      $SOPS_GLOBAL_DIR/age.keys
-  - Back-compat (if present):
-      $SOPS_BASE_DIR/age.keys
-
-Config selection order:
-  1) Local config (repo):          ./.sops.yaml
-  2) Project config (optional):    $SOPS_CFG_DIR/<project>.sops.yaml
-  3) Global config (preferred):    $SOPS_GLOBAL_DIR/.sops.yaml
-     Back-compat (if present):     $SOPS_BASE_DIR/.sops.yaml
-     Override global via:          SOPS_CONFIG_FILE=/path/to/.sops.yaml
-
-IO Rules (alias behavior):
-  - If --in/--out is absolute (/x) or relative-to-cwd (./x or ../x): used as-is
-  - Otherwise: treated as relative to the secrets repo mount:
-      $SOPS_REPO_DIR/<value>
-
-Defaults:
-  - If --out is omitted:
-      enc: writes to current directory (e.g. ./.env.enc)
-      dec: writes to current directory (e.g. ./.env)
-
-Safety:
-  By default, senv restricts input/output paths to be inside:
-    - current working directory
-    - $SOPS_REPO_DIR
-    - $SOPS_BASE_DIR
-  Use --unsafe to bypass.
-
-Creation rules:
-  - senv only creates files under $SOPS_BASE_DIR when running as root AND the target is writable.
-  - It never overwrites a non-empty key (trim-aware).
-
-Environment overrides:
-  SOPS_BASE_DIR   (default /etc/share/sops)
-  SOPS_GLOBAL_DIR (default /etc/share/sops/global)
-  SOPS_KEYS_DIR   (default /etc/share/sops/keys)
-  SOPS_CFG_DIR    (default /etc/share/sops/config)
-  SOPS_REPO_DIR   (default /etc/share/vhosts/sops)
-  SENV_PROJECT    (auto-detects from git root basename when possible)
+Notes:
+  - No word-splitting is used; SC2206 is resolved properly.
+  - Positional args (in/out) still work, but flags win.
 USAGE
   exit 2
   ;;

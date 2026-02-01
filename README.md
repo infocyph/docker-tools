@@ -10,6 +10,7 @@ A lightweight, multi-tool Docker image for:
 
 - ✅ SSL automation (`mkcert` + `certify`)
 - ✅ Interactive vhost generation (`mkhost`) + templates
+- ✅ Cleanup vhosts (`delhost`)
 - ✅ SOPS/Age encrypted env workflow (`senv`)
 - ✅ Host notifications pipeline (`notifierd` + `notify` + host `docknotify`)
 - ✅ Docker ops + TUI (`docker-cli` + compose + `lazydocker`)
@@ -30,7 +31,7 @@ A lightweight, multi-tool Docker image for:
 ## 🚀 Features (what’s included)
 
 ### 1) SSL + local CA automation
-- `mkcert` bundled (downloaded during build)
+- `mkcert` bundled
 - `certify` scans vhosts under `/etc/share/vhosts/**` and generates:
   - Apache server/client certs
   - Nginx server/proxy/client certs (includes `.p12` for Nginx client)
@@ -39,18 +40,18 @@ A lightweight, multi-tool Docker image for:
 - Stable CA root via `CAROOT=/etc/share/rootCA`
 
 ### 2) Interactive vhost generator + templates
-- `mkhost` (interactive) generates Nginx/Apache vhost configs using shipped templates under `/etc/http-templates/`
+- `mkhost` generates Nginx/Apache vhost configs using predefined templates
 - Uses runtime-versions DB baked during build:
   - `/etc/share/runtime-versions.json` (override via `RUNTIME_VERSIONS_DB`)
-- Supports helper flags to query/reset internal “active” selections (`ACTIVE_PHP_PROFILE`, `APACHE_ACTIVE`, `RESET`)
+- Supports helper flags to query/reset internal “active” selections (`ACTIVE_PHP_PROFILE`, `ACTIVE_NODE_PROFILE`, `APACHE_ACTIVE`)
 
 ### 3) SOPS/Age encrypted env workflow (Model B)
 - `age` + `sops` installed
 - `senv` provides a clean workflow around `.env` ↔ `.env.enc`
-- Designed to support:
+- Supports:
   - repo-local config `./.sops.yaml` (highest priority)
   - global fallback config/key under `/etc/share/sops` (mountable)
-  - multi-project keys (per-repo)
+  - multi-project keys (per-repo) + “shared encrypted env repo” input mount
 
 ### 4) Host notifications pipeline
 - `notifierd` listens on TCP (default `9901`) and emits a stable single-line event to stdout using a prefix (default `__HOST_NOTIFY__`)
@@ -59,13 +60,13 @@ A lightweight, multi-tool Docker image for:
 - Optional host-side sender `docknotify` can push events to the container from the host
 
 ### 5) Docker debugging + TUI
-- `docker-cli` + `docker-cli-compose`
+- `docker-cli` + compose
 - `lazydocker` bundled (mount the docker socket)
 
 ### 6) Network & diagnostics toolbox
 - `netx` (Toolset wrapper)
-- `curl`, `wget`, `ping`, `nc` (netcat)
-- `dig` / `nslookup` (bind-tools)
+- `curl`, `wget`, `ping`, `nc`
+- `dig`/`nslookup` (bind-tools)
 - `iproute2`, `traceroute`, `mtr`
 - `nmap`
 
@@ -89,8 +90,8 @@ A lightweight, multi-tool Docker image for:
 |---|---|
 | `mkcert` | Local CA + trusted TLS certificates |
 | `certify` | Scan vhosts and generate server/client certs |
-| `mkhost` | Generate Nginx/Apache vhost configs from templates |
-| `delhost` | Remove generated vhost configs (cleanup helper) |
+| `mkhost` | Generate vhost configs (Nginx/Apache) + optional Node compose |
+| `delhost` | Remove vhost configs for a domain (Nginx/Apache/Node yaml) |
 | `senv` | SOPS/Age workflow for `.env` + `.env.enc` |
 | `lazydocker` | Docker TUI (requires docker socket) |
 | `notify` | Send notification to `notifierd` |
@@ -142,53 +143,15 @@ This repo is designed so you can keep **all generated + persistent artifacts** i
 
 ### 🔗 Container mount mapping
 
-| Host path | Container path | RW/RO | Used by |
-|---|---|---:|---|
-| `./configuration/apache` | `/etc/share/vhosts/apache` | RW | `mkhost`, `certify` |
-| `./configuration/nginx` | `/etc/share/vhosts/nginx` | RW | `mkhost`, `certify` |
-| `./configuration/ssl` | `/etc/mkcert` | RW | `certify`, `mkcert` |
-| `./configuration/rootCA` | `/etc/share/rootCA` | RW | `mkcert` (CA store) |
-| `./configuration/sops` | `/etc/share/sops` | RW | `senv init`, `senv keygen`, `senv enc/dec/edit` |
-| `./secrets-repo` | `/etc/share/vhosts/sops` | RO | `senv dec --in=...` (alias input source) |
-| `/var/run/docker.sock` | `/var/run/docker.sock` | RW | `docker`, `lazydocker` |
-
-### 🧠 How `senv` uses this layout
-
-- **Config priority**
-  1. `./.sops.yaml` (repo-local)
-  2. `/etc/share/sops/config/<project>.sops.yaml` (optional)
-  3. `/etc/share/sops/.sops.yaml` (global fallback)
-
-- **Key selection (Model B)**
-  - `--key <path>` / `SOPS_AGE_KEY_FILE=<path>` (explicit)
-  - `/etc/share/sops/keys/<project>.age.keys` (project)
-  - `/etc/share/sops/age.keys` (global fallback)
-
-- **Shared encrypted env repo**
-  - If you pass `--in=demo.env.enc` (no `/`, no `./`), it resolves to:
-    `/etc/share/vhosts/sops/demo.env.enc`
-  - If `--out` is omitted, output defaults to **current directory**.
-
----
-
-## 📁 Important mount points (stable paths)
-
-### Vhosts
-- `/etc/share/vhosts/nginx`   → generated Nginx vhosts
-- `/etc/share/vhosts/apache`  → generated Apache vhosts
-- `/etc/http-templates`       → shipped templates used by `mkhost`
-
-### Certificates & CA
-- `/etc/mkcert`          → certificate output (mount RW)
-- `/etc/share/rootCA`    → CA root store (mount RW)
-- `CAROOT=/etc/share/rootCA`
-
-### SOPS/Age (recommended)
-Mount a single directory from host for persistence:
-- `/etc/share/sops`      → global keys + fallback config (mount RW)
-
-Optional “shared encrypted env repo” input mount:
-- `/etc/share/vhosts/sops` → read-only store of encrypted env files shared across repos (mount RO)
+| Host path | Container path |Used by |
+|---|---|---|
+| `./configuration/apache` | `/etc/share/vhosts/apache` | `mkhost`, `certify` |
+| `./configuration/nginx` | `/etc/share/vhosts/nginx` |`mkhost`, `certify` |
+| `./configuration/ssl` | `/etc/mkcert` |  `certify`, `mkcert` |
+| `./configuration/rootCA` | `/etc/share/rootCA` |  `mkcert` (CA store) |
+| `./configuration/sops` | `/etc/share/sops` | `senv init`, `senv keygen`, `senv enc/dec/edit` |
+| `./secrets-repo` | `/etc/share/vhosts/sops` |  `senv dec --in=...` (alias input source) |
+| `/var/run/docker.sock` | `/var/run/docker.sock` |  `docker`, `lazydocker` |
 
 ---
 
@@ -200,23 +163,16 @@ services:
     image: infocyph/tools:latest
     container_name: docker-tools
     volumes:
-      # vhosts (read-only ok, mkhost needs RW if you generate inside container)
       - ./configuration/apache:/etc/share/vhosts/apache
       - ./configuration/nginx:/etc/share/vhosts/nginx
 
-      # certificates + CA (RW)
       - ./configuration/ssl:/etc/mkcert
       - ./configuration/rootCA:/etc/share/rootCA
 
-      # sops global (RW, persists keys/configs)
       - ./configuration/sops:/etc/share/sops
-
-      # optional: shared encrypted env repo (RO)
       - ./secrets-repo:/etc/share/vhosts/sops:ro
 
-      # docker tooling
       - /var/run/docker.sock:/var/run/docker.sock
-
     environment:
       - TZ=Asia/Dhaka
       # - NOTIFY_TCP_PORT=9901
@@ -282,36 +238,89 @@ All certs are written to `/etc/mkcert`.
 
 ## 🧩 mkhost (interactive vhost generator)
 
+`mkhost` is your “domain setup wizard”. It generates:
+
+* Nginx vhost: `/etc/share/vhosts/nginx/<domain>.conf`
+* Apache vhost (only if you choose Apache): `/etc/share/vhosts/apache/<domain>.conf`
+* Node service yaml (only if you choose Node): `/etc/share/vhosts/node/<token>.yaml`
+
+Run it:
+
 ```bash
 docker exec -it docker-tools mkhost
 ```
 
-Writes configs into:
+### What it asks (flow)
+
+It runs a guided 9-step flow (slightly different for PHP vs Node):
+
+* Domain name (validated)
+* App type: **PHP** or **Node**
+* Server type (PHP only): **Nginx** or **Apache**
+
+    * Node always uses **Nginx proxy mode**
+* HTTP / HTTPS mode (keep HTTP, redirect, or HTTPS)
+* Document root (`/app/<path>`)
+* Client body size
+* Runtime version selection:
+
+    * PHP: choose PHP version/profile
+    * Node: choose Node version + optional run command
+* If HTTPS: optional client certificate verification (mutual TLS)
+
+### HTTPS + certificates
+
+If you enable HTTPS, `mkhost` triggers `certify` automatically so the required certs exist.
+
+### Helpful flags (used by devtainer)
+
+`mkhost` stores the “active selections” into env (used by your `server` wrapper to enable compose profiles).
+You can query/reset these values:
+
+```bash
+mkhost --RESET
+mkhost --ACTIVE_PHP_PROFILE
+mkhost --ACTIVE_NODE_PROFILE
+mkhost --APACHE_ACTIVE
+```
+
+* `--RESET` clears all active selections.
+* `--ACTIVE_PHP_PROFILE` prints the chosen PHP profile (if PHP was selected).
+* `--ACTIVE_NODE_PROFILE` prints the chosen Node profile (if Node was selected).
+* `--APACHE_ACTIVE` prints `apache` when Apache mode was selected.
+
+---
+
+## 🧹 delhost (remove vhost configs)
+
+`delhost` deletes the generated files for a domain:
 
 * `/etc/share/vhosts/nginx/<domain>.conf`
 * `/etc/share/vhosts/apache/<domain>.conf`
+* `/etc/share/vhosts/node/<token>.yaml` (token is a safe slug of the domain)
 
-Helpers:
+Run it:
 
 ```bash
-docker exec docker-tools mkhost --ACTIVE_PHP_PROFILE
-docker exec docker-tools mkhost --APACHE_ACTIVE
-docker exec docker-tools mkhost --RESET
+docker exec -it docker-tools delhost example.com
 ```
+
+Interactive mode (no args):
+
+```bash
+docker exec -it docker-tools delhost
+```
+
+Behavior:
+
+* Validates the domain format before deleting
+* Shows exactly what files it will remove
+* Requires confirmation (`y/N`)
+* If nothing exists for that domain, it exits with code `2` (useful for scripts)
 
 ---
 
 ## 🔐 senv (SOPS/Age env workflow)
-
-### Design goals
-
-* Works from `docker exec` in any mounted project directory.
-* Prefer repo-local config: `./.sops.yaml` (highest priority).
-* Otherwise use global fallback config under `/etc/share/sops` (mountable).
-* Supports “shared encrypted env repo” mounted at `/etc/share/vhosts/sops`:
-
-    * `--in=demo.env.enc` resolves to `/etc/share/vhosts/sops/demo.env.enc`
-    * if `--out` is not specified, output defaults to the current working directory
 
 ### Typical usage
 
@@ -337,18 +346,6 @@ Status / info:
 
 ```bash
 senv info
-```
-
-Generate key explicitly:
-
-```bash
-senv keygen --project projectA
-```
-
-Open the selected config in nano:
-
-```bash
-senv config --project projectA
 ```
 
 Encrypt / decrypt (defaults):
@@ -401,12 +398,6 @@ senv push --project projectA
 notify "Build done" "All services are healthy ✅"
 ```
 
-With options:
-
-```bash
-notify -H 127.0.0.1 -p 9901 -t 2500 -u normal -s api "Deploy" "Finished"
-```
-
 ---
 
 ## 🖥️ Host sender: `docknotify`
@@ -430,19 +421,9 @@ sudo curl -fsSL \
 docknotify "Build done" "All services are healthy ✅"
 ```
 
-Options:
-
-```bash
-docknotify -H docker-tools -p 9901 -t 2500 -u normal -s host "Deploy" "Finished"
-```
-
-> Requirement: `nc` must exist on the machine running `docknotify`.
-
 ---
 
 ## 📟 Tail docker logs (formatted watcher)
-
-If your container name is `docker-tools` and prefix is `__HOST_NOTIFY__`, this prints formatted events:
 
 ```bash
 docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
@@ -467,33 +448,6 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
   }
 '
 ```
-
-### Linux desktop popup (optional)
-
-If your host has `notify-send`:
-
-```bash
-docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
-  function shescape(s) { gsub(/["\\]/, "\\\\&", s); return s }
-  index($0, p) == 1 {
-    line = $0
-    sub("^" p "[ \t]*", "", line)
-
-    n = split(line, a, "\t")
-    if (n >= 6) {
-      title = a[5]
-      body = a[6]
-      for (i = 7; i <= n; i++) body = body "\t" a[i]
-
-      cmd = "command -v notify-send >/dev/null 2>&1 && notify-send \"" shescape(title) "\" \"" shescape(body) "\""
-      system(cmd)
-      fflush()
-    }
-  }
-'
-```
-
-> If you changed `NOTIFY_PREFIX`, replace `__HOST_NOTIFY__` in the commands.
 
 ---
 

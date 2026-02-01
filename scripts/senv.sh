@@ -812,7 +812,7 @@ Modes:
   init --local-only
     - Only creates repo-local ./.sops.yaml (no writes under /etc/share/sops).
 
-Model B (keys) selection order:
+keys selection order:
   1) Explicit override:
        --key <path> OR SOPS_AGE_KEY_FILE=<path>
   2) Per-project key:

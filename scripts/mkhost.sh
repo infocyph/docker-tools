@@ -519,7 +519,8 @@ services:
       datastore: {}
     volumes:
       - "\${PROJECT_DIR:-./../application}${DOC_ROOT}:/app"
-      - "../../configuration/ssh:/home/\${USER}/.ssh:ro"
+      - "configuration/ssh:/home/\${USER}/.ssh:ro"
+      - "\${HOME}/.gitconfig:/home/\${USER}/.gitconfig:ro"
     depends_on:
       - server-tools
     command: ["/usr/local/bin/node-entry"]

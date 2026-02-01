@@ -149,10 +149,10 @@ RUN apk add --no-cache \
       /etc/share/vhosts/apache \
       /etc/share/vhosts/nginx \
       /etc/share/vhosts/sops \
-      /etc/share/sops \
+      /etc/share/sops/global \
       /etc/share/sops/keys \
       /etc/share/sops/config \
-  && chmod 700 /etc/share/sops /etc/share/sops/keys /etc/share/sops/config \
+  && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*
 
 SHELL ["/bin/bash", "-c"]
@@ -197,6 +197,7 @@ RUN chmod +x \
   && chmod 644 /etc/environment \
   && echo 'ACTIVE_PHP_PROFILE=""' >> /etc/environment \
   && echo 'APACHE_ACTIVE=""' >> /etc/environment \
+  && echo 'ACTIVE_NODE_PROFILE=""' >> /etc/environment \
   && mkdir -p /etc/profile.d \
   && { \
       echo 'set linenumbers'; \

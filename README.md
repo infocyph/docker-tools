@@ -50,7 +50,7 @@ A lightweight, multi-tool Docker image for:
 - `senv` provides a clean workflow around `.env` ↔ `.env.enc`
 - Supports:
   - repo-local config `./.sops.yaml` (highest priority)
-  - global fallback config/key under `/etc/share/sops` (mountable)
+  - global fallback config/key under `/etc/share/sops/global` (mountable; back-compat: `/etc/share/sops/*`)
   - multi-project keys (per-repo) + “shared encrypted env repo” input mount
 
 ### 4) Host notifications pipeline
@@ -121,10 +121,11 @@ This repo is designed so you can keep **all generated + persistent artifacts** i
 │  ├─ nginx/                # Generated/managed Nginx vhosts (*.conf)
 │  ├─ ssl/                  # Generated certificates (.pem, .p12, keys)
 │  ├─ rootCA/               # mkcert CA store (persist across rebuilds)
-│  └─ sops/                 # Global SOPS Model B (persisted)
-│     ├─ age.keys           # Global Age key (fallback)
-│     ├─ .sops.yaml         # Global fallback config (created by senv init if writable)
-│     ├─ keys/              # Per-project keys
+│  └─ sops/                 # Global SOPS (Model B; persisted)
+│     ├─ global/            # Global fallback key + config (preferred)
+│     │  ├─ age.keys
+│     │  └─ .sops.yaml
+│     ├─ keys/              # Per-project keys (recommended)
 │     │  ├─ projectA.age.keys
 │     │  └─ projectB.age.keys
 │     └─ config/            # Optional per-project configs
@@ -140,6 +141,8 @@ This repo is designed so you can keep **all generated + persistent artifacts** i
 └─ docker-compose.yml
 
 ````
+
+> Back-compat: if your `configuration/sops` already contains `age.keys` and/or `.sops.yaml` at the top level, `senv` will still detect/use them. New defaults are created under `configuration/sops/global/`.
 
 ### 🔗 Container mount mapping
 
@@ -322,21 +325,56 @@ Behavior:
 
 ## 🔐 senv (SOPS/Age env workflow)
 
+`senv` wraps **SOPS + Age** for a predictable `.env` ⇄ `.env.enc` workflow, with:
+
+- **Repo-local config**: `./.sops.yaml` (highest priority)
+- **Global defaults**: `/etc/share/sops/global/{age.keys,.sops.yaml}` (preferred)
+- **Model B multi-project keys**: per-project keys under `/etc/share/sops/keys/`
+- **Shared encrypted env repo mount**: `/etc/share/vhosts/sops` for sourcing/storing encrypted envs
+
+### Key selection order
+
+`senv` chooses the Age key in this order:
+
+1. `--key <path>` or `SOPS_AGE_KEY_FILE=<path>`
+2. `--project <id>` → `/etc/share/sops/keys/<id>.age.keys`
+3. Global fallback (preferred) → `/etc/share/sops/global/age.keys`
+4. Back-compat fallback (if present) → `/etc/share/sops/age.keys`
+
+### Config selection order
+
+`senv` chooses the SOPS config in this order:
+
+1. Repo-local → `./.sops.yaml`
+2. Project config (optional) → `/etc/share/sops/config/<id>.sops.yaml`
+3. Global fallback (preferred) → `/etc/share/sops/global/.sops.yaml`
+4. Back-compat fallback (if present) → `/etc/share/sops/.sops.yaml`
+5. Override: `SOPS_CONFIG_FILE=/path/to/.sops.yaml`
+
+### Writes & permissions
+
+`senv init` / `senv keygen` will only create files under `/etc/share/sops/**` when:
+
+- the container user is **root**, and
+- the target path is **writable** (not a read-only mount).
+
+If you mount `/etc/share/sops` read-only, `senv` will operate in **consume-only** mode.
+
 ### Typical usage
 
-Initialize (creates missing defaults only when writable/mounted):
+Initialize (ensures missing global defaults + optional project config + key when writable):
 
 ```bash
 senv init
 ```
 
-Initialize repo-local config in current directory:
+Initialize and also create repo-local config in the current directory:
 
 ```bash
 senv init --local
 ```
 
-Local-only init (does not touch `/etc/share/sops`):
+Local-only init (creates `./.sops.yaml` only; never touches `/etc/share/sops`):
 
 ```bash
 senv init --local-only
@@ -348,6 +386,18 @@ Status / info:
 senv info
 ```
 
+Generate a per-project key (refuses to overwrite a real key):
+
+```bash
+senv keygen --project projectA
+```
+
+Open the effective config in nano:
+
+```bash
+senv config
+```
+
 Encrypt / decrypt (defaults):
 
 ```bash
@@ -356,22 +406,30 @@ senv dec          # .env.enc -> .env
 senv edit         # edit .env.enc using sops editor mode
 ```
 
-Explicit input/output:
+Explicit key / project selection:
 
 ```bash
-senv enc --in=./.env --out=./.env.enc
-senv dec --in=./.env.enc --out=./.env
+senv enc --project projectA
+senv dec --project projectA
+
+senv enc --key ./keys/projectA.age.keys
 ```
 
-Use “shared encrypted env repo” as input source:
+### Shared encrypted env repo (alias input/output)
+
+If `--in` / `--out` is **not** absolute (`/…`) and not `./…` / `../…`, it is treated as an alias under:
+
+- `SOPS_REPO_DIR` (default `/etc/share/vhosts/sops`)
+
+Examples:
 
 ```bash
-# reads from /etc/share/vhosts/sops/demo.env.enc
-# writes to ./demo.env (unless --out is set)
-senv dec --in=demo.env.enc
+# reads:  /etc/share/vhosts/sops/projectA/prod/.env.enc
+# writes: ./.env
+senv dec --in projectA/prod/.env.enc --out ./.env
 
-# nested path inside the shared repo
-senv dec --in=projectA/prod/.env.enc --out=./.env
+# if --out is omitted, it writes to current directory by default
+senv dec --in projectA/.env.enc
 ```
 
 Push/Pull sugar (shared encrypted repo):
@@ -384,9 +442,24 @@ senv pull --project projectA
 senv push --project projectA
 ```
 
+### Safe-path guard
+
+By default `senv` restricts input/output paths to stay inside:
+
+- current working directory
+- `/etc/share/vhosts/sops`
+- `/etc/share/sops`
+
+To bypass (not recommended unless you know what you’re doing):
+
+```bash
+senv dec --unsafe --in /somewhere/file.env.enc --out /somewhere/file.env
+```
+
 ---
 
 ## 🔔 Notifications
+
 
 ### Server: `notifierd`
 
@@ -466,6 +539,10 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `SOPS_BASE_DIR`       | `/etc/share/sops`                  | global SOPS base directory           |
 | `SOPS_KEYS_DIR`       | `/etc/share/sops/keys`             | per-project keys directory           |
 | `SOPS_CFG_DIR`        | `/etc/share/sops/config`           | per-project config directory         |
+| `SOPS_GLOBAL_DIR`    | `/etc/share/sops/global`           | global fallback key/config directory |
+| `SOPS_CONFIG_FILE`   | (empty)                            | override global fallback .sops.yaml  |
+| `SOPS_AGE_KEY_FILE`  | (empty)                            | override age key file path           |
+| `SENV_PROJECT`       | (auto)                             | project id (auto-detected from git)  |
 | `SOPS_REPO_DIR`       | `/etc/share/vhosts/sops`           | shared encrypted env repo mount      |
 
 ---

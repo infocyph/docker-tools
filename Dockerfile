@@ -129,13 +129,30 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     NOTIFY_TOKEN="" \
     RUNTIME_VERSIONS_DB=/etc/share/runtime-versions.json \
     LANG=en_US.UTF-8 \
-    LC_ALL=en_US.UTF-8
+    LC_ALL=en_US.UTF-8 \
+    EDITOR=nano \
+    VISUAL=nano \
+    SOPS_BASE_DIR=/etc/share/sops \
+    SOPS_KEYS_DIR=/etc/share/sops/keys \
+    SOPS_CFG_DIR=/etc/share/sops/config \
+    SOPS_REPO_DIR=/etc/share/vhosts/sops
 
 RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
-      nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat \
+      nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
+      docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
+      bind-tools iproute2 traceroute mtr netcat-openbsd \
   && update-ca-certificates \
-  && mkdir -p /etc/mkcert /etc/share/rootCA /etc/share/vhosts/apache /etc/share/vhosts/nginx \
+  && mkdir -p \
+      /etc/mkcert \
+      /etc/share/rootCA \
+      /etc/share/vhosts/apache \
+      /etc/share/vhosts/nginx \
+      /etc/share/vhosts/sops \
+      /etc/share/sops \
+      /etc/share/sops/keys \
+      /etc/share/sops/config \
+  && chmod 700 /etc/share/sops /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*
 
 SHELL ["/bin/bash", "-c"]
@@ -150,6 +167,7 @@ COPY scripts/mkhost.sh /usr/local/bin/mkhost
 COPY scripts/delhost.sh /usr/local/bin/delhost
 COPY scripts/notifierd.sh /usr/local/bin/notifierd
 COPY scripts/notify.sh /usr/local/bin/notify
+COPY scripts/senv.sh /usr/local/bin/senv
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/http-templates/ /etc/http-templates/
 
@@ -173,12 +191,21 @@ RUN chmod +x \
       /usr/local/bin/entrypoint \
       /usr/local/bin/mkcert \
       /usr/local/bin/lazydocker \
+      /usr/local/bin/senv \
   && touch /etc/environment \
   && chmod -R 755 /etc/share/vhosts \
   && chmod 644 /etc/environment \
   && echo 'ACTIVE_PHP_PROFILE=""' >> /etc/environment \
   && echo 'APACHE_ACTIVE=""' >> /etc/environment \
   && mkdir -p /etc/profile.d \
+  && { \
+      echo 'set linenumbers'; \
+      echo 'set softwrap'; \
+      echo 'set tabsize 2'; \
+      if [ -d /usr/share/nano ] && ls /usr/share/nano/*.nanorc >/dev/null 2>&1; then \
+        echo 'include "/usr/share/nano/*.nanorc"'; \
+      fi; \
+    } > /etc/nanorc \
   && { \
       echo '#!/bin/sh'; \
       echo 'if [ -n "$PS1" ] && [ -z "${BANNER_SHOWN-}" ]; then'; \

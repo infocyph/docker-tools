@@ -796,9 +796,116 @@ Usage:
   senv push --project <id> [--in <file>] [--out <file>] [--unsafe]
   senv pull --project <id> [--in <file>] [--out <file>] [--unsafe]
 
-Notes:
-  - No word-splitting is used; SC2206 is resolved properly.
-  - Positional args (in/out) still work, but flags win.
+Flags:
+  --project <id>   Select project key/config under global dirs (Model B)
+  --key <path>     Explicit key file path (overrides project/global)
+  --in <file>      Input file (alias rules apply)
+  --out <file>     Output file (alias rules apply)
+  --unsafe         Disable safe-path restrictions
+
+Modes:
+  init
+    - Ensures missing keys/configs under /etc/share/sops if writable AND running as root.
+    - Never overwrites a real (non-empty-after-trim) key.
+  init --local
+    - Runs normal init AND creates repo-local ./.sops.yaml if missing (only in current repo dir).
+  init --local-only
+    - Only creates repo-local ./.sops.yaml (no writes under /etc/share/sops).
+
+Model B (keys) selection order:
+  1) Explicit override:
+       --key <path> OR SOPS_AGE_KEY_FILE=<path>
+  2) Per-project key:
+       $SOPS_KEYS_DIR/<project>.age.keys
+  3) Global fallback (preferred):
+       $SOPS_GLOBAL_DIR/age.keys
+  4) Back-compat global key (if present):
+       $SOPS_BASE_DIR/age.keys
+
+Config selection order:
+  1) Local config (repo):
+       ./.sops.yaml
+  2) Project config (optional):
+       $SOPS_CFG_DIR/<project>.sops.yaml
+  3) Global config (preferred):
+       $SOPS_GLOBAL_DIR/.sops.yaml
+  4) Back-compat global config (if present):
+       $SOPS_BASE_DIR/.sops.yaml
+  Override global config path with:
+       SOPS_CONFIG_FILE=/path/to/.sops.yaml
+
+IO alias rules:
+  If --in/--out is:
+    - Absolute:           /x/y/file
+    - CWD-relative:       ./x/y/file or ../x/y/file
+  then it is used as-is.
+  Otherwise it is treated as a secrets-repo alias:
+    $SOPS_REPO_DIR/<value>
+
+Defaults when --out is omitted:
+  enc:
+    - if input looks like ".env" / "env"  -> writes ./.env.enc
+    - otherwise                           -> writes ./<basename>.enc
+  dec:
+    - if input looks like ".env.enc"      -> writes ./.env
+    - otherwise                           -> writes ./<basename>.dec
+
+push / pull convenience:
+  push (encrypt current env to secrets repo):
+    - default --in  : ./.env
+    - default --out : <project>/.env.enc   (in secrets repo mount)
+  pull (decrypt from secrets repo to current repo):
+    - default --in  : <project>/.env.enc   (in secrets repo mount)
+    - default --out : ./.env
+
+Safety:
+  By default, senv restricts input/output paths to stay inside:
+    - current working directory
+    - $SOPS_REPO_DIR
+    - $SOPS_BASE_DIR
+  Use --unsafe to bypass.
+
+System create rule:
+  senv only creates keys/configs under $SOPS_BASE_DIR when:
+    - running as root, AND
+    - the target path is writable (not read-only mount).
+
+Environment overrides:
+  SOPS_BASE_DIR     (default /etc/share/sops)
+  SOPS_KEYS_DIR     (default /etc/share/sops/keys)
+  SOPS_CFG_DIR      (default /etc/share/sops/config)
+  SOPS_GLOBAL_DIR   (default /etc/share/sops/global)
+  SOPS_REPO_DIR     (default /etc/share/vhosts/sops)
+  SENV_PROJECT      (auto-detects from git root basename when possible)
+
+Examples:
+  # Initialize global defaults (needs root + writable /etc/share/sops):
+  senv init
+
+  # Create repo-local config too:
+  senv init --local
+
+  # Only create ./ .sops.yaml (no system writes):
+  senv init --local-only
+
+  # Generate per-project key:
+  senv keygen --project demo
+
+  # Encrypt a local .env -> local .env.enc:
+  senv enc
+
+  # Encrypt from secrets repo alias -> current dir output:
+  senv enc --in demo/.env --out ./.env.enc
+
+  # Decrypt from secrets repo alias -> current dir:
+  senv dec --in demo/.env.enc --out ./.env
+
+  # Quick pull/push:
+  senv pull --project demo
+  senv push --project demo
+
+Parsing note:
+  This script does not use word-splitting for args; SC2206 is resolved properly.
 USAGE
   exit 2
   ;;

@@ -11,7 +11,7 @@ get_domains_from_files() {
         domain=$(basename "$file" .conf)
         [[ -n "$domain" ]] && domains+=("$domain" "*.$domain")
     done
-    domains+=("localhost" "127.0.0.1" "::1")
+    domains+=("localhost" "*.localhost" "127.0.0.1" "::1")
     echo "${domains[@]}" | tr ' ' '\n' | sort -u
 }
 

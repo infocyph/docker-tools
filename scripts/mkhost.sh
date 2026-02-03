@@ -524,7 +524,6 @@ services:
       - "\${HOME}/.gitconfig:/home/\${USER}/.gitconfig:ro"
     depends_on:
       - server-tools
-    command: ["/usr/local/bin/node-entry"]
     healthcheck:
       test: ["CMD-SHELL", "node -e \"const net=require('net');const h=process.env.HOST||'127.0.0.1';const p=+process.env.PORT||3000;const s=net.connect(p,h);s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));\""]
       interval: 30s

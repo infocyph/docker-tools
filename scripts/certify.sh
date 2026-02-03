@@ -21,6 +21,17 @@ to_epoch() {
   date -j -f "%b %e %T %Y %Z" "$s" +%s 2>/dev/null
 }
 
+# Format epoch in local timezone: "YYYY-MM-DD HH:MM:SS +ZZZZ"
+fmt_epoch_local() {
+  local e="$1"
+  if date -d "@$e" "+%Y-%m-%d %H:%M:%S %z" >/dev/null 2>&1; then
+    date -d "@$e" "+%Y-%m-%d %H:%M:%S %z"
+    return 0
+  fi
+  # BSD/macOS
+  date -r "$e" "+%Y-%m-%d %H:%M:%S %z" 2>/dev/null
+}
+
 run_mkcert() {
   mkcert "$@" >/dev/null 2>&1
 }
@@ -66,12 +77,12 @@ PY
   fi
 
   # Fallback without python (best-effort)
-  docker inspect --format '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}{{range $v.Aliases}} {{.}}{{end}}{{end}} {{.Config.Hostname}}' $ids 2>/dev/null |
-    tr ' ' '\n' |
-    sed 's|^/||' |
-    awk 'NF {print tolower($0)}' |
-    awk '$0 ~ /^[a-z0-9.-]+$/ {print}' |
-    sort -u
+  docker inspect --format '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}{{range $v.Aliases}} {{.}}{{end}}{{end}} {{.Config.Hostname}}' $ids 2>/dev/null \
+    | tr ' ' '\n' \
+    | sed 's|^/||' \
+    | awk 'NF {print tolower($0)}' \
+    | awk '$0 ~ /^[a-z0-9.-]+$/ {print}' \
+    | sort -u
 }
 
 get_domains_from_files() {
@@ -84,10 +95,8 @@ get_domains_from_files() {
     [[ -n "$domain" ]] && domains+=("$domain" "*.$domain")
   done
 
-  # Always include localhost & loopbacks
   domains+=("localhost" "*.localhost" "127.0.0.1" "::1")
 
-  # Auto-add docker DNS names (service aliases/container names/hostnames)
   local auto
   auto="$(docker_service_domains || true)"
   if [[ -n "$auto" ]]; then
@@ -96,8 +105,18 @@ get_domains_from_files() {
     done <<<"$auto"
   fi
 
-  # unique + stable ordering
   printf '%s\n' "${domains[@]}" | awk 'NF' | sort -u
+}
+
+# Get certificate expiry in epoch; prints epoch or empty
+cert_expiry_epoch() {
+  local cert_file="$1" expiry expiry_epoch
+  [[ -f "$cert_file" ]] || return 1
+  expiry="$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2 || true)"
+  [[ -n "$expiry" ]] || return 1
+  expiry_epoch="$(to_epoch "$expiry" || true)"
+  [[ -n "$expiry_epoch" ]] || return 1
+  printf '%s\n' "$expiry_epoch"
 }
 
 # validate_certificate <cert_path> <needs_domains:0|1>
@@ -107,21 +126,15 @@ validate_certificate() {
 
   [[ -f "$cert_file" ]] || return 1
 
-  # Expiration
-  local expiry expiry_epoch now
-  expiry="$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2 || true)"
-  [[ -n "$expiry" ]] || return 1
-
-  expiry_epoch="$(to_epoch "$expiry" || true)"
+  local expiry_epoch now
+  expiry_epoch="$(cert_expiry_epoch "$cert_file" || true)"
   [[ -n "$expiry_epoch" ]] || return 1
 
   now="$(date +%s)"
   [[ "$expiry_epoch" -gt "$now" ]] || return 1
 
-  # Client certs: expiry check is enough
   [[ "$needs_domains" -eq 1 ]] || return 0
 
-  # SAN check for server certs
   local san dns_entries ip_entries all_san
   san="$(openssl x509 -in "$cert_file" -noout -ext subjectAltName 2>/dev/null | tr ',' '\n' || true)"
   [[ -n "$san" ]] || return 1
@@ -167,7 +180,6 @@ update_container_trust() {
 }
 
 generate_certificates() {
-  # label -> "cert key [--client] [p12]"
   declare -A CERT_FILES=(
     ["Local Common (Server)"]="local.pem local-key.pem"
     ["Nginx (Server)"]="nginx-server.pem nginx-server-key.pem"
@@ -177,7 +189,6 @@ generate_certificates() {
     ["Apache (Client)"]="apache-client.pem apache-client-key.pem --client"
   )
 
-  # stable order (avoid hash-map iteration randomness)
   local labels=(
     "Local Common (Server)"
     "Nginx (Server)"
@@ -190,6 +201,7 @@ generate_certificates() {
   local output=""
   local total=0 regenerated=0 valid=0
   local label cert_file key_file client_flag p12 needs_domains full_cert_path p12_name
+  local exp_epoch exp_str
 
   mkdir -p "$CERT_DIR"
 
@@ -202,7 +214,11 @@ generate_certificates() {
     [[ "${client_flag:-}" == "--client" ]] && needs_domains=0
 
     if validate_certificate "$full_cert_path" "$needs_domains"; then
-      output+=" - $label: Valid & up-to-date; regeneration skipped"$'\n'
+      exp_epoch="$(cert_expiry_epoch "$full_cert_path" || true)"
+      exp_str=""
+      [[ -n "$exp_epoch" ]] && exp_str="$(fmt_epoch_local "$exp_epoch" || true)"
+      [[ -n "$exp_str" ]] && exp_str=" (~$exp_str)"
+      output+=" - $label: Valid & up-to-date$exp_str; regeneration skipped"$'\n'
       valid=$((valid + 1))
       continue
     fi
@@ -229,13 +245,17 @@ generate_certificates() {
         $CERT_DOMAINS
     fi
 
-    output+=" - $label: Generated & configured"$'\n'
+    exp_epoch="$(cert_expiry_epoch "$full_cert_path" || true)"
+    exp_str=""
+    [[ -n "$exp_epoch" ]] && exp_str="$(fmt_epoch_local "$exp_epoch" || true)"
+    [[ -n "$exp_str" ]] && exp_str=" (~$exp_str)"
+
+    output+=" - $label: Generated & configured$exp_str"$'\n'
     regenerated=$((regenerated + 1))
   done
 
   chmod 644 "$CERT_DIR"/apache-*.pem 2>/dev/null || true
 
-  # Install mkcert root CA into this container user store (best-effort)
   run_mkcert -install || true
 
   output+=$'\n'"--------------------------------------------------------------"$'\n'

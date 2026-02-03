@@ -520,6 +520,7 @@ services:
     volumes:
       - "\${PROJECT_DIR:-./../application}${DOC_ROOT}:/app"
       - "configuration/ssh:/home/\${USER}/.ssh:ro"
+      - configuration/rootCA:/etc/share/rootCA:ro
       - "\${HOME}/.gitconfig:/home/\${USER}/.gitconfig:ro"
     depends_on:
       - server-tools

@@ -16,7 +16,7 @@ get_domains_from_files() {
 }
 
 run_mkcert() {
-    mkcert "$@" &> /dev/null
+    mkcert "$@" &>/dev/null
 }
 
 validate_certificate() {
@@ -58,7 +58,7 @@ validate_certificate() {
     # Check that all non-empty domains in CERT_DOMAINS are present in the certificate's SAN.
     if [ -n "$CERT_DOMAINS" ]; then
         for domain in $CERT_DOMAINS; do
-            domain=$(echo "$domain" | xargs)  # trim spaces
+            domain=$(echo "$domain" | xargs) # trim spaces
             if [ -z "$domain" ]; then
                 continue
             fi
@@ -94,7 +94,7 @@ generate_certificates() {
 
     for cert in "${!CERT_FILES[@]}"; do
         count_total=$((count_total + 1))
-        IFS=' ' read -r cert_file key_file client_flag p12 <<< "${CERT_FILES[$cert]}"
+        IFS=' ' read -r cert_file key_file client_flag p12 <<<"${CERT_FILES[$cert]}"
         full_cert_path="$CERT_DIR/$cert_file"
         if validate_certificate "$full_cert_path"; then
             output+=" - $cert: Valid & up-to-date; regeneration skipped"$'\n'
@@ -103,23 +103,23 @@ generate_certificates() {
             # Generate the certificate if missing, expired, or missing domains.
             if [[ "$client_flag" == "--client" ]]; then
                 run_mkcert --ecdsa $client_flag \
-                  -cert-file "$CERT_DIR/$cert_file" \
-                  -key-file "$CERT_DIR/$key_file" \
-                  $CERT_DOMAINS
+                    -cert-file "$CERT_DIR/$cert_file" \
+                    -key-file "$CERT_DIR/$key_file" \
+                    $CERT_DOMAINS
                 if [[ "$p12" == "p12" ]]; then
                     p12_name="${cert_file%.pem}.p12"
                     openssl pkcs12 -export \
-                      -in "$CERT_DIR/$cert_file" \
-                      -inkey "$CERT_DIR/$key_file" \
-                      -out "$CERT_DIR/$p12_name" \
-                      -name "${cert_file%.pem} Certificate" \
-                      -passout pass:""
+                        -in "$CERT_DIR/$cert_file" \
+                        -inkey "$CERT_DIR/$key_file" \
+                        -out "$CERT_DIR/$p12_name" \
+                        -name "${cert_file%.pem} Certificate" \
+                        -passout pass:""
                 fi
             else
                 run_mkcert --ecdsa \
-                  -cert-file "$CERT_DIR/$cert_file" \
-                  -key-file "$CERT_DIR/$key_file" \
-                  $CERT_DOMAINS
+                    -cert-file "$CERT_DIR/$cert_file" \
+                    -key-file "$CERT_DIR/$key_file" \
+                    $CERT_DOMAINS
             fi
             output+=" - $cert: Generated & configured"$'\n'
             count_regenerated=$((count_regenerated + 1))
@@ -129,11 +129,11 @@ generate_certificates() {
     run_mkcert -install
     output+=$'\n'"--------------------------------------------------------------"$'\n'
     if [ $count_regenerated -eq 0 ]; then
-         output+="[OK] All ($count_total) certificates are valid; no regeneration required."
+        output+="[OK] All ($count_total) certificates are valid; no regeneration required."
     elif [ $count_valid -eq 0 ]; then
-         output+="[OK] All ($count_total) certificates were regenerated."
+        output+="[OK] All ($count_total) certificates were regenerated."
     else
-         output+="[OK] Certificate validation complete; Regenerated: $count_regenerated, Valid: $count_valid."
+        output+="[OK] Certificate validation complete; Regenerated: $count_regenerated, Valid: $count_valid."
     fi
     echo "$output"
 }
@@ -153,4 +153,3 @@ echo ""
 generate_certificates
 echo ""
 echo "=============================================================="
-

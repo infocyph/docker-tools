@@ -11,7 +11,7 @@ NC='\033[0m'
 # Runtime versions DB (baked during docker build) — REQUIRED
 ###############################################################################
 RUNTIME_VERSIONS_DB="${RUNTIME_VERSIONS_DB:-/etc/share/runtime-versions.json}"
-MAX_VERSIONS="${MAX_VERSIONS:-15}"
+MAX_VERSIONS="${MAX_VERSIONS:-16}"
 
 require_versions_db() {
   command -v jq >/dev/null 2>&1 || {
@@ -341,19 +341,39 @@ prompt_for_node_version() {
   mapfile -t active_rows < <(jq -r '.node.active[]? | "\(.version)|\(.debut)|\(.eol)|\(.lts)"' "$RUNTIME_VERSIONS_DB")
   mapfile -t dep_rows    < <(jq -r '.node.deprecated[]? | "\(.version)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
 
-  local n=0
-  local idx_map_type=() idx_map_value=()
+  # Total menu size = MAX_VERSIONS (default 15) => indices 0..(MAX_VERSIONS-1)
+  local max_sel=$((MAX_VERSIONS - 1))
 
-  # 0) Custom first
+  local idx_map_type=() idx_map_value=()
+  local n=0
+
+  # 0) Custom
   printf "  %2d) %-7s %s\n" 0 "Custom" "Version"
   idx_map_type[0]="custom"
   idx_map_value[0]=""
 
+  # 1) CURRENT
+  n=1
+  printf "  %2d) %-7s %s\n" "$n" "CURRENT" "(v${current_major})"
+  idx_map_type[$n]="tag"
+  idx_map_value[$n]="current"
+
+  # 2) LTS
+  n=2
+  printf "  %2d) %-7s %s\n" "$n" "LTS" "(v${lts_major})"
+  idx_map_type[$n]="tag"
+  idx_map_value[$n]="lts"
+
+  # Remaining slots for actual versions
+  local slots_left=$((MAX_VERSIONS - 3))
+
   echo -e "${CYAN}Active (supported):${NC}"
   for r in "${active_rows[@]}"; do
-    [[ "$n" -ge "$MAX_VERSIONS" ]] && break
+    [[ "$slots_left" -le 0 ]] && break
     n=$((n+1))
-    IFS='|' read -r v debut eol lts <<< "$r"
+    slots_left=$((slots_left-1))
+
+    IFS='|' read -r v debut eol lts <<<"$r"
     if [[ "$lts" == "true" ]]; then
       printf "  %2d) %-7s %s LTS\n" "$n" "v${v}" "$(fmt_range "$debut" "$eol")"
     else
@@ -365,31 +385,24 @@ prompt_for_node_version() {
 
   echo -e "${CYAN}Deprecated (EOL):${NC}"
   for r in "${dep_rows[@]}"; do
-    [[ "$n" -ge "$MAX_VERSIONS" ]] && break
+    [[ "$slots_left" -le 0 ]] && break
     n=$((n+1))
-    IFS='|' read -r v eol <<< "$r"
+    slots_left=$((slots_left-1))
+
+    IFS='|' read -r v eol <<<"$r"
     printf "  %2d) %-7s %s\n" "$n" "v${v}" "$(fmt_eol_tilde "$eol")"
     idx_map_type[$n]="node"
     idx_map_value[$n]="$v"
   done
 
-  # Force indices 16/17 as requested (assumes MAX_VERSIONS=15)
-  local CURRENT_IDX=$((MAX_VERSIONS + 1))
-  local LTS_IDX=$((MAX_VERSIONS + 2))
+  # If fewer rows than MAX_VERSIONS, still allow selecting only up to last printed
+  local printed_max="$n"
+  [[ "$printed_max" -gt "$max_sel" ]] && printed_max="$max_sel"
 
-  printf "  %2d) %-7s %s\n" "$CURRENT_IDX" "CURRENT" "(v${current_major})"
-  idx_map_type[$CURRENT_IDX]="tag"
-  idx_map_value[$CURRENT_IDX]="current"
-
-  printf "  %2d) %-7s %s\n" "$LTS_IDX" "LTS" "(v${lts_major})"
-  idx_map_type[$LTS_IDX]="tag"
-  idx_map_value[$LTS_IDX]="lts"
-
-  local max_sel="$LTS_IDX"
   local sel custom
-  sel="$(pick_index_allow_zero "$max_sel" "Select option (0-${max_sel}):")"
+  sel="$(pick_index_allow_zero "$printed_max" "Select option (0-${printed_max}):")"
 
-  case "${idx_map_type[$sel]}" in
+  case "${idx_map_type[$sel]:-}" in
   node)
     NODE_VERSION="${idx_map_value[$sel]}"
     ;;

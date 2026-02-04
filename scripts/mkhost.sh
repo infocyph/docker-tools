@@ -499,7 +499,7 @@ create_node_compose() {
     esc="${esc//\"/\\\"}"
     node_cmd_line='- NODE_CMD=${NODE_CMD:-"'"${esc}"'"}'
   else
-    node_cmd_line='- NODE_CMD=${NODE_CMD:-""}'
+    node_cmd_line='- NODE_CMD=${NODE_CMD:-}'
   fi
 
   cat >"$CONFIG_DOCKER_NODE" <<YAML

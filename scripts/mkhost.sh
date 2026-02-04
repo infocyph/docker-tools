@@ -635,13 +635,13 @@ show_step() {
 configure_server() {
   require_versions_db
 
-  show_step 1 9
+  show_step 1 8
   prompt_for_domain
 
-  show_step 2 9
+  show_step 2 8
   choose_app_type
 
-  show_step 3 9
+  show_step 3 8
   if [[ "$APP_TYPE" == "php" ]]; then
     prompt_for_php_version
   else
@@ -649,7 +649,7 @@ configure_server() {
   fi
 
   # Step 4: server type decision (php asks, node is forced)
-  show_step 4 9
+  show_step 4 8
   if [[ "$APP_TYPE" == "php" ]]; then
     choose_server_type
   else
@@ -657,16 +657,16 @@ configure_server() {
     prompt_for_node_command_optional
   fi
 
-  show_step 5 9
+  show_step 5 8
   prompt_for_http_https
 
-  show_step 6 9
+  show_step 6 8
   prompt_for_doc_root
 
-  show_step 7 9
+  show_step 7 8
   prompt_for_client_max_body_size
 
-  show_step 8 9
+  show_step 8 8
   if [[ "$ENABLE_HTTPS" == "y" ]]; then
     prompt_for_client_verification
   else

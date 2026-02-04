@@ -488,15 +488,18 @@ create_node_compose() {
   local CONFIG_DOCKER_NODE="/etc/share/vhosts/node/${token}.yaml"
   rm -f "$CONFIG_DOCKER_NODE"
 
-  # If NODE_CMD was set in the UI, bake it into compose as a literal default.
-  # Otherwise keep it as runtime override (empty by default).
-  local node_cmd_line='- NODE_CMD=\${NODE_CMD:-}'
+  # Always emit NODE_CMD line, but keep YAML valid when empty.
+  # If user set NODE_CMD in UI -> bake it into default.
+  # Else -> default to empty string.
+  local node_cmd_line esc
   if [[ -n "${NODE_CMD:-}" ]]; then
-    # escape backslashes + double quotes to stay valid YAML
-    local esc
-    esc="${NODE_CMD//\\/\\\\}"
+    esc="${NODE_CMD//$'\r'/}"
+    esc="${esc//$'\n'/ }"
+    esc="${esc//\\/\\\\}"
     esc="${esc//\"/\\\"}"
-    node_cmd_line="- NODE_CMD=\${NODE_CMD:-\"${esc}\"}"
+    node_cmd_line='- NODE_CMD=${NODE_CMD:-"'"${esc}"'"}'
+  else
+    node_cmd_line='- NODE_CMD=${NODE_CMD:-""}'
   fi
 
   cat >"$CONFIG_DOCKER_NODE" <<YAML
@@ -520,7 +523,6 @@ services:
       - TZ=\${TZ:-}
       - PORT=3000
       - HOST=0.0.0.0
-      # Optional overrides (baked default if provided)
       ${node_cmd_line}
       - NPM_AUDIT=\${NPM_AUDIT:-0}
       - NPM_FUND=\${NPM_FUND:-0}
@@ -532,8 +534,8 @@ services:
       datastore: {}
     volumes:
       - "\${PROJECT_DIR:-./../application}${DOC_ROOT}:/app"
-      - "configuration/ssh:/home/\${USER}/.ssh:ro"
-      - configuration/rootCA:/etc/share/rootCA:ro
+      - "./configuration/ssh:/home/\${USER}/.ssh:ro"
+      - ./configuration/rootCA:/etc/share/rootCA:ro
       - "\${HOME}/.gitconfig:/home/\${USER}/.gitconfig:ro"
     depends_on:
       - server-tools

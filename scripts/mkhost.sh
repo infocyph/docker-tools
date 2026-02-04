@@ -641,36 +641,37 @@ configure_server() {
   show_step 2 9
   choose_app_type
 
-  if [[ "$APP_TYPE" == "php" ]]; then
-    show_step 3 9
-    choose_server_type
-  else
-    SERVER_TYPE="Nginx"
-    echo -e "${GREEN}Node uses Nginx proxy mode.${NC}"
-  fi
-
-  show_step 4 9
-  prompt_for_http_https
-
-  show_step 5 9
-  prompt_for_doc_root
-
-  show_step 6 9
-  prompt_for_client_max_body_size
-
-  show_step 7 9
+  show_step 3 9
   if [[ "$APP_TYPE" == "php" ]]; then
     prompt_for_php_version
   else
     prompt_for_node_version
-    show_step 8 9
+  fi
+
+  # Step 4: server type decision (php asks, node is forced)
+  show_step 4 9
+  if [[ "$APP_TYPE" == "php" ]]; then
+    choose_server_type
+  else
+    SERVER_TYPE="Nginx"
     prompt_for_node_command_optional
   fi
 
+  show_step 5 9
+  prompt_for_http_https
+
+  show_step 6 9
+  prompt_for_doc_root
+
+  show_step 7 9
+  prompt_for_client_max_body_size
+
+  show_step 8 9
   if [[ "$ENABLE_HTTPS" == "y" ]]; then
     prompt_for_client_verification
   else
     ENABLE_CLIENT_VERIFICATION="ssl_verify_client off;"
+    echo -e "${GREEN}Client verification not allowed in Non-HTTPS.${NC}"
   fi
 
   if [[ "$APP_TYPE" == "node" ]]; then

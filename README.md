@@ -275,7 +275,7 @@ It runs a guided 9-step flow (slightly different for PHP vs Node):
 
 If you enable HTTPS, `mkhost` triggers `certify` automatically so the required certs exist.
 
-### Helpful flags (used by devtainer)
+### Helpful flags
 
 `mkhost` stores the “active selections” into env (used by your `server` wrapper to enable compose profiles).
 You can query/reset these values:

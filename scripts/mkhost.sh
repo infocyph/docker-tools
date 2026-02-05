@@ -503,6 +503,8 @@ create_node_compose() {
   fi
 
   cat >"$CONFIG_DOCKER_NODE" <<YAML
+name: LocalDevStack
+
 services:
   ${svc}:
     container_name: ${cname}

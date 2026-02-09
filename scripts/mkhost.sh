@@ -248,15 +248,15 @@ print_two_column_menu() {
     ((${#arr[i]} > width)) && width=${#arr[i]}
   done
   ((width < 10)) && width=10
-  local colw=$((width + 6))
+  local colw=$((width + 7))
 
   local idx
   for ((idx=start; idx<${#arr[@]}; idx+=2)); do
     local left_i="$idx"
     local right_i=$((idx+1))
-    local left="  $(printf '%2d) ' "$left_i")${arr[left_i]}"
+    local left="  $(printf '%3d) ' "$left_i")${arr[left_i]}"
     if (( right_i < ${#arr[@]} )); then
-      local right="  $(printf '%2d) ' "$right_i")${arr[right_i]}"
+      local right="  $(printf '%3d) ' "$right_i")${arr[right_i]}"
       printf "%-${colw}s%s\n" "$left" "$right"
     else
       printf "%s\n" "$left"
@@ -676,7 +676,7 @@ prompt_node_runtime_step3() {
 
 choose_doc_root_step6() {
   local opts=()
-  opts+=("Custom…")
+  opts+=("<Custom Path>")
 
   while IFS= read -r -d '' v; do opts+=("$v"); done < <(collect_docroot_options || true)
 

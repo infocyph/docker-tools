@@ -1,119 +1,188 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# mkhost.sh — vhost + runtime chooser (PHP/Node) for LocalDevStack
 
-# Define colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+set -euo pipefail
 
 ###############################################################################
-# Runtime versions DB (baked during docker build) — REQUIRED
+# 0) Constants / Tunables
 ###############################################################################
-RUNTIME_VERSIONS_DB="${RUNTIME_VERSIONS_DB:-/etc/share/runtime-versions.json}"
-MAX_VERSIONS="${MAX_VERSIONS:-16}"
+readonly RUNTIME_VERSIONS_DB="${RUNTIME_VERSIONS_DB:-/etc/share/runtime-versions.json}"
+readonly MAX_VERSIONS="${MAX_VERSIONS:-16}"
+
+readonly TEMPLATE_DIR="${TEMPLATE_DIR:-/etc/http-templates}"
+readonly VHOST_NGINX_DIR="${VHOST_NGINX_DIR:-/etc/share/vhosts/nginx}"
+readonly VHOST_APACHE_DIR="${VHOST_APACHE_DIR:-/etc/share/vhosts/apache}"
+readonly VHOST_NODE_DIR="${VHOST_NODE_DIR:-/etc/share/vhosts/node}"
+
+readonly ENV_STORE="${ENV_STORE:-/etc/environment}"
+
+readonly NODE_PORT="${NODE_PORT:-3000}"
+readonly COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-LocalDevStack}"
+
+readonly APP_SCAN_DIR="${APP_SCAN_DIR:-/app}"   # for doc-root suggestions
+
+###############################################################################
+# 1) Colors + UI
+###############################################################################
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+CYAN=$'\033[0;36m'
+YELLOW=$'\033[1;33m'
+NC=$'\033[0m'
+
+say()  { echo -e "$*"; }
+ok()   { say "${GREEN}$*${NC}"; }
+warn() { say "${YELLOW}$*${NC}"; }
+err()  { say "${RED}$*${NC}"; }
+
+###############################################################################
+# 2) Preconditions
+###############################################################################
+need_cmd() { command -v "$1" >/dev/null 2>&1 || { err "Error: '$1' not found."; exit 1; }; }
 
 require_versions_db() {
-  command -v jq >/dev/null 2>&1 || {
-    echo -e "${RED}Error:${NC} jq not found."
-    exit 1
-  }
-  [[ -r "$RUNTIME_VERSIONS_DB" ]] || {
-    echo -e "${RED}Error:${NC} versions DB not found/readable: $RUNTIME_VERSIONS_DB"
-    exit 1
-  }
+  need_cmd jq
+  [[ -r "$RUNTIME_VERSIONS_DB" ]] || { err "Error: versions DB not found/readable: $RUNTIME_VERSIONS_DB"; exit 1; }
 }
 
 ###############################################################################
-# Input helpers
+# 3) Generic input helpers (centralized)
 ###############################################################################
-pick_index_allow_zero() {
-  # pick_index_allow_zero <max> <prompt>   (0..max)
-  local max="$1" prompt="$2" ans
+trim() { echo "${1:-}" | xargs; }
+
+prompt_line() {
+  # prompt_line <stepN> <stepT> <label> <suffix> <default_display?>
+  local n="$1" t="$2" label="$3" suffix="${4:-}" defdisp="${5:-}"
+  if [[ -n "$defdisp" ]]; then
+    echo -e "${YELLOW}Step ${n} of ${t}:${NC} ${CYAN}${label}${NC}${suffix} (${YELLOW}${defdisp}${NC}): "
+  else
+    echo -e "${YELLOW}Step ${n} of ${t}:${NC} ${CYAN}${label}${NC}${suffix}: "
+  fi
+}
+
+step_ask_text_required() {
+  # step_ask_text_required <n> <t> <label> <var> [hint]
+  local n="$1" t="$2" label="$3" __var="$4" hint="${5:-}"
+  local ans="" suffix=""
+  [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
   while true; do
-    read -e -r -p "$(echo -e "${CYAN}${prompt}${NC} ")" ans
-    ans="$(echo "${ans:-}" | xargs)"
-    [[ "$ans" =~ ^[0-9]+$ ]] || { echo -e "${RED}Enter a number.${NC}"; continue; }
-    (( ans >= 0 && ans <= max )) || { echo -e "${RED}Out of range (0-${max}).${NC}"; continue; }
-    echo "$ans"
+    read -e -r -p "$(prompt_line "$n" "$t" "$label" "$suffix")" ans
+    ans="$(trim "$ans")"
+    [[ -n "$ans" ]] || { err "Input cannot be empty."; continue; }
+    printf -v "$__var" '%s' "$ans"
+    return 0
+  done
+}
+
+step_ask_text_default() {
+  # step_ask_text_default <n> <t> <label> <var> <default_value> [hint]
+  local n="$1" t="$2" label="$3" __var="$4" def="$5" hint="${6:-}"
+  local ans="" suffix=""
+  [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
+  read -e -r -p "$(prompt_line "$n" "$t" "$label" "$suffix" "$def")" ans
+  ans="$(trim "${ans:-$def}")"
+  [[ -n "$ans" ]] || ans="$def"
+  printf -v "$__var" '%s' "$ans"
+}
+
+step_yn_default() {
+  # step_yn_default <n> <t> <label> <var> <default_y_or_n> [hint]
+  # Shows explicit answer option: (y/N) or (Y/n)
+  local n="$1" t="$2" label="$3" __var="$4" def="${5:-n}" hint="${6:-}"
+  local ans="" suffix="" opt=""
+  [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
+  def="${def,,}"
+  if [[ "$def" == "y" ]]; then opt=" ${YELLOW}(Y/n)${NC}"; else opt=" ${YELLOW}(y/N)${NC}"; fi
+  while true; do
+    read -e -r -p "$(echo -e "${YELLOW}Step ${n} of ${t}:${NC} ${CYAN}${label}${NC}${suffix}${opt}: ")" ans
+    ans="$(trim "$ans")"
+    ans="${ans,,}"
+    [[ -z "$ans" ]] && ans="$def"
+    case "$ans" in
+    y|yes) printf -v "$__var" '%s' "y"; return 0 ;;
+    n|no)  printf -v "$__var" '%s' "n"; return 0 ;;
+    *) err "Enter y or n." ;;
+    esac
+  done
+}
+
+pick_index_required() {
+  # pick_index_required <n> <t> <label> <max> <var> [hint]
+  local n="$1" t="$2" label="$3" max="$4" __var="$5" hint="${6:-}"
+  local ans="" suffix=""
+  [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
+  while true; do
+    read -e -r -p "$(prompt_line "$n" "$t" "$label" "$suffix")" ans
+    ans="$(trim "$ans")"
+    [[ "$ans" =~ ^[0-9]+$ ]] || { err "Enter a number."; continue; }
+    (( ans >= 0 && ans <= max )) || { err "Out of range (0-${max})."; continue; }
+    printf -v "$__var" '%s' "$ans"
+    return 0
+  done
+}
+
+pick_index_default_value() {
+  # pick_index_default_value <n> <t> <label> <max> <default_index> <default_display> <var> [hint]
+  local n="$1" t="$2" label="$3" max="$4" def_i="$5" def_disp="$6" __var="$7" hint="${8:-}"
+  local ans="" suffix=""
+  [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
+  while true; do
+    read -e -r -p "$(prompt_line "$n" "$t" "$label" "$suffix" "$def_disp")" ans
+    ans="$(trim "$ans")"
+    [[ -z "$ans" ]] && ans="$def_i"
+    [[ "$ans" =~ ^[0-9]+$ ]] || { err "Enter a number."; continue; }
+    (( ans >= 0 && ans <= max )) || { err "Out of range (0-${max})."; continue; }
+    printf -v "$__var" '%s' "$ans"
     return 0
   done
 }
 
 ###############################################################################
-# Helpers
+# 4) Env store helpers
+###############################################################################
+env_set() {
+  local key="$1" value="$2"
+  touch "$ENV_STORE"
+  if grep -qE "^${key}=" "$ENV_STORE"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_STORE"
+  else
+    echo "${key}=${value}" >>"$ENV_STORE"
+  fi
+}
+
+env_get() { grep -E "^$1=" "$ENV_STORE" 2>/dev/null | cut -d'=' -f2- || true; }
+
+###############################################################################
+# 5) Validation helpers
 ###############################################################################
 validate_domain() {
-  local domain=$1
-  local regex="^([a-zA-Z0-9][-a-zA-Z0-9]{0,253}[a-zA-Z0-9]\.)+[a-zA-Z]{2,}$"
-  if [[ ! $domain =~ $regex ]]; then
-    echo -e "${RED}Invalid domain name:${NC} $domain"
-    return 1
-  fi
-  return 0
+  local d="$1"
+  local re='^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+(localhost|local|test|loc|[a-zA-Z]{2,})$'
+  [[ "$d" =~ $re ]]
 }
 
-prompt_for_domain() {
-  while true; do
-    read -e -r -p "$(echo -e "${CYAN}Enter the domain (e.g., example.com):${NC} ")" DOMAIN_NAME
-    DOMAIN_NAME="$(echo "$DOMAIN_NAME" | xargs)"
-    if validate_domain "$DOMAIN_NAME"; then
-      break
-    fi
-    echo -e "${YELLOW}Please enter a valid domain name.${NC}"
-  done
+normalize_rel_path() {
+  local p
+  p="$(trim "${1:-}")"
+  [[ "$p" == /* ]] || p="/$p"
+  while [[ "$p" == *"//"* ]]; do p="${p//\/\//\/}"; done
+  [[ "$p" != "/" ]] && p="${p%/}"
+  echo "$p"
 }
 
-validate_input() {
-  local input="$1"
-  local message="$2"
-  while [[ -z "$input" ]]; do
-    echo -e "${RED}${message}${NC}"
-    read -e -r input
-  done
-  echo "$input"
-}
-
-slugify() {
-  echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+|_+$//g'
-}
+slugify() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+|_+$//g'; }
 
 to_env_key() {
-  local v="${1:-}"
-  v="$(echo "$v" | xargs)"
-  v="${v,,}"
-
+  local v; v="$(trim "${1:-}")"; v="${v,,}"
   case "$v" in
   current) echo "CURRENT" ;;
   lts)     echo "LTS" ;;
-  '' )     echo "" ;;
-  *)
-    if [[ "$v" =~ ^[0-9]+$ ]]; then
-      echo "$v"
-    else
-      echo "$v" | sed -E 's/[^0-9]+//g'
-    fi
-    ;;
+  '')      echo "" ;;
+  *) echo "$v" | sed -E 's/[^0-9]+//g' ;;
   esac
 }
 
-update_env() {
-  local key="$1" value="$2"
-  local f="/etc/environment"
-  touch "$f"
-  if grep -qE "^${key}=" "$f"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$f"
-  else
-    echo "${key}=${value}" >>"$f"
-  fi
-}
-
-get_env() {
-  grep -E "^$1=" /etc/environment 2>/dev/null | cut -d'=' -f2-
-}
-
 fmt_range() {
-  # fmt_range <debut> <eol> => "(debut to eol)" with fallbacks
   local debut="${1:-}" eol="${2:-}"
   [[ -z "$debut" || "$debut" == "null" ]] && debut="unknown"
   [[ -z "$eol"   || "$eol"   == "null" ]] && eol="unknown"
@@ -121,143 +190,13 @@ fmt_range() {
 }
 
 fmt_eol_tilde() {
-  # fmt_eol_tilde <eol> => "(~eol)" with fallbacks
   local eol="${1:-}"
   [[ -z "$eol" || "$eol" == "null" ]] && eol="unknown"
   echo "(~${eol})"
 }
 
 ###############################################################################
-# App type
-###############################################################################
-choose_app_type() {
-  echo -e "${CYAN}Choose app type:${NC}"
-  PS3="$(echo -e "${YELLOW}👉 Select app type: ${NC}") "
-  select app_type in "PHP" "NodeJs"; do
-    case "$app_type" in
-    "PHP")
-      APP_TYPE="php"
-      echo -e "${GREEN}Selected: PHP${NC}"
-      break
-      ;;
-    "NodeJs")
-      APP_TYPE="node"
-      echo -e "${GREEN}Selected: NodeJs${NC}"
-      break
-      ;;
-    *)
-      echo -e "${RED}Invalid option, please select again.${NC}"
-      ;;
-    esac
-  done
-}
-
-###############################################################################
-# HTTP server type (only meaningful for PHP)
-###############################################################################
-choose_server_type() {
-  echo -e "${CYAN}Choose the server to configure:${NC}"
-  PS3="$(echo -e "${YELLOW}👉 Select server type: ${NC}") "
-  select server_type in "Nginx" "Apache"; do
-    if [[ "$server_type" == "Nginx" || "$server_type" == "Apache" ]]; then
-      SERVER_TYPE="$server_type"
-      echo -e "${GREEN}You have selected $server_type.${NC}"
-      break
-    fi
-    echo -e "${RED}Invalid option, please select again.${NC}"
-  done
-}
-
-prompt_for_http_https() {
-  echo -e "${CYAN}Choose the type of protocol:${NC}"
-  PS3="$(echo -e "${YELLOW}👉 Select option: ${NC}") "
-  select choice in "HTTP only" "HTTPS only" "Both HTTP and HTTPS"; do
-    case $choice in
-    "HTTP only")
-      ENABLE_HTTPS="n"
-      ENABLE_REDIRECTION="n"
-      KEEP_HTTP="y"
-      break
-      ;;
-    "HTTPS only")
-      ENABLE_HTTPS="y"
-      ENABLE_REDIRECTION="n"
-      KEEP_HTTP="n"
-      break
-      ;;
-    "Both HTTP and HTTPS")
-      ENABLE_HTTPS="y"
-      read -e -r -p "$(echo -e "${CYAN}Set up HTTP to HTTPS redirection? (y/N):${NC} ")" ENABLE_REDIRECTION
-      ENABLE_REDIRECTION=${ENABLE_REDIRECTION,,}
-      if [[ "$ENABLE_REDIRECTION" =~ ^(y|yes)$ ]]; then
-        ENABLE_REDIRECTION="y"
-        KEEP_HTTP="n"
-      else
-        ENABLE_REDIRECTION="n"
-        KEEP_HTTP="y"
-      fi
-      break
-      ;;
-    *)
-      echo -e "${RED}Invalid option, please select again.${NC}"
-      ;;
-    esac
-  done
-}
-
-prompt_for_streaming() {
-  local ans="n"
-
-  PROXY_STREAMING_INCLUDE=""
-  FASTCGI_STREAMING_INCLUDE=""
-  APACHE_STREAMING_INCLUDE=""
-
-  echo -e "${CYAN}Enable streaming/SSE mode? (y/N):${NC}"
-  read -r ans
-
-  if [[ "${ans,,}" == "y" ]]; then
-    PROXY_STREAMING_INCLUDE="include /etc/nginx/proxy_streaming;"
-    FASTCGI_STREAMING_INCLUDE="include /etc/nginx/fastcgi_streaming;"
-    APACHE_STREAMING_INCLUDE=""
-  fi
-}
-
-prompt_for_client_verification() {
-  read -e -r -p "$(echo -e "${CYAN}Enable client certificate verification (mutual TLS)? (y/N):${NC} ")" client_verif_choice
-  client_verif_choice=${client_verif_choice,,}
-  if [[ "$client_verif_choice" =~ ^(y|yes)$ ]]; then
-    ENABLE_CLIENT_VERIFICATION="ssl_verify_client on;"
-    echo -e "${GREEN}Client certificate verification enabled.${RED} Ensure client certificates are in place.${NC}"
-  else
-    ENABLE_CLIENT_VERIFICATION="ssl_verify_client off;"
-    echo -e "${YELLOW}Client certificate verification disabled.${NC}"
-  fi
-}
-
-prompt_for_doc_root() {
-  local input
-  read -e -r -p "$(echo -e "${CYAN}Enter the relative DocumentRoot / ProjectRoot (e.g., /site/public or /my-node-app):${NC} ")" input
-  input="$(validate_input "$input" "Path cannot be empty. Please enter a valid path:")"
-  input="$(echo "$input" | xargs)"
-  [[ "$input" == /* ]] || input="/$input"
-  while [[ "$input" == *"//"* ]]; do input="${input//\/\//\/}"; done
-  [[ "$input" != "/" ]] && input="${input%/}"
-  DOC_ROOT="$input"
-}
-
-prompt_for_client_max_body_size() {
-  read -e -r -p "$(echo -e "${CYAN}Enter the maximum client body size (MB, default 10):${NC} ")" CLIENT_MAX_BODY_SIZE
-  CLIENT_MAX_BODY_SIZE=${CLIENT_MAX_BODY_SIZE:-10}
-  while [[ ! "$CLIENT_MAX_BODY_SIZE" =~ ^[0-9]+$ ]]; do
-    echo -e "${RED}Invalid input. Please enter a valid number (e.g., 12):${NC}"
-    read -e -r CLIENT_MAX_BODY_SIZE
-  done
-  CLIENT_MAX_BODY_SIZE_APACHE=$((CLIENT_MAX_BODY_SIZE * 1000000))
-  CLIENT_MAX_BODY_SIZE="${CLIENT_MAX_BODY_SIZE}M"
-}
-
-###############################################################################
-# Version validators (JSON-driven)
+# 6) Version validators (JSON-driven)
 ###############################################################################
 php_is_valid_custom() {
   local v="$1"
@@ -272,226 +211,96 @@ node_is_valid_custom() {
 }
 
 ###############################################################################
-# PHP versions (limit MAX_VERSIONS) — 0=Custom, then Active, then Deprecated
-# 3 columns: INDEX | VERSION | DATES
+# 7) Doc-root suggestions (two-column menu)
 ###############################################################################
-prompt_for_php_version() {
-  require_versions_db
+collect_docroot_options() {
+  local base="$APP_SCAN_DIR"
+  local out=()
 
-  echo -e "${CYAN}PHP versions:${NC}"
-
-  mapfile -t active_rows < <(jq -r '.php.active[]? | "\(.version)|\(.debut)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
-  mapfile -t dep_rows    < <(jq -r '.php.deprecated[]? | "\(.version)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
-
-  local n=0
-  local idx_map_type=() idx_map_value=()
-
-  # 0) Custom first
-  printf "  %2d) %-7s %s\n" 0 "Custom" "Version"
-  idx_map_type[0]="custom"
-  idx_map_value[0]=""
-
-  echo -e "${CYAN}Active (supported):${NC}"
-  for r in "${active_rows[@]}"; do
-    [[ "$n" -ge "$MAX_VERSIONS" ]] && break
-    n=$((n+1))
-    IFS='|' read -r v debut eol <<< "$r"
-    printf "  %2d) %-7s %s\n" "$n" "$v" "$(fmt_range "$debut" "$eol")"
-    idx_map_type[$n]="php"
-    idx_map_value[$n]="$v"
-  done
-
-  echo -e "${CYAN}Deprecated (EOL):${NC}"
-  for r in "${dep_rows[@]}"; do
-    [[ "$n" -ge "$MAX_VERSIONS" ]] && break
-    n=$((n+1))
-    IFS='|' read -r v eol <<< "$r"
-    printf "  %2d) %-7s %s\n" "$n" "$v" "$(fmt_eol_tilde "$eol")"
-    idx_map_type[$n]="php"
-    idx_map_value[$n]="$v"
-  done
-
-  local sel PHP_VERSION custom
-  sel="$(pick_index_allow_zero "$MAX_VERSIONS" "Select option (0-${MAX_VERSIONS}):")"
-
-  if [[ "${idx_map_type[$sel]}" == "custom" ]]; then
-    while true; do
-      read -e -r -p "$(echo -e "${CYAN}Enter PHP version (Major.Minor, e.g., 8.4):${NC} ")" custom
-      custom="$(echo "${custom:-}" | xargs)"
-      if php_is_valid_custom "$custom"; then
-        PHP_VERSION="$custom"
-        break
-      fi
-      echo -e "${RED}Invalid / unknown PHP version.${NC}"
-    done
-  else
-    PHP_VERSION="${idx_map_value[$sel]}"
-    [[ -n "$PHP_VERSION" ]] || {
-      echo -e "${RED}Invalid selection.${NC}"
-      exit 1
-    }
+  if [[ -d "$base/public" ]]; then
+    out+=("/public")
   fi
 
-  PHP_CONTAINER_PROFILE="php${PHP_VERSION//./}"
-  PHP_APACHE_CONTAINER_PROFILE="php${PHP_VERSION//./}apache"
-  PHP_CONTAINER="PHP_${PHP_VERSION}"
-  PHP_APACHE_CONTAINER="PHP_${PHP_VERSION}_APACHE"
-  echo -e "${GREEN}You have selected PHP version $PHP_VERSION.${NC}"
-}
+  if [[ -d "$base" ]]; then
+    while IFS= read -r -d '' d; do
+      local name; name="$(basename "$d")"
+      [[ "$name" == .* ]] && continue
+      out+=("/$name")
+      [[ -d "$d/public" ]] && out+=("/$name/public")
+    done < <(find "$base" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null || true)
+  fi
 
-###############################################################################
-# Node versions (limit MAX_VERSIONS) — indices:
-#   0 = Custom
-#   1..15 = versions (active then deprecated)
-#   16 = CURRENT
-#   17 = LTS
-###############################################################################
-prompt_for_node_version() {
-  require_versions_db
-
-  local current_major lts_major
-  current_major="$(jq -r '.node.tags.current // ""' "$RUNTIME_VERSIONS_DB")"
-  lts_major="$(jq -r '.node.tags.lts // ""' "$RUNTIME_VERSIONS_DB")"
-
-  echo -e "${CYAN}Node versions:${NC}"
-
-  mapfile -t active_rows < <(jq -r '.node.active[]? | "\(.version)|\(.debut)|\(.eol)|\(.lts)"' "$RUNTIME_VERSIONS_DB")
-  mapfile -t dep_rows    < <(jq -r '.node.deprecated[]? | "\(.version)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
-
-  # Total menu size = MAX_VERSIONS (default 15) => indices 0..(MAX_VERSIONS-1)
-  local max_sel=$((MAX_VERSIONS - 1))
-
-  local idx_map_type=() idx_map_value=()
-  local n=0
-
-  # 0) Custom
-  printf "  %2d) %-7s %s\n" 0 "Custom" "Version"
-  idx_map_type[0]="custom"
-  idx_map_value[0]=""
-
-  # 1) CURRENT
-  n=1
-  printf "  %2d) %-7s %s\n" "$n" "CURRENT" "(v${current_major})"
-  idx_map_type[$n]="tag"
-  idx_map_value[$n]="current"
-
-  # 2) LTS
-  n=2
-  printf "  %2d) %-7s %s\n" "$n" "LTS" "(v${lts_major})"
-  idx_map_type[$n]="tag"
-  idx_map_value[$n]="lts"
-
-  # Remaining slots for actual versions
-  local slots_left=$((MAX_VERSIONS - 3))
-
-  echo -e "${CYAN}Active (supported):${NC}"
-  for r in "${active_rows[@]}"; do
-    [[ "$slots_left" -le 0 ]] && break
-    n=$((n+1))
-    slots_left=$((slots_left-1))
-
-    IFS='|' read -r v debut eol lts <<<"$r"
-    if [[ "$lts" == "true" ]]; then
-      printf "  %2d) %-7s %s LTS\n" "$n" "v${v}" "$(fmt_range "$debut" "$eol")"
-    else
-      printf "  %2d) %-7s %s\n" "$n" "v${v}" "$(fmt_range "$debut" "$eol")"
+  local seen="|"
+  local opt
+  for opt in "${out[@]}"; do
+    if [[ "$seen" != *"|$opt|"* ]]; then
+      seen="${seen}${opt}|"
+      printf '%s\0' "$opt"
     fi
-    idx_map_type[$n]="node"
-    idx_map_value[$n]="$v"
   done
+}
 
-  echo -e "${CYAN}Deprecated (EOL):${NC}"
-  for r in "${dep_rows[@]}"; do
-    [[ "$slots_left" -le 0 ]] && break
-    n=$((n+1))
-    slots_left=$((slots_left-1))
-
-    IFS='|' read -r v eol <<<"$r"
-    printf "  %2d) %-7s %s\n" "$n" "v${v}" "$(fmt_eol_tilde "$eol")"
-    idx_map_type[$n]="node"
-    idx_map_value[$n]="$v"
+print_two_column_menu() {
+  local arr_name="$1" start="$2"
+  local -n arr="$arr_name"
+  local i width=0
+  for ((i=start; i<${#arr[@]}; i++)); do
+    ((${#arr[i]} > width)) && width=${#arr[i]}
   done
+  ((width < 10)) && width=10
+  local colw=$((width + 6))
 
-  # If fewer rows than MAX_VERSIONS, still allow selecting only up to last printed
-  local printed_max="$n"
-  [[ "$printed_max" -gt "$max_sel" ]] && printed_max="$max_sel"
-
-  local sel custom
-  sel="$(pick_index_allow_zero "$printed_max" "Select option (0-${printed_max}):")"
-
-  case "${idx_map_type[$sel]:-}" in
-  node)
-    NODE_VERSION="${idx_map_value[$sel]}"
-    ;;
-  tag)
-    NODE_VERSION="${idx_map_value[$sel]}"   # current|lts
-    ;;
-  custom)
-    while true; do
-      read -e -r -p "$(echo -e "${CYAN}Enter Node major only (e.g., 24):${NC} ")" custom
-      custom="$(echo "${custom:-}" | xargs)"
-      if node_is_valid_custom "$custom"; then
-        NODE_VERSION="$custom"
-        break
-      fi
-      echo -e "${RED}Invalid / unknown Node major.${NC}"
-    done
-    ;;
-  *)
-    echo -e "${RED}Invalid selection.${NC}"
-    exit 1
-    ;;
-  esac
-
-  echo -e "${GREEN}Selected Node version: $NODE_VERSION${NC}"
+  local idx
+  for ((idx=start; idx<${#arr[@]}; idx+=2)); do
+    local left_i="$idx"
+    local right_i=$((idx+1))
+    local left="  $(printf '%2d) ' "$left_i")${arr[left_i]}"
+    if (( right_i < ${#arr[@]} )); then
+      local right="  $(printf '%2d) ' "$right_i")${arr[right_i]}"
+      printf "%-${colw}s%s\n" "$left" "$right"
+    else
+      printf "%s\n" "$left"
+    fi
+  done
 }
 
 ###############################################################################
-# OPTIONAL Node command override:
-# Default: empty => node-entry auto-detects (dev/start/server.js/index.js)
+# 8) Template rendering
 ###############################################################################
-prompt_for_node_command_optional() {
-  NODE_CMD=""
-  local ans
-  read -e -r -p "$(echo -e "${CYAN}Custom Node start command? (y/N):${NC} ")" ans
-  ans="${ans,,}"
-  [[ "$ans" =~ ^(y|yes)$ ]] || return 0
+sed_escape_repl() { echo "${1:-}" | sed -e 's/[\/&|\\]/\\&/g'; }
 
-  read -e -r -p "$(echo -e "${CYAN}Enter Node start command (e.g., npm run dev / npm start / node server.js):${NC} ")" NODE_CMD
-  NODE_CMD="$(echo "${NODE_CMD:-}" | xargs)"
-  [[ -n "$NODE_CMD" ]] || NODE_CMD=""
+render_template() {
+  local tpl="$1" out="$2"
+  [[ -r "$tpl" ]] || { err "Template not readable: $tpl"; exit 1; }
+
+  local tmp; tmp="$(mktemp)"
+  sed \
+    -e "s|{{SERVER_NAME}}|$(sed_escape_repl "$DOMAIN_NAME")|g" \
+    -e "s|{{DOC_ROOT}}|$(sed_escape_repl "$DOC_ROOT")|g" \
+    -e "s|{{CLIENT_MAX_BODY_SIZE}}|$(sed_escape_repl "$CLIENT_MAX_BODY_SIZE")|g" \
+    -e "s|{{CLIENT_MAX_BODY_SIZE_APACHE}}|$(sed_escape_repl "${CLIENT_MAX_BODY_SIZE_APACHE:-}")|g" \
+    -e "s|{{PROXY_STREAMING_INCLUDE}}|$(sed_escape_repl "${PROXY_STREAMING_INCLUDE:-}")|g" \
+    -e "s|{{FASTCGI_STREAMING_INCLUDE}}|$(sed_escape_repl "${FASTCGI_STREAMING_INCLUDE:-}")|g" \
+    -e "s|{{APACHE_STREAMING_INCLUDE}}|$(sed_escape_repl "${APACHE_STREAMING_INCLUDE:-}")|g" \
+    -e "s|{{PHP_APACHE_CONTAINER}}|$(sed_escape_repl "${PHP_APACHE_CONTAINER:-}")|g" \
+    -e "s|{{APACHE_CONTAINER}}|$(sed_escape_repl "${APACHE_CONTAINER:-APACHE}")|g" \
+    -e "s|{{PHP_CONTAINER}}|$(sed_escape_repl "${PHP_CONTAINER:-}")|g" \
+    -e "s|{{CLIENT_VERIFICATION}}|$(sed_escape_repl "${ENABLE_CLIENT_VERIFICATION:-ssl_verify_client off;}")|g" \
+    -e "s|{{NODE_CONTAINER}}|$(sed_escape_repl "${NODE_CONTAINER:-}")|g" \
+    -e "s|{{NODE_PORT}}|$(sed_escape_repl "${NODE_PORT}")|g" \
+    "$tpl" >"$tmp"
+
+  install -m 0644 "$tmp" "$out"
+  rm -f "$tmp"
 }
 
 ###############################################################################
-# Template renderer
-###############################################################################
-generate_conf_from_template() {
-  local template_file=$1
-  local output_file=$2
-
-  sed -e "s|{{SERVER_NAME}}|$DOMAIN_NAME|g" \
-    -e "s|{{DOC_ROOT}}|$DOC_ROOT|g" \
-    -e "s|{{CLIENT_MAX_BODY_SIZE}}|$CLIENT_MAX_BODY_SIZE|g" \
-    -e "s|{{CLIENT_MAX_BODY_SIZE_APACHE}}|$CLIENT_MAX_BODY_SIZE_APACHE|g" \
-    -e "s|{{PROXY_STREAMING_INCLUDE}}|$PROXY_STREAMING_INCLUDE|g" \
-    -e "s|{{FASTCGI_STREAMING_INCLUDE}}|$FASTCGI_STREAMING_INCLUDE|g" \
-    -e "s|{{APACHE_STREAMING_INCLUDE}}|$APACHE_STREAMING_INCLUDE|g" \
-    -e "s|{{PHP_APACHE_CONTAINER}}|$PHP_APACHE_CONTAINER|g" \
-    -e "s|{{APACHE_CONTAINER}}|${APACHE_CONTAINER:-APACHE}|g" \
-    -e "s|{{PHP_CONTAINER}}|$PHP_CONTAINER|g" \
-    -e "s|{{CLIENT_VERIFICATION}}|$ENABLE_CLIENT_VERIFICATION|g" \
-    -e "s|{{NODE_CONTAINER}}|${NODE_CONTAINER:-}|g" \
-    -e "s|{{NODE_PORT}}|3000|g" \
-    "$template_file" >>"$output_file"
-}
-
-###############################################################################
-# Node dynamic compose generator (PORT always 3000)
+# 9) Node compose generator
 ###############################################################################
 create_node_compose() {
-  mkdir -p /etc/share/vhosts/node
+  mkdir -p "$VHOST_NODE_DIR"
 
-  local token domain_token svc cname profile node_key
+  local domain_token token svc cname profile node_key
   domain_token="$(slugify "$DOMAIN_NAME")"
   token="${NODE_DIR_TOKEN:-$domain_token}"
 
@@ -505,12 +314,9 @@ create_node_compose() {
 
   node_key="$(to_env_key "$NODE_VERSION")"
 
-  local CONFIG_DOCKER_NODE="/etc/share/vhosts/node/${token}.yaml"
-  rm -f "$CONFIG_DOCKER_NODE"
+  local out="${VHOST_NODE_DIR}/${token}.yaml"
+  local tmp; tmp="$(mktemp)"
 
-  # Always emit NODE_CMD line, but keep YAML valid when empty.
-  # If user set NODE_CMD in UI -> bake it into default.
-  # Else -> default to empty string.
   local node_cmd_line esc
   if [[ -n "${NODE_CMD:-}" ]]; then
     esc="${NODE_CMD//$'\r'/}"
@@ -522,8 +328,8 @@ create_node_compose() {
     node_cmd_line='- NODE_CMD=${NODE_CMD:-}'
   fi
 
-  cat >"$CONFIG_DOCKER_NODE" <<YAML
-name: LocalDevStack
+  cat >"$tmp" <<YAML
+name: ${COMPOSE_PROJECT_NAME}
 
 services:
   ${svc}:
@@ -543,7 +349,7 @@ services:
         NODE_GLOBAL_VERSIONED: \${NODE_GLOBAL_${node_key}:-}
     environment:
       - TZ=\${TZ:-}
-      - PORT=3000
+      - PORT=${NODE_PORT}
       - HOST=0.0.0.0
       ${node_cmd_line}
       - NPM_AUDIT=\${NPM_AUDIT:-0}
@@ -562,30 +368,30 @@ services:
     depends_on:
       - server-tools
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"const net=require('net');const h=process.env.HOST||'127.0.0.1';const p=+process.env.PORT||3000;const s=net.connect(p,h);s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));\""]
+      test: ["CMD-SHELL", "node -e \"const net=require('net');const h=process.env.HOST||'127.0.0.1';const p=+process.env.PORT||${NODE_PORT};const s=net.connect(p,h);s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));\""]
       interval: 30s
       timeout: 5s
       retries: 5
     profiles: ["node","${profile}"]
 YAML
 
-  chmod 644 "$CONFIG_DOCKER_NODE"
-  update_env "ACTIVE_NODE_PROFILE" "$profile"
+  install -m 0644 "$tmp" "$out"
+  rm -f "$tmp"
 
-  echo -e "${GREEN}Node compose generated:${NC} ${token}"
-  echo -e "${GREEN}Node service:${NC} $svc  ${GREEN}profile:${NC} $profile  ${GREEN}port:${NC} 3000"
-  [[ -n "${NODE_CMD:-}" ]] && echo -e "${YELLOW}Node override command baked into compose:${NC} ${NODE_CMD}"
+  env_set "ACTIVE_NODE_PROFILE" "$profile"
+  ok "Node compose generated: ${token}"
+  ok "Node service: ${svc}  profile: ${profile}  port: ${NODE_PORT}"
+  [[ -n "${NODE_CMD:-}" ]] && warn "Node override baked into compose: ${NODE_CMD}"
 }
 
 ###############################################################################
-# Create configs
+# 10) Config generation
 ###############################################################################
 create_configuration() {
-  local CONFIG_NGINX="/etc/share/vhosts/nginx/${DOMAIN_NAME}.conf"
-  local CONFIG_APACHE="/etc/share/vhosts/apache/${DOMAIN_NAME}.conf"
-  local base_template_path="/etc/http-templates"
+  mkdir -p "$VHOST_NGINX_DIR" "$VHOST_APACHE_DIR"
 
-  rm -f "$CONFIG_NGINX" "$CONFIG_APACHE"
+  local nginx_conf="${VHOST_NGINX_DIR}/${DOMAIN_NAME}.conf"
+  local apache_conf="${VHOST_APACHE_DIR}/${DOMAIN_NAME}.conf"
 
   ENABLE_CLIENT_VERIFICATION="${ENABLE_CLIENT_VERIFICATION:-ssl_verify_client off;}"
 
@@ -595,110 +401,376 @@ create_configuration() {
 
   if [[ "$SERVER_TYPE" == "Nginx" ]]; then
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then
-      generate_conf_from_template "$base_template_path/redirect.nginx.conf" "$CONFIG_NGINX"
+      render_template "${TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
     elif [[ "$KEEP_HTTP" == "y" || "$ENABLE_HTTPS" == "n" ]]; then
       if [[ "$APP_TYPE" == "node" ]]; then
-        generate_conf_from_template "$base_template_path/http.node.nginx.conf" "$CONFIG_NGINX"
+        render_template "${TEMPLATE_DIR}/http.node.nginx.conf" "$nginx_conf"
       else
-        generate_conf_from_template "$base_template_path/http.nginx.conf" "$CONFIG_NGINX"
+        render_template "${TEMPLATE_DIR}/http.nginx.conf" "$nginx_conf"
       fi
+    else
+      : >"$nginx_conf"
+      chmod 0644 "$nginx_conf"
     fi
 
     if [[ "$ENABLE_HTTPS" == "y" ]]; then
-      if [[ "$APP_TYPE" == "node" ]]; then
-        generate_conf_from_template "$base_template_path/https.node.nginx.conf" "$CONFIG_NGINX"
-      else
-        generate_conf_from_template "$base_template_path/https.nginx.conf" "$CONFIG_NGINX"
-      fi
-      certify
-    fi
+      local tmp; tmp="$(mktemp)"
+      cat "$nginx_conf" >"$tmp" 2>/dev/null || true
 
-    chmod 644 "$CONFIG_NGINX"
+      if [[ "$APP_TYPE" == "node" ]]; then
+        render_template "${TEMPLATE_DIR}/https.node.nginx.conf" "$nginx_conf"
+      else
+        render_template "${TEMPLATE_DIR}/https.nginx.conf" "$nginx_conf"
+      fi
+
+      if [[ -s "$tmp" ]]; then
+        cat "$tmp" >"${nginx_conf}.tmpmerge"
+        cat "$nginx_conf" >>"${nginx_conf}.tmpmerge"
+        install -m 0644 "${nginx_conf}.tmpmerge" "$nginx_conf"
+        rm -f "${nginx_conf}.tmpmerge"
+      fi
+      rm -f "$tmp"
+
+      command -v certify >/dev/null 2>&1 && certify
+    fi
 
   elif [[ "$SERVER_TYPE" == "Apache" ]]; then
-    update_env "APACHE_ACTIVE" "apache"
-
-    local CONFIG_FILE="$CONFIG_APACHE"
+    env_set "APACHE_ACTIVE" "apache"
 
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then
-      generate_conf_from_template "$base_template_path/redirect.nginx.conf" "$CONFIG_NGINX"
+      render_template "${TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
+      : >"$apache_conf"
+      chmod 0644 "$apache_conf"
     elif [[ "$KEEP_HTTP" == "y" || "$ENABLE_HTTPS" == "n" ]]; then
-      generate_conf_from_template "$base_template_path/proxy-http.nginx.conf" "$CONFIG_NGINX"
-      generate_conf_from_template "$base_template_path/http.apache.conf" "$CONFIG_FILE"
+      render_template "${TEMPLATE_DIR}/proxy-http.nginx.conf" "$nginx_conf"
+      render_template "${TEMPLATE_DIR}/http.apache.conf" "$apache_conf"
+    else
+      : >"$nginx_conf"
+      : >"$apache_conf"
+      chmod 0644 "$nginx_conf" "$apache_conf"
     fi
 
     if [[ "$ENABLE_HTTPS" == "y" ]]; then
-      generate_conf_from_template "$base_template_path/proxy-https.nginx.conf" "$CONFIG_NGINX"
-      generate_conf_from_template "$base_template_path/https.apache.conf" "$CONFIG_FILE"
-      certify
-    fi
+      local tmpn tmpa
+      tmpn="$(mktemp)"; tmpa="$(mktemp)"
+      cat "$nginx_conf"  >"$tmpn" 2>/dev/null || true
+      cat "$apache_conf" >"$tmpa" 2>/dev/null || true
 
-    chmod 644 "$CONFIG_NGINX" "$CONFIG_FILE"
+      render_template "${TEMPLATE_DIR}/proxy-https.nginx.conf" "$nginx_conf"
+      render_template "${TEMPLATE_DIR}/https.apache.conf" "$apache_conf"
+
+      if [[ -s "$tmpn" ]]; then
+        cat "$tmpn" >"${nginx_conf}.tmpmerge"
+        cat "$nginx_conf" >>"${nginx_conf}.tmpmerge"
+        install -m 0644 "${nginx_conf}.tmpmerge" "$nginx_conf"
+        rm -f "${nginx_conf}.tmpmerge"
+      fi
+      if [[ -s "$tmpa" ]]; then
+        cat "$tmpa" >"${apache_conf}.tmpmerge"
+        cat "$apache_conf" >>"${apache_conf}.tmpmerge"
+        install -m 0644 "${apache_conf}.tmpmerge" "$apache_conf"
+        rm -f "${apache_conf}.tmpmerge"
+      fi
+      rm -f "$tmpn" "$tmpa"
+
+      command -v certify >/dev/null 2>&1 && certify
+    fi
   else
-    echo -e "${RED}Invalid server type: $SERVER_TYPE${NC}"
+    err "Invalid server type: ${SERVER_TYPE:-}"
     return 1
   fi
 
   if [[ "$APP_TYPE" == "php" ]]; then
-    update_env "ACTIVE_PHP_PROFILE" "${PHP_CONTAINER_PROFILE}"
-    update_env "ACTIVE_NODE_PROFILE" ""
+    env_set "ACTIVE_PHP_PROFILE" "${PHP_CONTAINER_PROFILE}"
+    env_set "ACTIVE_NODE_PROFILE" ""
   else
-    update_env "ACTIVE_PHP_PROFILE" ""
+    env_set "ACTIVE_PHP_PROFILE" ""
   fi
 
-  echo -e "\n${GREEN}Configuration for ${DOMAIN_NAME} has been saved.${NC}"
+  ok "Saved configuration for: ${DOMAIN_NAME}"
 }
 
 ###############################################################################
-# UI flow
+# 11) Flow
 ###############################################################################
-show_step() {
-  echo -ne "${YELLOW}Step $1 of $2: ${NC}"
+cleanup_vars() {
+  unset -v DOMAIN_NAME APP_TYPE SERVER_TYPE \
+    ENABLE_HTTPS ENABLE_REDIRECTION KEEP_HTTP \
+    DOC_ROOT CLIENT_MAX_BODY_SIZE CLIENT_MAX_BODY_SIZE_APACHE \
+    ENABLE_STREAMING PROXY_STREAMING_INCLUDE FASTCGI_STREAMING_INCLUDE APACHE_STREAMING_INCLUDE \
+    ENABLE_CLIENT_VERIFICATION CLIENT_VERIF \
+    PHP_VERSION PHP_CONTAINER_PROFILE PHP_CONTAINER PHP_APACHE_CONTAINER_PROFILE PHP_APACHE_CONTAINER \
+    NODE_VERSION NODE_CMD NODE_PROFILE NODE_SERVICE NODE_CONTAINER \
+    NODE_DIR_TOKEN || true
+}
+
+choose_app_type_step2() {
+  say "${CYAN}  1) PHP${NC}"
+  say "${CYAN}  2) NodeJs${NC}"
+  local sel
+  pick_index_required 2 9 "App type (choose 1-2)" 2 sel
+  case "$sel" in
+  1) APP_TYPE="php"; ok "Selected: PHP" ;;
+  2) APP_TYPE="node"; ok "Selected: NodeJs" ;;
+  *) err "Invalid selection."; exit 1 ;;
+  esac
+}
+
+choose_server_type_step4() {
+  say "${CYAN}  1) Nginx${NC}"
+  say "${CYAN}  2) Apache${NC}"
+  local sel
+  pick_index_required 4 9 "Server type (choose 1-2)" 2 sel
+  case "$sel" in
+  1) SERVER_TYPE="Nginx"; ok "Selected: Nginx" ;;
+  2) SERVER_TYPE="Apache"; ok "Selected: Apache" ;;
+  *) err "Invalid selection."; exit 1 ;;
+  esac
+}
+
+choose_protocol_step5() {
+  say "${CYAN}  1) HTTP only${NC}"
+  say "${CYAN}  2) HTTPS only${NC}"
+  say "${CYAN}  3) Both HTTP and HTTPS${NC}"
+  local sel
+  pick_index_default_value 5 9 "HTTP/HTTPS mode (choose 1-3)" 3 3 "Both" sel
+  case "$sel" in
+  1) ENABLE_HTTPS="n"; ENABLE_REDIRECTION="n"; KEEP_HTTP="y" ;;
+  2) ENABLE_HTTPS="y"; ENABLE_REDIRECTION="n"; KEEP_HTTP="n" ;;
+  3)
+    ENABLE_HTTPS="y"
+    # FIX #1: redirection default is y and explicit (Y/n) shown
+    step_yn_default 5 9 "HTTP → HTTPS redirection" ENABLE_REDIRECTION "y"
+    if [[ "$ENABLE_REDIRECTION" == "y" ]]; then KEEP_HTTP="n"; else KEEP_HTTP="y"; fi
+    ;;
+  *) err "Invalid selection."; exit 1 ;;
+  esac
+}
+
+prompt_php_runtime_step3() {
+  require_versions_db
+  say "${CYAN}PHP versions:${NC}"
+
+  mapfile -t active_rows < <(jq -r '.php.active[]? | "\(.version)|\(.debut)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
+  mapfile -t dep_rows    < <(jq -r '.php.deprecated[]? | "\(.version)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
+
+  local idx_map_type=() idx_map_value=()
+  local n=0
+
+  printf "  %2d) %-7s %s\n" 0 "Custom" "Version"
+  idx_map_type[0]="custom"; idx_map_value[0]=""
+
+  say "${CYAN}Active (supported):${NC}"
+  for r in "${active_rows[@]}"; do
+    [[ "$n" -ge "$MAX_VERSIONS" ]] && break
+    n=$((n+1))
+    IFS='|' read -r v debut eol <<<"$r"
+    printf "  %2d) %-7s %s\n" "$n" "$v" "$(fmt_range "$debut" "$eol")"
+    idx_map_type[$n]="php"; idx_map_value[$n]="$v"
+  done
+
+  say "${CYAN}Deprecated (EOL):${NC}"
+  for r in "${dep_rows[@]}"; do
+    [[ "$n" -ge "$MAX_VERSIONS" ]] && break
+    n=$((n+1))
+    IFS='|' read -r v eol <<<"$r"
+    printf "  %2d) %-7s %s\n" "$n" "$v" "$(fmt_eol_tilde "$eol")"
+    idx_map_type[$n]="php"; idx_map_value[$n]="$v"
+  done
+
+  local printed_max="$n"
+  local sel def_idx=1 def_disp="${idx_map_value[1]:-1}"
+  pick_index_default_value 3 9 "Runtime (select 0-${printed_max})" "$printed_max" "$def_idx" "$def_disp" sel
+
+  if [[ "${idx_map_type[$sel]}" == "custom" ]]; then
+    local custom=""
+    while true; do
+      step_ask_text_required 3 9 "PHP version (Major.Minor)" custom "e.g., 8.4"
+      if php_is_valid_custom "$custom"; then
+        PHP_VERSION="$custom"; break
+      fi
+      err "Invalid / unknown PHP version."
+    done
+  else
+    PHP_VERSION="${idx_map_value[$sel]:-}"
+    [[ -n "$PHP_VERSION" ]] || { err "Invalid selection."; exit 1; }
+  fi
+
+  PHP_CONTAINER_PROFILE="php${PHP_VERSION//./}"
+  PHP_APACHE_CONTAINER_PROFILE="php${PHP_VERSION//./}apache"
+  PHP_CONTAINER="PHP_${PHP_VERSION}"
+  PHP_APACHE_CONTAINER="PHP_${PHP_VERSION}_APACHE"
+  ok "Selected PHP version: $PHP_VERSION"
+}
+
+prompt_node_runtime_step3() {
+  require_versions_db
+
+  local current_major lts_major
+  current_major="$(jq -r '.node.tags.current // ""' "$RUNTIME_VERSIONS_DB")"
+  lts_major="$(jq -r '.node.tags.lts // ""' "$RUNTIME_VERSIONS_DB")"
+
+  say "${CYAN}Node versions:${NC}"
+
+  mapfile -t active_rows < <(jq -r '.node.active[]? | "\(.version)|\(.debut)|\(.eol)|\(.lts)"' "$RUNTIME_VERSIONS_DB")
+  mapfile -t dep_rows    < <(jq -r '.node.deprecated[]? | "\(.version)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
+
+  local idx_map_type=() idx_map_value=()
+  local n=0
+
+  printf "  %2d) %-7s %s\n" 0 "Custom" "Version"
+  idx_map_type[0]="custom"; idx_map_value[0]=""
+
+  n=1; printf "  %2d) %-7s %s\n" "$n" "CURRENT" "(v${current_major})"
+  idx_map_type[$n]="tag"; idx_map_value[$n]="current"
+
+  n=2; printf "  %2d) %-7s %s\n" "$n" "LTS" "(v${lts_major})"
+  idx_map_type[$n]="tag"; idx_map_value[$n]="lts"
+
+  local slots_left=$((MAX_VERSIONS - 3))
+
+  say "${CYAN}Active (supported):${NC}"
+  for r in "${active_rows[@]}"; do
+    [[ "$slots_left" -le 0 ]] && break
+    n=$((n+1)); slots_left=$((slots_left-1))
+    IFS='|' read -r v debut eol lts <<<"$r"
+    if [[ "$lts" == "true" ]]; then
+      printf "  %2d) %-7s %s LTS\n" "$n" "v${v}" "$(fmt_range "$debut" "$eol")"
+    else
+      printf "  %2d) %-7s %s\n" "$n" "v${v}" "$(fmt_range "$debut" "$eol")"
+    fi
+    idx_map_type[$n]="node"; idx_map_value[$n]="$v"
+  done
+
+  say "${CYAN}Deprecated (EOL):${NC}"
+  for r in "${dep_rows[@]}"; do
+    [[ "$slots_left" -le 0 ]] && break
+    n=$((n+1)); slots_left=$((slots_left-1))
+    IFS='|' read -r v eol <<<"$r"
+    printf "  %2d) %-7s %s\n" "$n" "v${v}" "$(fmt_eol_tilde "$eol")"
+    idx_map_type[$n]="node"; idx_map_value[$n]="$v"
+  done
+
+  local printed_max="$n"
+  local sel def_idx=2 def_disp="LTS"
+  pick_index_default_value 3 9 "Runtime (select 0-${printed_max})" "$printed_max" "$def_idx" "$def_disp" sel
+
+  case "${idx_map_type[$sel]:-}" in
+  node) NODE_VERSION="${idx_map_value[$sel]}" ;;
+  tag)  NODE_VERSION="${idx_map_value[$sel]}" ;;
+  custom)
+    local custom=""
+    while true; do
+      step_ask_text_required 3 9 "Node major" custom "e.g., 24"
+      if node_is_valid_custom "$custom"; then
+        NODE_VERSION="$custom"; break
+      fi
+      err "Invalid / unknown Node major."
+    done
+    ;;
+  *) err "Invalid selection."; exit 1 ;;
+  esac
+
+  ok "Selected Node version: $NODE_VERSION"
+}
+
+choose_doc_root_step6() {
+  local opts=()
+  opts+=("Custom…")
+
+  while IFS= read -r -d '' v; do opts+=("$v"); done < <(collect_docroot_options || true)
+
+  say "${CYAN}Doc root suggestions from ${APP_SCAN_DIR}:${NC}"
+  print_two_column_menu opts 0
+
+  local max=$(( ${#opts[@]} - 1 ))
+  local sel
+  pick_index_required 6 9 "Doc root (choose 0-${max})" "$max" sel
+
+  if [[ "$sel" == "0" ]]; then
+    step_ask_text_required 6 9 "Doc root" DOC_ROOT "e.g., /site/public"
+    DOC_ROOT="$(normalize_rel_path "$DOC_ROOT")"
+  else
+    DOC_ROOT="$(normalize_rel_path "${opts[$sel]}")"
+    ok "Selected Doc root: $DOC_ROOT"
+  fi
 }
 
 configure_server() {
   require_versions_db
 
-  show_step 1 9
-  prompt_for_domain
+  # 1) Domain (required, one-line)
+  while true; do
+    step_ask_text_required 1 9 "Domain" DOMAIN_NAME "e.g., app.localhost / example.com"
+    validate_domain "$DOMAIN_NAME" && break
+    warn "Invalid domain name. Try again."
+  done
 
-  show_step 2 9
-  choose_app_type
+  # 2) App type (NO default)
+  choose_app_type_step2
 
-  show_step 3 9
+  # 3) Runtime versions (default index shown as VALUE)
   if [[ "$APP_TYPE" == "php" ]]; then
-    prompt_for_php_version
+    prompt_php_runtime_step3
   else
-    prompt_for_node_version
+    prompt_node_runtime_step3
   fi
 
-  # Step 4: server type decision (php asks, node is forced)
-  show_step 4 9
+  # 4) Server type (NO default; PHP only)
   if [[ "$APP_TYPE" == "php" ]]; then
-    choose_server_type
+    choose_server_type_step4
   else
     SERVER_TYPE="Nginx"
-    prompt_for_node_command_optional
+    step_yn_default 4 9 "Custom Node start command" _NODE_CMD_YN "n"
+    if [[ "$_NODE_CMD_YN" == "y" ]]; then
+      step_ask_text_required 4 9 "Node command" NODE_CMD "npm run dev / npm start / node server.js"
+      NODE_CMD="$(trim "$NODE_CMD")"
+    else
+      NODE_CMD=""
+    fi
+    unset -v _NODE_CMD_YN || true
   fi
 
-  show_step 5 9
-  prompt_for_http_https
+  # 5) HTTP/HTTPS mode (default 3)
+  choose_protocol_step5
 
-  show_step 6 9
-  prompt_for_doc_root
+  # 6) Doc root (NO default)
+  choose_doc_root_step6
 
-  show_step 7 9
-  prompt_for_client_max_body_size
+  # 7) Client body size (default 10)
+  local _MB=""
+  step_ask_text_default 7 9 "Client body size (MB)" _MB "10"
+  while [[ ! "$_MB" =~ ^[0-9]+$ ]]; do
+    err "Invalid number."
+    step_ask_text_default 7 9 "Client body size (MB)" _MB "10"
+  done
+  CLIENT_MAX_BODY_SIZE_APACHE=$((_MB * 1000000))
+  CLIENT_MAX_BODY_SIZE="${_MB}M"
+  unset -v _MB || true
 
-  show_step 8 9
-  prompt_for_streaming
+  # 8) Streaming/SSE mode (default n) — FIX #2 ensured here
+  PROXY_STREAMING_INCLUDE=""
+  FASTCGI_STREAMING_INCLUDE=""
+  APACHE_STREAMING_INCLUDE=""
+  step_yn_default 8 9 "Streaming/SSE mode" ENABLE_STREAMING "n"
+  if [[ "$ENABLE_STREAMING" == "y" ]]; then
+    PROXY_STREAMING_INCLUDE="include /etc/nginx/proxy_streaming;"
+    FASTCGI_STREAMING_INCLUDE="include /etc/nginx/fastcgi_streaming;"
+    APACHE_STREAMING_INCLUDE=""
+  fi
 
-  show_step 9 9
-  if [[ "$ENABLE_HTTPS" == "y" ]]; then
-    prompt_for_client_verification
-  else
+  # 9) Client verification (default n) — FIX #3 ensured here
+  if [[ "${ENABLE_HTTPS:-n}" != "y" ]]; then
     ENABLE_CLIENT_VERIFICATION="ssl_verify_client off;"
-    echo -e "${GREEN}Client verification not allowed in Non-HTTPS.${NC}"
+    ok "Client verification disabled (HTTPS not enabled)."
+  else
+    step_yn_default 9 9 "Client certificate verification (mTLS)" CLIENT_VERIF "n"
+    if [[ "$CLIENT_VERIF" == "y" ]]; then
+      ENABLE_CLIENT_VERIFICATION="ssl_verify_client on;"
+      warn "Client verification enabled. Ensure client certs are configured."
+    else
+      ENABLE_CLIENT_VERIFICATION="ssl_verify_client off;"
+    fi
   fi
 
   if [[ "$APP_TYPE" == "node" ]]; then
@@ -709,30 +781,20 @@ configure_server() {
 }
 
 ###############################################################################
-# CLI flags
+# 12) CLI flags
 ###############################################################################
-case "$1" in
-"--RESET")
-  update_env "APACHE_ACTIVE" ""
-  update_env "ACTIVE_PHP_PROFILE" ""
-  update_env "ACTIVE_NODE_PROFILE" ""
+case "${1:-}" in
+--RESET)
+  env_set "APACHE_ACTIVE" ""
+  env_set "ACTIVE_PHP_PROFILE" ""
+  env_set "ACTIVE_NODE_PROFILE" ""
+  ok "Reset done."
   ;;
-"--ACTIVE_PHP_PROFILE")
-  get_env "ACTIVE_PHP_PROFILE"
-  ;;
-"--ACTIVE_NODE_PROFILE")
-  get_env "ACTIVE_NODE_PROFILE"
-  ;;
-"--APACHE_ACTIVE")
-  get_env "APACHE_ACTIVE"
-  ;;
+--ACTIVE_PHP_PROFILE)  env_get "ACTIVE_PHP_PROFILE" ;;
+--ACTIVE_NODE_PROFILE) env_get "ACTIVE_NODE_PROFILE" ;;
+--APACHE_ACTIVE)       env_get "APACHE_ACTIVE" ;;
 *)
   configure_server
-  unset "DOMAIN_NAME" "APP_TYPE" "SERVER_TYPE" "ENABLE_HTTPS" "ENABLE_REDIRECTION" \
-    "KEEP_HTTP" "DOC_ROOT" "CLIENT_MAX_BODY_SIZE" "CLIENT_MAX_BODY_SIZE_APACHE" "ENABLE_STREAMING" \
-    "PROXY_STREAMING_INCLUDE" "FASTCGI_STREAMING_INCLUDE" "APACHE_STREAMING_INCLUDE" \
-    "ENABLE_CLIENT_VERIFICATION" "PHP_CONTAINER_PROFILE" "PHP_CONTAINER" \
-    "PHP_APACHE_CONTAINER_PROFILE" "PHP_APACHE_CONTAINER" "APACHE_CONTAINER" \
-    "NODE_VERSION" "NODE_CMD" "NODE_PROFILE" "NODE_SERVICE" "NODE_CONTAINER"
+  cleanup_vars
   ;;
 esac

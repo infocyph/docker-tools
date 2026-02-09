@@ -205,6 +205,23 @@ prompt_for_http_https() {
   done
 }
 
+prompt_for_streaming() {
+  local ans="n"
+
+  PROXY_STREAMING_INCLUDE=""
+  FASTCGI_STREAMING_INCLUDE=""
+  APACHE_STREAMING_INCLUDE=""
+
+  echo -e "${CYAN}Enable streaming/SSE mode? (y/N):${NC}"
+  read -r ans
+
+  if [[ "${ans,,}" == "y" ]]; then
+    PROXY_STREAMING_INCLUDE="include /etc/nginx/proxy_streaming;"
+    FASTCGI_STREAMING_INCLUDE="include /etc/nginx/fastcgi_streaming;"
+    APACHE_STREAMING_INCLUDE=""
+  fi
+}
+
 prompt_for_client_verification() {
   read -e -r -p "$(echo -e "${CYAN}Enable client certificate verification (mutual TLS)? (y/N):${NC} ")" client_verif_choice
   client_verif_choice=${client_verif_choice,,}
@@ -456,6 +473,9 @@ generate_conf_from_template() {
     -e "s|{{DOC_ROOT}}|$DOC_ROOT|g" \
     -e "s|{{CLIENT_MAX_BODY_SIZE}}|$CLIENT_MAX_BODY_SIZE|g" \
     -e "s|{{CLIENT_MAX_BODY_SIZE_APACHE}}|$CLIENT_MAX_BODY_SIZE_APACHE|g" \
+    -e "s|{{PROXY_STREAMING_INCLUDE}}|$PROXY_STREAMING_INCLUDE|g" \
+    -e "s|{{FASTCGI_STREAMING_INCLUDE}}|$FASTCGI_STREAMING_INCLUDE|g" \
+    -e "s|{{APACHE_STREAMING_INCLUDE}}|$APACHE_STREAMING_INCLUDE|g" \
     -e "s|{{PHP_APACHE_CONTAINER}}|$PHP_APACHE_CONTAINER|g" \
     -e "s|{{APACHE_CONTAINER}}|${APACHE_CONTAINER:-APACHE}|g" \
     -e "s|{{PHP_CONTAINER}}|$PHP_CONTAINER|g" \
@@ -639,13 +659,13 @@ show_step() {
 configure_server() {
   require_versions_db
 
-  show_step 1 8
+  show_step 1 9
   prompt_for_domain
 
-  show_step 2 8
+  show_step 2 9
   choose_app_type
 
-  show_step 3 8
+  show_step 3 9
   if [[ "$APP_TYPE" == "php" ]]; then
     prompt_for_php_version
   else
@@ -653,7 +673,7 @@ configure_server() {
   fi
 
   # Step 4: server type decision (php asks, node is forced)
-  show_step 4 8
+  show_step 4 9
   if [[ "$APP_TYPE" == "php" ]]; then
     choose_server_type
   else
@@ -661,16 +681,19 @@ configure_server() {
     prompt_for_node_command_optional
   fi
 
-  show_step 5 8
+  show_step 5 9
   prompt_for_http_https
 
-  show_step 6 8
+  show_step 6 9
   prompt_for_doc_root
 
-  show_step 7 8
+  show_step 7 9
   prompt_for_client_max_body_size
 
-  show_step 8 8
+  show_step 8 9
+  prompt_for_streaming
+
+  show_step 9 9
   if [[ "$ENABLE_HTTPS" == "y" ]]; then
     prompt_for_client_verification
   else
@@ -706,7 +729,8 @@ case "$1" in
 *)
   configure_server
   unset "DOMAIN_NAME" "APP_TYPE" "SERVER_TYPE" "ENABLE_HTTPS" "ENABLE_REDIRECTION" \
-    "KEEP_HTTP" "DOC_ROOT" "CLIENT_MAX_BODY_SIZE" "CLIENT_MAX_BODY_SIZE_APACHE" \
+    "KEEP_HTTP" "DOC_ROOT" "CLIENT_MAX_BODY_SIZE" "CLIENT_MAX_BODY_SIZE_APACHE" "ENABLE_STREAMING" \
+    "PROXY_STREAMING_INCLUDE" "FASTCGI_STREAMING_INCLUDE" "APACHE_STREAMING_INCLUDE" \
     "ENABLE_CLIENT_VERIFICATION" "PHP_CONTAINER_PROFILE" "PHP_CONTAINER" \
     "PHP_APACHE_CONTAINER_PROFILE" "PHP_APACHE_CONTAINER" "APACHE_CONTAINER" \
     "NODE_VERSION" "NODE_CMD" "NODE_PROFILE" "NODE_SERVICE" "NODE_CONTAINER"

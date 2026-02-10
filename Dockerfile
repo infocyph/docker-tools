@@ -164,7 +164,7 @@ COPY --from=fetch /out/runtime-versions.json /etc/share/runtime-versions.json
 
 COPY scripts/certify.sh /usr/local/bin/certify
 COPY scripts/mkhost.sh /usr/local/bin/mkhost
-COPY scripts/delhost.sh /usr/local/bin/delhost
+COPY scripts/rmhost.sh /usr/local/bin/rmhost
 COPY scripts/notifierd.sh /usr/local/bin/notifierd
 COPY scripts/notify.sh /usr/local/bin/notify
 COPY scripts/senv.sh /usr/local/bin/senv
@@ -181,7 +181,7 @@ RUN chmod +x \
       /usr/local/bin/gitx \
       /usr/local/bin/certify \
       /usr/local/bin/mkhost \
-      /usr/local/bin/delhost \
+      /usr/local/bin/rmhost \
       /usr/local/bin/show-banner \
       /usr/local/bin/chromacat \
       /usr/local/bin/sqlitex \
@@ -198,6 +198,9 @@ RUN chmod +x \
   && echo 'ACTIVE_PHP_PROFILE=""' >> /etc/environment \
   && echo 'APACHE_ACTIVE=""' >> /etc/environment \
   && echo 'ACTIVE_NODE_PROFILE=""' >> /etc/environment \
+  && echo 'DELETE_PHP_PROFILE=""' >> /etc/environment \
+  && echo 'APACHE_DELETE=""' >> /etc/environment \
+  && echo 'DELETE_NODE_PROFILE=""' >> /etc/environment \
   && mkdir -p /etc/profile.d \
   && { \
       echo 'set linenumbers'; \

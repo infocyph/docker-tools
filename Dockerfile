@@ -141,7 +141,7 @@ RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
-      bind-tools iproute2 traceroute mtr netcat-openbsd \
+      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep \
   && update-ca-certificates \
   && mkdir -p \
       /etc/mkcert \

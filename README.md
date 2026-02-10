@@ -10,7 +10,7 @@ A lightweight, multi-tool Docker image for:
 
 - ✅ SSL automation (`mkcert` + `certify`)
 - ✅ Interactive vhost generation (`mkhost`) + templates
-- ✅ Cleanup vhosts (`delhost`)
+- ✅ Cleanup vhosts (`rmhost`)
 - ✅ SOPS/Age encrypted env workflow (`senv`)
 - ✅ Host notifications pipeline (`notifierd` + `notify` + host `docknotify`)
 - ✅ Docker ops + TUI (`docker-cli` + compose + `lazydocker`)
@@ -91,7 +91,7 @@ A lightweight, multi-tool Docker image for:
 | `mkcert` | Local CA + trusted TLS certificates |
 | `certify` | Scan vhosts and generate server/client certs |
 | `mkhost` | Generate vhost configs (Nginx/Apache) + optional Node compose |
-| `delhost` | Remove vhost configs for a domain (Nginx/Apache/Node yaml) |
+| `rmhost` | Remove vhost configs for domain(s) (Nginx/Apache/Node yaml) |
 | `senv` | SOPS/Age workflow for `.env` + `.env.enc` |
 | `lazydocker` | Docker TUI (requires docker socket) |
 | `notify` | Send notification to `notifierd` |
@@ -294,9 +294,9 @@ mkhost --APACHE_ACTIVE
 
 ---
 
-## 🧹 delhost (remove vhost configs)
+## 🧹 rmhost (remove vhost configs)
 
-`delhost` deletes the generated files for a domain:
+`rmhost` deletes the generated files for a domain:
 
 * `/etc/share/vhosts/nginx/<domain>.conf`
 * `/etc/share/vhosts/apache/<domain>.conf`
@@ -305,20 +305,26 @@ mkhost --APACHE_ACTIVE
 Run it:
 
 ```bash
-docker exec -it docker-tools delhost example.com
+docker exec -it docker-tools rmhost example.com
+```
+
+Multiple domains (batch plan + single confirmation):
+
+```bash
+docker exec -it docker-tools rmhost a.localhost b.localhost api.example.com
 ```
 
 Interactive mode (no args):
 
 ```bash
-docker exec -it docker-tools delhost
+docker exec -it docker-tools rmhost
 ```
 
 Behavior:
 
 * Validates the domain format before deleting
 * Shows exactly what files it will remove
-* Requires confirmation (`y/N`)
+* Requires confirmation (`y/N`) — in multi-domain mode it asks **once** for the full plan
 * If nothing exists for that domain, it exits with code `2` (useful for scripts)
 
 ---

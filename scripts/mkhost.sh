@@ -756,7 +756,7 @@ configure_server() {
   if [[ "$ENABLE_STREAMING" == "y" ]]; then
     PROXY_STREAMING_INCLUDE="include /etc/nginx/proxy_streaming;"
     FASTCGI_STREAMING_INCLUDE="include /etc/nginx/fastcgi_streaming;"
-    APACHE_STREAMING_INCLUDE=""
+    APACHE_STREAMING_INCLUDE=$'  # Streaming/SSE tuning\n  ProxyTimeout 3600\n  Timeout 3600\n  Header set Cache-Control "no-cache"\n  Header set X-Accel-Buffering "no"\n'
   fi
 
   # 9) Client verification (default n) — FIX #3 ensured here

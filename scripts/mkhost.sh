@@ -45,6 +45,23 @@ require_versions_db() {
   [[ -r "$RUNTIME_VERSIONS_DB" ]] || { err "Error: versions DB not found/readable: $RUNTIME_VERSIONS_DB"; exit 1; }
 }
 
+# Preflight templates
+required_tpls=(
+  redirect.nginx.conf
+  http.nginx.conf https.nginx.conf
+  http.node.nginx.conf https.node.nginx.conf
+  proxy-http.nginx.conf proxy-https.nginx.conf
+  http.apache.conf https.apache.conf
+)
+
+for f in "${required_tpls[@]}"; do
+  [[ -r "$TEMPLATE_DIR/$f" ]] || {
+    echo "Error: missing template: $TEMPLATE_DIR/$f" >&2
+    echo "Debug: TEMPLATE_DIR=$TEMPLATE_DIR" >&2
+    ls -la "$TEMPLATE_DIR" >&2 || true
+    exit 1
+  }
+done
 ###############################################################################
 # 3) Generic input helpers (centralized)
 ###############################################################################

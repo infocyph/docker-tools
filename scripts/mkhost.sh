@@ -45,7 +45,7 @@ require_versions_db() {
   [[ -r "$RUNTIME_VERSIONS_DB" ]] || { err "Error: versions DB not found/readable: $RUNTIME_VERSIONS_DB"; exit 1; }
 }
 
-# Preflight templates
+# Preflight templates (fail fast, but do NOT print template directory in normal flow)
 required_tpls=(
   redirect.nginx.conf
   http.nginx.conf https.nginx.conf
@@ -54,21 +54,23 @@ required_tpls=(
   http.apache.conf https.apache.conf
 )
 
-for f in "${required_tpls[@]}"; do
-  [[ -r "$TEMPLATE_DIR/$f" ]] || {
-    echo "Error: missing template: $TEMPLATE_DIR/$f" >&2
-    echo "Debug: TEMPLATE_DIR=$TEMPLATE_DIR" >&2
-    ls -la "$TEMPLATE_DIR" >&2 || true
-    exit 1
-  }
-done
+preflight_templates() {
+  local f
+  for f in "${required_tpls[@]}"; do
+    [[ -r "$TEMPLATE_DIR/$f" ]] || {
+      err "Error: missing template: $f"
+      exit 1
+    }
+  done
+}
+
 ###############################################################################
-# 3) Generic input helpers (centralized)
+# 3) Generic input helpers (single-line step prompts)
 ###############################################################################
 trim() { echo "${1:-}" | xargs; }
 
-prompt_line() {
-  # prompt_line <stepN> <stepT> <label> <suffix> <default_display?>
+_prompt_line() {
+  # _prompt_line <n> <t> <label> <suffix> <default_display?>
   local n="$1" t="$2" label="$3" suffix="${4:-}" defdisp="${5:-}"
   if [[ -n "$defdisp" ]]; then
     echo -e "${YELLOW}Step ${n} of ${t}:${NC} ${CYAN}${label}${NC}${suffix} (${YELLOW}${defdisp}${NC}): "
@@ -83,7 +85,7 @@ step_ask_text_required() {
   local ans="" suffix=""
   [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
   while true; do
-    read -e -r -p "$(prompt_line "$n" "$t" "$label" "$suffix")" ans
+    read -e -r -p "$(_prompt_line "$n" "$t" "$label" "$suffix")" ans
     ans="$(trim "$ans")"
     [[ -n "$ans" ]] || { err "Input cannot be empty."; continue; }
     printf -v "$__var" '%s' "$ans"
@@ -96,7 +98,7 @@ step_ask_text_default() {
   local n="$1" t="$2" label="$3" __var="$4" def="$5" hint="${6:-}"
   local ans="" suffix=""
   [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
-  read -e -r -p "$(prompt_line "$n" "$t" "$label" "$suffix" "$def")" ans
+  read -e -r -p "$(_prompt_line "$n" "$t" "$label" "$suffix" "$def")" ans
   ans="$(trim "${ans:-$def}")"
   [[ -n "$ans" ]] || ans="$def"
   printf -v "$__var" '%s' "$ans"
@@ -104,7 +106,6 @@ step_ask_text_default() {
 
 step_yn_default() {
   # step_yn_default <n> <t> <label> <var> <default_y_or_n> [hint]
-  # Shows explicit answer option: (y/N) or (Y/n)
   local n="$1" t="$2" label="$3" __var="$4" def="${5:-n}" hint="${6:-}"
   local ans="" suffix="" opt=""
   [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
@@ -129,7 +130,7 @@ pick_index_required() {
   local ans="" suffix=""
   [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
   while true; do
-    read -e -r -p "$(prompt_line "$n" "$t" "$label" "$suffix")" ans
+    read -e -r -p "$(_prompt_line "$n" "$t" "$label" "$suffix")" ans
     ans="$(trim "$ans")"
     [[ "$ans" =~ ^[0-9]+$ ]] || { err "Enter a number."; continue; }
     (( ans >= 0 && ans <= max )) || { err "Out of range (0-${max})."; continue; }
@@ -144,7 +145,7 @@ pick_index_default_value() {
   local ans="" suffix=""
   [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
   while true; do
-    read -e -r -p "$(prompt_line "$n" "$t" "$label" "$suffix" "$def_disp")" ans
+    read -e -r -p "$(_prompt_line "$n" "$t" "$label" "$suffix" "$def_disp")" ans
     ans="$(trim "$ans")"
     [[ -z "$ans" ]] && ans="$def_i"
     [[ "$ans" =~ ^[0-9]+$ ]] || { err "Enter a number."; continue; }
@@ -234,9 +235,7 @@ collect_docroot_options() {
   local base="$APP_SCAN_DIR"
   local out=()
 
-  if [[ -d "$base/public" ]]; then
-    out+=("/public")
-  fi
+  [[ -d "$base/public" ]] && out+=("/public")
 
   if [[ -d "$base" ]]; then
     while IFS= read -r -d '' d; do
@@ -288,7 +287,7 @@ sed_escape_repl() { echo "${1:-}" | sed -e 's/[\/&|\\]/\\&/g'; }
 
 render_template() {
   local tpl="$1" out="$2"
-  [[ -r "$tpl" ]] || { err "Template not readable: $tpl"; exit 1; }
+  [[ -r "$tpl" ]] || { err "Template not readable: $(basename "$tpl")"; exit 1; }
 
   local tmp; tmp="$(mktemp)"
   sed \
@@ -396,9 +395,7 @@ YAML
   rm -f "$tmp"
 
   env_set "ACTIVE_NODE_PROFILE" "$profile"
-  ok "Node compose generated: ${token}"
-  ok "Node service: ${svc}  profile: ${profile}  port: ${NODE_PORT}"
-  [[ -n "${NODE_CMD:-}" ]] && warn "Node override baked into compose: ${NODE_CMD}"
+  NODE_COMPOSE_FILE_BASENAME="$(basename "$out")"
 }
 
 ###############################################################################
@@ -412,6 +409,7 @@ create_configuration() {
 
   ENABLE_CLIENT_VERIFICATION="${ENABLE_CLIENT_VERIFICATION:-ssl_verify_client off;}"
 
+  # Node is always proxied by Nginx
   if [[ "$APP_TYPE" == "node" ]]; then
     SERVER_TYPE="Nginx"
   fi
@@ -426,8 +424,7 @@ create_configuration() {
         render_template "${TEMPLATE_DIR}/http.nginx.conf" "$nginx_conf"
       fi
     else
-      : >"$nginx_conf"
-      chmod 0644 "$nginx_conf"
+      : >"$nginx_conf"; chmod 0644 "$nginx_conf"
     fi
 
     if [[ "$ENABLE_HTTPS" == "y" ]]; then
@@ -447,8 +444,6 @@ create_configuration() {
         rm -f "${nginx_conf}.tmpmerge"
       fi
       rm -f "$tmp"
-
-      command -v certify >/dev/null 2>&1 && certify
     fi
 
   elif [[ "$SERVER_TYPE" == "Apache" ]]; then
@@ -456,14 +451,12 @@ create_configuration() {
 
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then
       render_template "${TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
-      : >"$apache_conf"
-      chmod 0644 "$apache_conf"
+      : >"$apache_conf"; chmod 0644 "$apache_conf"
     elif [[ "$KEEP_HTTP" == "y" || "$ENABLE_HTTPS" == "n" ]]; then
       render_template "${TEMPLATE_DIR}/proxy-http.nginx.conf" "$nginx_conf"
       render_template "${TEMPLATE_DIR}/http.apache.conf" "$apache_conf"
     else
-      : >"$nginx_conf"
-      : >"$apache_conf"
+      : >"$nginx_conf"; : >"$apache_conf"
       chmod 0644 "$nginx_conf" "$apache_conf"
     fi
 
@@ -489,14 +482,13 @@ create_configuration() {
         rm -f "${apache_conf}.tmpmerge"
       fi
       rm -f "$tmpn" "$tmpa"
-
-      command -v certify >/dev/null 2>&1 && certify
     fi
   else
     err "Invalid server type: ${SERVER_TYPE:-}"
     return 1
   fi
 
+  # Active profiles bookkeeping
   if [[ "$APP_TYPE" == "php" ]]; then
     env_set "ACTIVE_PHP_PROFILE" "${PHP_CONTAINER_PROFILE}"
     env_set "ACTIVE_NODE_PROFILE" ""
@@ -504,21 +496,22 @@ create_configuration() {
     env_set "ACTIVE_PHP_PROFILE" ""
   fi
 
-  ok "Saved configuration for: ${DOMAIN_NAME}"
+  GENERATED_NGINX_CONF_BASENAME="$(basename "$nginx_conf")"
+  GENERATED_APACHE_CONF_BASENAME="$(basename "$apache_conf")"
 }
 
 ###############################################################################
-# 11) Flow
+# 11) Flow + summary
 ###############################################################################
 cleanup_vars() {
-  unset -v DOMAIN_NAME APP_TYPE SERVER_TYPE \
+  unset -v DOMAINS DOMAIN_NAME APP_TYPE SERVER_TYPE \
     ENABLE_HTTPS ENABLE_REDIRECTION KEEP_HTTP \
     DOC_ROOT CLIENT_MAX_BODY_SIZE CLIENT_MAX_BODY_SIZE_APACHE \
     ENABLE_STREAMING PROXY_STREAMING_INCLUDE FASTCGI_STREAMING_INCLUDE APACHE_STREAMING_INCLUDE \
     ENABLE_CLIENT_VERIFICATION CLIENT_VERIF \
     PHP_VERSION PHP_CONTAINER_PROFILE PHP_CONTAINER PHP_APACHE_CONTAINER_PROFILE PHP_APACHE_CONTAINER \
-    NODE_VERSION NODE_CMD NODE_PROFILE NODE_SERVICE NODE_CONTAINER \
-    NODE_DIR_TOKEN || true
+    NODE_VERSION NODE_CMD NODE_PROFILE NODE_SERVICE NODE_CONTAINER NODE_COMPOSE_FILE_BASENAME \
+    NODE_DIR_TOKEN GENERATED_NGINX_CONF_BASENAME GENERATED_APACHE_CONF_BASENAME || true
 }
 
 choose_app_type_step2() {
@@ -556,7 +549,6 @@ choose_protocol_step5() {
   2) ENABLE_HTTPS="y"; ENABLE_REDIRECTION="n"; KEEP_HTTP="n" ;;
   3)
     ENABLE_HTTPS="y"
-    # FIX #1: redirection default is y and explicit (Y/n) shown
     step_yn_default 5 9 "HTTP → HTTPS redirection" ENABLE_REDIRECTION "y"
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then KEEP_HTTP="n"; else KEEP_HTTP="y"; fi
     ;;
@@ -602,7 +594,7 @@ prompt_php_runtime_step3() {
   if [[ "${idx_map_type[$sel]}" == "custom" ]]; then
     local custom=""
     while true; do
-      step_ask_text_required 3 9 "PHP version (Major.Minor)" custom "e.g., 8.4"
+      step_ask_text_required 3 9 "PHP version" custom "Major.Minor (e.g., 8.4)"
       if php_is_valid_custom "$custom"; then
         PHP_VERSION="$custom"; break
       fi
@@ -614,7 +606,6 @@ prompt_php_runtime_step3() {
   fi
 
   PHP_CONTAINER_PROFILE="php${PHP_VERSION//./}"
-  PHP_APACHE_CONTAINER_PROFILE="php${PHP_VERSION//./}apache"
   PHP_CONTAINER="PHP_${PHP_VERSION}"
   PHP_APACHE_CONTAINER="PHP_${PHP_VERSION}_APACHE"
   ok "Selected PHP version: $PHP_VERSION"
@@ -713,27 +704,96 @@ choose_doc_root_step6() {
   fi
 }
 
+parse_domains_step1() {
+  local raw="$1"
+  raw="${raw//,/ }"
+  raw="$(trim "$raw")"
+  [[ -n "$raw" ]] || return 1
+
+  local -a tmp=()
+  local d
+  for d in $raw; do
+    d="$(trim "$d")"
+    [[ -n "$d" ]] || continue
+    validate_domain "$d" || return 1
+    tmp+=("$d")
+  done
+  ((${#tmp[@]} > 0)) || return 1
+
+  # dedupe
+  local seen="|"
+  local -a out=()
+  for d in "${tmp[@]}"; do
+    if [[ "$seen" != *"|$d|"* ]]; then
+      seen="${seen}${d}|"
+      out+=("$d")
+    fi
+  done
+
+  DOMAINS=("${out[@]}")
+  return 0
+}
+
+print_summary() {
+  echo
+  say "${CYAN}Summary:${NC}"
+  say "Domains:               ${DOMAINS[*]}"
+  say "App type:              ${APP_TYPE^^}"
+  [[ "$APP_TYPE" == "php"  ]] && say "PHP version:           ${PHP_VERSION}  (profile: ${PHP_CONTAINER_PROFILE})"
+  [[ "$APP_TYPE" == "node" ]] && say "Node version:          ${NODE_VERSION}"
+
+  say "Server type:           ${SERVER_TYPE}"
+  if [[ "$ENABLE_HTTPS" == "y" && "$KEEP_HTTP" == "y" ]]; then
+    say "Protocol mode:         Both (HTTP + HTTPS)"
+  elif [[ "$ENABLE_HTTPS" == "y" && "$KEEP_HTTP" == "n" ]]; then
+    if [[ "${ENABLE_REDIRECTION:-n}" == "y" ]]; then
+      say "Protocol mode:         Both (Redirect HTTP → HTTPS)"
+    else
+      say "Protocol mode:         HTTPS only"
+    fi
+  else
+    say "Protocol mode:         HTTP only"
+  fi
+
+  say "Doc root:              ${DOC_ROOT}"
+  say "Client body size:      ${CLIENT_MAX_BODY_SIZE}"
+  say "Streaming/SSE:         $([[ "${ENABLE_STREAMING}" == "y" ]] && echo enabled || echo disabled)"
+  say "mTLS:                  $([[ "${CLIENT_VERIF:-n}" == "y" ]] && echo enabled || echo disabled)"
+  echo
+
+  say "${CYAN}Will generate:${NC}"
+  local d
+  for d in "${DOMAINS[@]}"; do
+    say " - ${d}.conf"
+    [[ "$APP_TYPE" == "php" && "$SERVER_TYPE" == "Apache" ]] && say " - (apache) ${d}.conf"
+    [[ "$APP_TYPE" == "node" ]] && say " - (node) $(slugify "$d").yaml"
+  done
+  echo
+}
+
 configure_server() {
   require_versions_db
+  preflight_templates
 
-  # 1) Domain (required, one-line)
+  # 1) Domain(s) (required; supports multi-domain)
   while true; do
-    step_ask_text_required 1 9 "Domain" DOMAIN_NAME "e.g., app.localhost / example.com"
-    validate_domain "$DOMAIN_NAME" && break
-    warn "Invalid domain name. Try again."
+    local raw=""
+    step_ask_text_required 1 9 "Domain" raw "space/comma separated (e.g., a.localhost, b.localhost)"
+    if parse_domains_step1 "$raw"; then break; fi
+    warn "Invalid domain(s). Try again."
   done
 
   # 2) App type (NO default)
   choose_app_type_step2
 
-  # 3) Runtime versions (default index shown as VALUE)
+  # 3) Runtime versions (default shows VALUE)
   if [[ "$APP_TYPE" == "php" ]]; then
     prompt_php_runtime_step3
   else
     prompt_node_runtime_step3
   fi
 
-  # 4) Server type (NO default; PHP only)
+  # 4) Server type (NO default; PHP only) / Node command prompt
   if [[ "$APP_TYPE" == "php" ]]; then
     choose_server_type_step4
   else
@@ -748,7 +808,7 @@ configure_server() {
     unset -v _NODE_CMD_YN || true
   fi
 
-  # 5) HTTP/HTTPS mode (default 3)
+  # 5) HTTP/HTTPS mode (default Both; redirection default Y)
   choose_protocol_step5
 
   # 6) Doc root (NO default)
@@ -765,10 +825,10 @@ configure_server() {
   CLIENT_MAX_BODY_SIZE="${_MB}M"
   unset -v _MB || true
 
-  # 8) Streaming/SSE mode (default n) — FIX #2 ensured here
+  # 8) Streaming/SSE mode (default n)
   PROXY_STREAMING_INCLUDE=""
   FASTCGI_STREAMING_INCLUDE=""
-  APACHE_STREAMING_INCLUDE=""
+  APACHE_STREAMING_INCLUDE=""  # kept, but populated when enabled
   step_yn_default 8 9 "Streaming/SSE mode" ENABLE_STREAMING "n"
   if [[ "$ENABLE_STREAMING" == "y" ]]; then
     PROXY_STREAMING_INCLUDE="include /etc/nginx/proxy_streaming;"
@@ -776,7 +836,8 @@ configure_server() {
     APACHE_STREAMING_INCLUDE=$'  # Streaming/SSE tuning\n  ProxyTimeout 3600\n  Timeout 3600\n  Header set Cache-Control "no-cache"\n  Header set X-Accel-Buffering "no"\n'
   fi
 
-  # 9) Client verification (default n) — FIX #3 ensured here
+  # 9) Client verification (mTLS) (default n; only allowed if HTTPS)
+  CLIENT_VERIF="n"
   if [[ "${ENABLE_HTTPS:-n}" != "y" ]]; then
     ENABLE_CLIENT_VERIFICATION="ssl_verify_client off;"
     ok "Client verification disabled (HTTPS not enabled)."
@@ -790,11 +851,33 @@ configure_server() {
     fi
   fi
 
-  if [[ "$APP_TYPE" == "node" ]]; then
-    create_node_compose
-  fi
+  # Summary + batch confirm (default Y)
+  print_summary
+  local PROCEED="y"
+  step_yn_default 9 9 "Proceed with generation" PROCEED "y"
+  [[ "$PROCEED" == "y" ]] || { warn "Cancelled."; return 0; }
 
-  create_configuration
+  # Generate per-domain
+  local d
+  for d in "${DOMAINS[@]}"; do
+    DOMAIN_NAME="$d"
+
+    if [[ "$APP_TYPE" == "node" ]]; then
+      create_node_compose
+      ok "Node compose generated: ${NODE_COMPOSE_FILE_BASENAME}"
+      ok "Node service: ${NODE_SERVICE}  profile: ${NODE_PROFILE}  port: ${NODE_PORT}"
+    fi
+
+    create_configuration
+
+    # Clean, high-level output only
+    ok "Saved configuration for: ${DOMAIN_NAME}"
+    ok "${DOMAIN_NAME}.conf"
+    if [[ "$APP_TYPE" == "php" && "$SERVER_TYPE" == "Apache" ]]; then
+      ok "apache: ${DOMAIN_NAME}.conf"
+    fi
+  done
+  command -v certify >/dev/null 2>&1 && certify >/dev/null 2>&1 && ok "Relevant certificates generated/updated!"
 }
 
 ###############################################################################

@@ -22,12 +22,15 @@ readonly COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-LocalDevStack}"
 readonly APP_SCAN_DIR="${APP_SCAN_DIR:-/app}"   # for doc-root suggestions
 
 ###############################################################################
-# 1) Colors + UI
+# 1) Colors + UI (higher contrast)
 ###############################################################################
-RED=$'\033[0;31m'
-GREEN=$'\033[0;32m'
-CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+DIM=$'\033[2m'
+RED=$'\033[1;31m'
+GREEN=$'\033[1;32m'
+CYAN=$'\033[1;36m'
 YELLOW=$'\033[1;33m'
+MAGENTA=$'\033[1;35m'
 NC=$'\033[0m'
 
 say()  { echo -e "$*"; }
@@ -45,7 +48,7 @@ require_versions_db() {
   [[ -r "$RUNTIME_VERSIONS_DB" ]] || { err "Error: versions DB not found/readable: $RUNTIME_VERSIONS_DB"; exit 1; }
 }
 
-# Preflight templates (fail fast, but do NOT print template directory in normal flow)
+# Preflight templates (fail fast; do NOT print template directory)
 required_tpls=(
   redirect.nginx.conf
   http.nginx.conf https.nginx.conf
@@ -57,10 +60,7 @@ required_tpls=(
 preflight_templates() {
   local f
   for f in "${required_tpls[@]}"; do
-    [[ -r "$TEMPLATE_DIR/$f" ]] || {
-      err "Error: missing template: $f"
-      exit 1
-    }
+    [[ -r "$TEMPLATE_DIR/$f" ]] || { err "Error: missing template: $f"; exit 1; }
   done
 }
 
@@ -73,9 +73,9 @@ _prompt_line() {
   # _prompt_line <n> <t> <label> <suffix> <default_display?>
   local n="$1" t="$2" label="$3" suffix="${4:-}" defdisp="${5:-}"
   if [[ -n "$defdisp" ]]; then
-    echo -e "${YELLOW}Step ${n} of ${t}:${NC} ${CYAN}${label}${NC}${suffix} (${YELLOW}${defdisp}${NC}): "
+    echo -e "${YELLOW}${BOLD}Step ${n} of ${t}:${NC} ${CYAN}${BOLD}${label}${NC}${suffix} (${YELLOW}${BOLD}${defdisp}${NC}): "
   else
-    echo -e "${YELLOW}Step ${n} of ${t}:${NC} ${CYAN}${label}${NC}${suffix}: "
+    echo -e "${YELLOW}${BOLD}Step ${n} of ${t}:${NC} ${CYAN}${BOLD}${label}${NC}${suffix}: "
   fi
 }
 
@@ -83,7 +83,7 @@ step_ask_text_required() {
   # step_ask_text_required <n> <t> <label> <var> [hint]
   local n="$1" t="$2" label="$3" __var="$4" hint="${5:-}"
   local ans="" suffix=""
-  [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
+  [[ -n "$hint" ]] && suffix=" ${DIM}(${hint})${NC}"
   while true; do
     read -e -r -p "$(_prompt_line "$n" "$t" "$label" "$suffix")" ans
     ans="$(trim "$ans")"
@@ -97,7 +97,7 @@ step_ask_text_default() {
   # step_ask_text_default <n> <t> <label> <var> <default_value> [hint]
   local n="$1" t="$2" label="$3" __var="$4" def="$5" hint="${6:-}"
   local ans="" suffix=""
-  [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
+  [[ -n "$hint" ]] && suffix=" ${DIM}(${hint})${NC}"
   read -e -r -p "$(_prompt_line "$n" "$t" "$label" "$suffix" "$def")" ans
   ans="$(trim "${ans:-$def}")"
   [[ -n "$ans" ]] || ans="$def"
@@ -108,11 +108,31 @@ step_yn_default() {
   # step_yn_default <n> <t> <label> <var> <default_y_or_n> [hint]
   local n="$1" t="$2" label="$3" __var="$4" def="${5:-n}" hint="${6:-}"
   local ans="" suffix="" opt=""
-  [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
+  [[ -n "$hint" ]] && suffix=" ${DIM}(${hint})${NC}"
   def="${def,,}"
   if [[ "$def" == "y" ]]; then opt=" ${YELLOW}(Y/n)${NC}"; else opt=" ${YELLOW}(y/N)${NC}"; fi
   while true; do
-    read -e -r -p "$(echo -e "${YELLOW}Step ${n} of ${t}:${NC} ${CYAN}${label}${NC}${suffix}${opt}: ")" ans
+    read -e -r -p "$(echo -e "${YELLOW}${BOLD}Step ${n} of ${t}:${NC} ${CYAN}${BOLD}${label}${NC}${suffix}${opt}: ")" ans
+    ans="$(trim "$ans")"
+    ans="${ans,,}"
+    [[ -z "$ans" ]] && ans="$def"
+    case "$ans" in
+    y|yes) printf -v "$__var" '%s' "y"; return 0 ;;
+    n|no)  printf -v "$__var" '%s' "n"; return 0 ;;
+    *) err "Enter y or n." ;;
+    esac
+  done
+}
+
+# Non-step confirmation (used for final proceed; NOT counted as a step)
+ask_yn_default() {
+  # ask_yn_default <label> <var> <default_y_or_n>
+  local label="$1" __var="$2" def="${3:-y}"
+  local ans="" opt=""
+  def="${def,,}"
+  if [[ "$def" == "y" ]]; then opt=" ${YELLOW}(Y/n)${NC}"; else opt=" ${YELLOW}(y/N)${NC}"; fi
+  while true; do
+    read -e -r -p "$(echo -e "${CYAN}${BOLD}${label}${NC}${opt}: ")" ans
     ans="$(trim "$ans")"
     ans="${ans,,}"
     [[ -z "$ans" ]] && ans="$def"
@@ -128,7 +148,7 @@ pick_index_required() {
   # pick_index_required <n> <t> <label> <max> <var> [hint]
   local n="$1" t="$2" label="$3" max="$4" __var="$5" hint="${6:-}"
   local ans="" suffix=""
-  [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
+  [[ -n "$hint" ]] && suffix=" ${DIM}(${hint})${NC}"
   while true; do
     read -e -r -p "$(_prompt_line "$n" "$t" "$label" "$suffix")" ans
     ans="$(trim "$ans")"
@@ -143,7 +163,7 @@ pick_index_default_value() {
   # pick_index_default_value <n> <t> <label> <max> <default_index> <default_display> <var> [hint]
   local n="$1" t="$2" label="$3" max="$4" def_i="$5" def_disp="$6" __var="$7" hint="${8:-}"
   local ans="" suffix=""
-  [[ -n "$hint" ]] && suffix=" ${YELLOW}(${hint})${NC}"
+  [[ -n "$hint" ]] && suffix=" ${DIM}(${hint})${NC}"
   while true; do
     read -e -r -p "$(_prompt_line "$n" "$t" "$label" "$suffix" "$def_disp")" ans
     ans="$(trim "$ans")"
@@ -167,7 +187,6 @@ env_set() {
     echo "${key}=${value}" >>"$ENV_STORE"
   fi
 }
-
 env_get() { grep -E "^$1=" "$ENV_STORE" 2>/dev/null | cut -d'=' -f2- || true; }
 
 ###############################################################################
@@ -595,9 +614,7 @@ prompt_php_runtime_step3() {
     local custom=""
     while true; do
       step_ask_text_required 3 9 "PHP version" custom "Major.Minor (e.g., 8.4)"
-      if php_is_valid_custom "$custom"; then
-        PHP_VERSION="$custom"; break
-      fi
+      if php_is_valid_custom "$custom"; then PHP_VERSION="$custom"; break; fi
       err "Invalid / unknown PHP version."
     done
   else
@@ -670,9 +687,7 @@ prompt_node_runtime_step3() {
     local custom=""
     while true; do
       step_ask_text_required 3 9 "Node major" custom "e.g., 24"
-      if node_is_valid_custom "$custom"; then
-        NODE_VERSION="$custom"; break
-      fi
+      if node_is_valid_custom "$custom"; then NODE_VERSION="$custom"; break; fi
       err "Invalid / unknown Node major."
     done
     ;;
@@ -685,7 +700,6 @@ prompt_node_runtime_step3() {
 choose_doc_root_step6() {
   local opts=()
   opts+=("<Custom Path>")
-
   while IFS= read -r -d '' v; do opts+=("$v"); done < <(collect_docroot_options || true)
 
   say "${CYAN}Doc root suggestions from ${APP_SCAN_DIR}:${NC}"
@@ -720,7 +734,6 @@ parse_domains_step1() {
   done
   ((${#tmp[@]} > 0)) || return 1
 
-  # dedupe
   local seen="|"
   local -a out=()
   for d in "${tmp[@]}"; do
@@ -736,39 +749,64 @@ parse_domains_step1() {
 
 print_summary() {
   echo
-  say "${CYAN}Summary:${NC}"
-  say "Domains:               ${DOMAINS[*]}"
-  say "App type:              ${APP_TYPE^^}"
-  [[ "$APP_TYPE" == "php"  ]] && say "PHP version:           ${PHP_VERSION}  (profile: ${PHP_CONTAINER_PROFILE})"
-  [[ "$APP_TYPE" == "node" ]] && say "Node version:          ${NODE_VERSION}"
 
-  say "Server type:           ${SERVER_TYPE}"
-  if [[ "$ENABLE_HTTPS" == "y" && "$KEEP_HTTP" == "y" ]]; then
-    say "Protocol mode:         Both (HTTP + HTTPS)"
-  elif [[ "$ENABLE_HTTPS" == "y" && "$KEEP_HTTP" == "n" ]]; then
-    if [[ "${ENABLE_REDIRECTION:-n}" == "y" ]]; then
-      say "Protocol mode:         Both (Redirect HTTP → HTTPS)"
+  local label="${DIM}"
+  local key="${DIM}"
+  local val="${BOLD}${NC}"
+  local head="${CYAN}${BOLD}"
+  local line="${DIM}────────────────────────────────────────────────────────${NC}"
+
+  _chip() { # _chip <y|n> <onText> <offText>
+    if [[ "${1:-n}" == "y" ]]; then
+      echo -e "${GREEN}${BOLD}${2:-enabled}${NC}"
     else
-      say "Protocol mode:         HTTPS only"
+      echo -e "${YELLOW}${BOLD}${3:-disabled}${NC}"
     fi
-  else
-    say "Protocol mode:         HTTP only"
+  }
+
+  local proto="HTTP only"
+  if [[ "${ENABLE_HTTPS:-n}" == "y" && "${KEEP_HTTP:-n}" == "y" ]]; then
+    proto="Both (HTTP + HTTPS)"
+  elif [[ "${ENABLE_HTTPS:-n}" == "y" && "${KEEP_HTTP:-n}" == "n" ]]; then
+    if [[ "${ENABLE_REDIRECTION:-n}" == "y" ]]; then
+      proto="Both (Redirect HTTP → HTTPS)"
+    else
+      proto="HTTPS only"
+    fi
   fi
 
-  say "Doc root:              ${DOC_ROOT}"
-  say "Client body size:      ${CLIENT_MAX_BODY_SIZE}"
-  say "Streaming/SSE:         $([[ "${ENABLE_STREAMING}" == "y" ]] && echo enabled || echo disabled)"
-  say "mTLS:                  $([[ "${CLIENT_VERIF:-n}" == "y" ]] && echo enabled || echo disabled)"
-  echo
+  say "${head}Summary${NC}"
+  say "${line}"
 
-  say "${CYAN}Will generate:${NC}"
-  local d
-  for d in "${DOMAINS[@]}"; do
-    say " - ${d}.conf"
-    [[ "$APP_TYPE" == "php" && "$SERVER_TYPE" == "Apache" ]] && say " - (apache) ${d}.conf"
-    [[ "$APP_TYPE" == "node" ]] && say " - (node) $(slugify "$d").yaml"
-  done
+  say "${key}Domains:${NC}              ${BOLD}${CYAN}${DOMAINS[*]}${NC}"
+  say "${key}App type:${NC}             ${BOLD}${APP_TYPE^^}${NC}"
+
+  if [[ "$APP_TYPE" == "php" ]]; then
+    say "${key}PHP version:${NC}          ${BOLD}${PHP_VERSION}${NC} ${DIM}(profile: ${PHP_CONTAINER_PROFILE})${NC}"
+  else
+    say "${key}Node version:${NC}         ${BOLD}${NODE_VERSION}${NC}"
+  fi
+
+  say "${key}Server type:${NC}          ${BOLD}${SERVER_TYPE}${NC}"
+  say "${key}Protocol mode:${NC}        ${BOLD}${proto}${NC}"
+  say "${key}Doc root:${NC}             ${BOLD}${DOC_ROOT}${NC}"
+  say "${key}Client body size:${NC}     ${BOLD}${CLIENT_MAX_BODY_SIZE}${NC}"
+
+  say "${key}Streaming/SSE:${NC}        $(_chip "${ENABLE_STREAMING:-n}" "enabled" "disabled")"
+  say "${key}mTLS:${NC}                 $(_chip "${CLIENT_VERIF:-n}" "enabled" "disabled")"
+
   echo
+}
+
+run_certify_if_available() {
+  command -v certify >/dev/null 2>&1 || return 0
+
+  if certify >/dev/null; then
+    say "${MAGENTA}${BOLD}Certificates:${NC} ${BOLD}Generated/Updated${NC}"
+  else
+    warn "! Certificates: Generation failed (showing output):"
+    certify || true
+  fi
 }
 
 configure_server() {
@@ -828,7 +866,7 @@ configure_server() {
   # 8) Streaming/SSE mode (default n)
   PROXY_STREAMING_INCLUDE=""
   FASTCGI_STREAMING_INCLUDE=""
-  APACHE_STREAMING_INCLUDE=""  # kept, but populated when enabled
+  APACHE_STREAMING_INCLUDE=""
   step_yn_default 8 9 "Streaming/SSE mode" ENABLE_STREAMING "n"
   if [[ "$ENABLE_STREAMING" == "y" ]]; then
     PROXY_STREAMING_INCLUDE="include /etc/nginx/proxy_streaming;"
@@ -851,33 +889,33 @@ configure_server() {
     fi
   fi
 
-  # Summary + batch confirm (default Y)
+  # Summary + batch confirm (NOT a step; default Y)
   print_summary
   local PROCEED="y"
-  step_yn_default 9 9 "Proceed with generation" PROCEED "y"
+  ask_yn_default "Proceed with generation" PROCEED "y"
   [[ "$PROCEED" == "y" ]] || { warn "Cancelled."; return 0; }
+  echo
 
   # Generate per-domain
   local d
   for d in "${DOMAINS[@]}"; do
     DOMAIN_NAME="$d"
 
+    say "${MAGENTA}${BOLD}Generating:${NC} ${BOLD}${DOMAIN_NAME}${NC}"
+
     if [[ "$APP_TYPE" == "node" ]]; then
       create_node_compose
-      ok "Node compose generated: ${NODE_COMPOSE_FILE_BASENAME}"
-      ok "Node service: ${NODE_SERVICE}  profile: ${NODE_PROFILE}  port: ${NODE_PORT}"
+      ok "  ✔ Node compose generated"
+      say "    ${DIM}service:${NC} ${BOLD}${NODE_SERVICE}${NC}  ${DIM}profile:${NC} ${BOLD}${NODE_PROFILE}${NC}  ${DIM}port:${NC} ${BOLD}${NODE_PORT}${NC}"
     fi
 
     create_configuration
 
-    # Clean, high-level output only
-    ok "Saved configuration for: ${DOMAIN_NAME}"
-    ok "${DOMAIN_NAME}.conf"
-    if [[ "$APP_TYPE" == "php" && "$SERVER_TYPE" == "Apache" ]]; then
-      ok "apache: ${DOMAIN_NAME}.conf"
-    fi
+    ok "  ✔ Configuration Saved"
+    echo
   done
-  command -v certify >/dev/null 2>&1 && certify >/dev/null 2>&1 && ok "Relevant certificates generated/updated!"
+
+  run_certify_if_available
 }
 
 ###############################################################################

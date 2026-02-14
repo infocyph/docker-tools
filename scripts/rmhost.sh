@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
-# delhost - remove vhost configs for domain(s) (nginx/apache/node) and track delete intents in ENV_STORE
+# rmhost — remove vhost configs for domain(s) (nginx/apache/node) and track delete intents in ENV_STORE
 set -euo pipefail
 
 ###############################################################################
-# UI
+# UI (match mkhost: higher contrast)
 ###############################################################################
-RED=$'\033[0;31m'
-GREEN=$'\033[0;32m'
-CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+DIM=$'\033[2m'
+RED=$'\033[1;31m'
+GREEN=$'\033[1;32m'
+CYAN=$'\033[1;36m'
 YELLOW=$'\033[1;33m'
+MAGENTA=$'\033[1;35m'
 NC=$'\033[0m'
 
 say()  { echo -e "$*"; }
-ok()   { say "${GREEN}$*${NC}"; }
-warn() { say "${YELLOW}$*${NC}"; }
-err()  { say "${RED}$*${NC}"; }
+ok()   { say "${GREEN}${BOLD}$*${NC}"; }
+warn() { say "${YELLOW}${BOLD}$*${NC}"; }
+err()  { say "${RED}${BOLD}$*${NC}"; }
 die()  { err "Error: $*"; exit 1; }
 
 trim() { echo "${1:-}" | xargs; }
@@ -42,8 +45,30 @@ env_set() {
   fi
 }
 
-env_get() {
-  grep -E "^$1=" "$ENV_STORE" 2>/dev/null | cut -d'=' -f2- || true
+env_get() { grep -E "^$1=" "$ENV_STORE" 2>/dev/null | cut -d'=' -f2- || true; }
+
+env_add_csv_unique() {
+  # env_add_csv_unique KEY VALUE  => append VALUE to KEY as comma-list, unique
+  local key="$1" value="$2"
+  value="$(trim "$value")"
+  [[ -n "$value" ]] || return 0
+
+  local cur; cur="$(env_get "$key")"
+  cur="$(trim "$cur")"
+
+  if [[ -z "$cur" ]]; then
+    env_set "$key" "$value"
+    return 0
+  fi
+
+  # already present?
+  local IFS=',' x
+  for x in $cur; do
+    x="$(trim "$x")"
+    [[ "$x" == "$value" ]] && return 0
+  done
+
+  env_set "$key" "${cur},${value}"
 }
 
 ###############################################################################
@@ -61,13 +86,13 @@ slugify() {
 
 confirm_default_n() {
   local prompt="$1" ans=""
-  read -r -p "$(printf "%b%s (y/N): %b" "$YELLOW" "$prompt" "$NC")" ans
+  read -r -p "$(printf "%b%b%s%b (y/N): %b" "$CYAN" "$BOLD" "$prompt" "$NC" "$YELLOW" "$NC")" ans
   ans="$(trim "$ans")"; ans="${ans,,}"
   [[ "$ans" == "y" || "$ans" == "yes" ]]
 }
 
 ###############################################################################
-# Domain selection
+# Domain listing / interactive multi-pick
 ###############################################################################
 list_nginx_domains() {
   [[ -d "$NGINX_DIR" ]] || return 0
@@ -76,41 +101,79 @@ list_nginx_domains() {
     | LC_ALL=C sort -u
 }
 
-pick_domain_interactive() {
-  local domains=() line
+# reads domains into array DOM_LIST
+load_domain_list() {
+  DOM_LIST=()
+  local line
   while IFS= read -r line; do
-    [[ -n "$line" ]] && domains+=("$line")
+    [[ -n "$line" ]] && DOM_LIST+=("$line")
   done < <(list_nginx_domains || true)
+}
 
-  if ((${#domains[@]} == 0)); then
-    local d=""
-    read -r -p "$(printf "%bEnter domain to delete:%b " "$CYAN" "$NC")" d
-    echo "$(trim "$d")"
+# parse user input into array PICKED_DOMAINS
+# input can be: "1 2 5" (indexes), "a.localhost b.localhost", or comma-separated.
+parse_domain_input() {
+  local input="$1"
+  input="${input//,/ }"
+  input="$(trim "$input")"
+  PICKED_DOMAINS=()
+  [[ -n "$input" ]] || return 1
+
+  local tok
+  for tok in $input; do
+    tok="$(trim "$tok")"
+    [[ -n "$tok" ]] || continue
+
+    if [[ "$tok" =~ ^[0-9]+$ ]]; then
+      local idx=$((tok-1))
+      (( idx >= 0 && idx < ${#DOM_LIST[@]} )) || { err "Out of range index: $tok"; return 1; }
+      PICKED_DOMAINS+=("${DOM_LIST[$idx]}")
+    else
+      PICKED_DOMAINS+=("$tok")
+    fi
+  done
+
+  # dedupe
+  local seen="|"
+  local -a out=()
+  for tok in "${PICKED_DOMAINS[@]}"; do
+    if [[ "$seen" != *"|$tok|"* ]]; then
+      seen="${seen}${tok}|"
+      out+=("$tok")
+    fi
+  done
+  PICKED_DOMAINS=("${out[@]}")
+  ((${#PICKED_DOMAINS[@]} > 0))
+}
+
+pick_domains_interactive() {
+  load_domain_list
+
+  if ((${#DOM_LIST[@]} == 0)); then
+    local raw=""
+    read -r -p "$(printf "%bEnter domain(s) to delete (space/comma separated):%b " "$CYAN" "$NC")" raw
+    raw="$(trim "$raw")"
+    [[ -n "$raw" ]] || return 1
+    DOMAINS=()
+    raw="${raw//,/ }"
+    local d
+    for d in $raw; do DOMAINS+=("$(trim "$d")"); done
     return 0
   fi
 
-  say "${CYAN}Available domains (from nginx):${NC}"
+  say "${CYAN}${BOLD}Available domains (from nginx):${NC}"
   local i
-  for ((i=0; i<${#domains[@]}; i++)); do
-    printf "  %2d) %s\n" $((i+1)) "${domains[i]}"
+  for ((i=0; i<${#DOM_LIST[@]}; i++)); do
+    printf "  %2d) %s\n" $((i+1)) "${DOM_LIST[i]}"
   done
 
   local ans=""
-  while true; do
-    read -r -p "$(printf "%bSelect domain (1-%d) or type domain:%b " "$CYAN" "${#domains[@]}" "$NC")" ans
-    ans="$(trim "$ans")"
-    [[ -n "$ans" ]] || { err "Input cannot be empty."; continue; }
+  read -r -p "$(printf "%bSelect domain(s) (e.g. 1 2 5) or type domain list:%b " "$CYAN" "$NC")" ans
+  ans="$(trim "$ans")"
+  [[ -n "$ans" ]] || die "No domain provided."
 
-    if [[ "$ans" =~ ^[0-9]+$ ]]; then
-      local idx=$((ans-1))
-      (( idx >= 0 && idx < ${#domains[@]} )) || { err "Out of range."; continue; }
-      echo "${domains[idx]}"
-      return 0
-    fi
-
-    echo "$ans"
-    return 0
-  done
+  parse_domain_input "$ans" || die "Invalid selection."
+  DOMAINS=("${PICKED_DOMAINS[@]}")
 }
 
 ###############################################################################
@@ -144,9 +207,10 @@ apache_has_any_vhosts() {
 }
 
 ###############################################################################
-# Plan build (batch) and execution
+# Plan build + execution
 ###############################################################################
-# Plan rows: domain<TAB>token<TAB>nginx_conf<TAB>apache_conf<TAB>node_yaml<TAB>php_ver<TAB>del_nginx<TAB>del_apache<TAB>del_node
+# Plan rows:
+# domain<TAB>token<TAB>nginx_conf<TAB>apache_conf<TAB>node_yaml<TAB>php_ver<TAB>del_nginx<TAB>del_apache<TAB>del_node
 build_plan_for_domain() {
   local domain="$1"
   validate_domain "$domain" || { warn "Skipping invalid domain: $domain"; return 3; }
@@ -175,15 +239,15 @@ build_plan_for_domain() {
 }
 
 print_plan() {
-  # input: plan file
   local plan="$1"
-  say "${CYAN}Planned deletions:${NC}"
+  say "${CYAN}${BOLD}Planned deletions:${NC}"
   while IFS=$'\t' read -r domain token nginx_conf apache_conf node_yaml php_ver del_nginx del_apache del_node; do
-    say "${YELLOW}- ${domain}${NC} ${CYAN}(token=${token})${NC}"
-    [[ "$del_nginx"  == "y" ]] && say "   - $nginx_conf"
-    [[ "$del_apache" == "y" ]] && say "   - $apache_conf"
-    [[ "$del_node"   == "y" ]] && say "   - $node_yaml"
+    say "${YELLOW}- ${domain}${NC} ${DIM}(token=${token})${NC}"
+    [[ "$del_nginx"  == "y" ]] && say "   ${DIM}- ${nginx_conf}${NC}"
+    [[ "$del_apache" == "y" ]] && say "   ${DIM}- ${apache_conf}${NC}"
+    [[ "$del_node"   == "y" ]] && say "   ${DIM}- ${node_yaml}${NC}"
   done <"$plan"
+  echo
 }
 
 execute_plan() {
@@ -197,39 +261,48 @@ execute_plan() {
   local any_apache_deleted="n"
 
   while IFS=$'\t' read -r domain token nginx_conf apache_conf node_yaml php_ver del_nginx del_apache del_node; do
-    say "${CYAN}Deleting:${NC} ${domain}"
+    say "${MAGENTA}${BOLD}Deleting:${NC} ${BOLD}${domain}${NC}"
 
     if [[ "$del_nginx" == "y" ]]; then
       rm -f -- "$nginx_conf"
-      ok "Deleted: $nginx_conf"
+      ok "  ✔ ${domain}.conf removed (nginx)"
     fi
 
     if [[ "$del_apache" == "y" ]]; then
       rm -f -- "$apache_conf"
-      ok "Deleted: $apache_conf"
+      ok "  ✔ ${domain}.conf removed (apache)"
       any_apache_deleted="y"
     fi
 
     if [[ "$del_node" == "y" ]]; then
       rm -f -- "$node_yaml"
-      ok "Deleted: $node_yaml"
-      env_set "DELETE_NODE_PROFILE" "node_${token}"
+      ok "  ✔ ${token}.yaml removed (node)"
+      env_add_csv_unique "DELETE_NODE_PROFILE" "node_${token}"
     fi
 
+    # PHP profile cleanup signal:
+    # - infer version from deleted vhost
+    # - only mark for deletion if no other vhost references that PHP_#.# anymore
     if [[ -n "$php_ver" ]]; then
       local php_profile; php_profile="$(php_profile_from_version "$php_ver")"
       if [[ -n "$php_profile" ]] && ! any_vhost_references_php_version "$php_ver"; then
-        env_set "DELETE_PHP_PROFILE" "$php_profile"
+        env_add_csv_unique "DELETE_PHP_PROFILE" "$php_profile"
       fi
     fi
+
+    echo
   done <"$plan"
 
-  # APACHE_DELETE rule (after all deletes)
-  if [[ "$any_apache_deleted" == "y" ]] && apache_has_any_vhosts; then
+  # APACHE_DELETE rule (FIXED):
+  # If apache vhost dir is empty after deletion -> request removing apache profile.
+  if ! apache_has_any_vhosts; then
     env_set "APACHE_DELETE" "apache"
   else
     env_set "APACHE_DELETE" ""
   fi
+
+  # note: any_apache_deleted is kept for future use; not required for the logic now
+  : "${any_apache_deleted:=n}"
 }
 
 ###############################################################################
@@ -246,23 +319,34 @@ case "${1:-}" in
 --DELETE_NODE_PROFILE) env_get "DELETE_NODE_PROFILE" ;;
 --APACHE_DELETE)       env_get "APACHE_DELETE" ;;
 *)
-# MULTI-DOMAIN + BATCH CONFIRM:
-# - If args present: treat each as a domain
-# - If no args: interactive pick one domain
+# Multi-domain:
+# - Args may include comma/space separated domains.
+# - If no args: interactive multi-pick.
   plan="$(mktemp)"
 
+  DOMAINS=()
+
   if (($# == 0)); then
-    d="$(pick_domain_interactive)"
-    d="$(trim "$d")"
-    [[ -n "$d" ]] || die "No domain provided."
-    build_plan_for_domain "$d" >>"$plan" || true
+    pick_domains_interactive
   else
-    for d in "$@"; do
+    # split all args by commas/spaces
+    raw="$*"
+    raw="${raw//,/ }"
+    raw="$(trim "$raw")"
+    for d in $raw; do
       d="$(trim "$d")"
-      [[ -n "$d" ]] || continue
-      build_plan_for_domain "$d" >>"$plan" || true
+      [[ -n "$d" ]] && DOMAINS+=("$d")
     done
   fi
+
+  ((${#DOMAINS[@]} > 0)) || die "No domain provided."
+
+  # Build plan
+  for d in "${DOMAINS[@]}"; do
+    d="$(trim "$d")"
+    [[ -n "$d" ]] || continue
+    build_plan_for_domain "$d" >>"$plan" || true
+  done
 
   if [[ ! -s "$plan" ]]; then
     rm -f "$plan"

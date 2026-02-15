@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# rmhost — remove vhost configs for domain(s) (nginx/apache/node) and track delete intents in ENV_STORE
+# rmhost - remove vhost configs for domain(s) (nginx/apache/node) and track delete intents in ENV_STORE
 set -euo pipefail
 
 ###############################################################################
-# UI (match mkhost: higher contrast)
+# UI
 ###############################################################################
 BOLD=$'\033[1m'
 DIM=$'\033[2m'
@@ -11,7 +11,6 @@ RED=$'\033[1;31m'
 GREEN=$'\033[1;32m'
 CYAN=$'\033[1;36m'
 YELLOW=$'\033[1;33m'
-MAGENTA=$'\033[1;35m'
 NC=$'\033[0m'
 
 say()  { echo -e "$*"; }
@@ -48,20 +47,17 @@ env_set() {
 env_get() { grep -E "^$1=" "$ENV_STORE" 2>/dev/null | cut -d'=' -f2- || true; }
 
 env_add_csv_unique() {
-  # env_add_csv_unique KEY VALUE  => append VALUE to KEY as comma-list, unique
+  # env_add_csv_unique KEY VALUE  => append VALUE to KEY as comma-list (unique)
   local key="$1" value="$2"
   value="$(trim "$value")"
   [[ -n "$value" ]] || return 0
 
-  local cur; cur="$(env_get "$key")"
-  cur="$(trim "$cur")"
-
+  local cur; cur="$(trim "$(env_get "$key")")"
   if [[ -z "$cur" ]]; then
     env_set "$key" "$value"
     return 0
   fi
 
-  # already present?
   local IFS=',' x
   for x in $cur; do
     x="$(trim "$x")"
@@ -92,16 +88,23 @@ confirm_default_n() {
 }
 
 ###############################################################################
-# Domain listing / interactive multi-pick
+# Domain selection (MULTI, LIST-ONLY)
 ###############################################################################
 list_nginx_domains() {
+  # Alpine/BusyBox safe: no find -printf
   [[ -d "$NGINX_DIR" ]] || return 0
-  find "$NGINX_DIR" -maxdepth 1 -type f -name '*.conf' -printf '%f\n' 2>/dev/null \
-    | sed -E 's/\.conf$//' \
-    | LC_ALL=C sort -u
+
+  local f base
+  shopt -s nullglob 2>/dev/null || true
+
+  for f in "$NGINX_DIR"/*.conf; do
+    [[ -f "$f" ]] || continue
+    base="$(basename "$f")"
+    base="${base%.conf}"
+    [[ -n "$base" ]] && printf '%s\n' "$base"
+  done | LC_ALL=C sort -u
 }
 
-# reads domains into array DOM_LIST
 load_domain_list() {
   DOM_LIST=()
   local line
@@ -110,36 +113,34 @@ load_domain_list() {
   done < <(list_nginx_domains || true)
 }
 
-# parse user input into array PICKED_DOMAINS
-# input can be: "1 2 5" (indexes), "a.localhost b.localhost", or comma-separated.
 parse_domain_input() {
   local input="$1"
-  input="${input//,/ }"
   input="$(trim "$input")"
   PICKED_DOMAINS=()
   [[ -n "$input" ]] || return 1
+
+  # normalize: commas -> spaces, collapse multiple spaces
+  input="${input//,/ }"
+  input="$(echo "$input" | xargs)"
 
   local tok
   for tok in $input; do
     tok="$(trim "$tok")"
     [[ -n "$tok" ]] || continue
 
-    if [[ "$tok" =~ ^[0-9]+$ ]]; then
-      local idx=$((tok-1))
-      (( idx >= 0 && idx < ${#DOM_LIST[@]} )) || { err "Out of range index: $tok"; return 1; }
-      PICKED_DOMAINS+=("${DOM_LIST[$idx]}")
-    else
-      PICKED_DOMAINS+=("$tok")
-    fi
+    [[ "$tok" =~ ^[0-9]+$ ]] || return 1
+
+    local idx=$((tok-1))
+    (( idx >= 0 && idx < ${#DOM_LIST[@]} )) || return 1
+    PICKED_DOMAINS+=("${DOM_LIST[$idx]}")
   done
 
-  # dedupe
-  local seen="|"
-  local -a out=()
-  for tok in "${PICKED_DOMAINS[@]}"; do
-    if [[ "$seen" != *"|$tok|"* ]]; then
-      seen="${seen}${tok}|"
-      out+=("$tok")
+  # dedupe preserve order
+  local seen="|" out=() d
+  for d in "${PICKED_DOMAINS[@]}"; do
+    if [[ "$seen" != *"|$d|"* ]]; then
+      seen="${seen}${d}|"
+      out+=("$d")
     fi
   done
   PICKED_DOMAINS=("${out[@]}")
@@ -150,15 +151,9 @@ pick_domains_interactive() {
   load_domain_list
 
   if ((${#DOM_LIST[@]} == 0)); then
-    local raw=""
-    read -r -p "$(printf "%bEnter domain(s) to delete (space/comma separated):%b " "$CYAN" "$NC")" raw
-    raw="$(trim "$raw")"
-    [[ -n "$raw" ]] || return 1
-    DOMAINS=()
-    raw="${raw//,/ }"
-    local d
-    for d in $raw; do DOMAINS+=("$(trim "$d")"); done
-    return 0
+    warn "No domains found in: ${NGINX_DIR}"
+    warn "Nothing to delete."
+    exit 2
   fi
 
   say "${CYAN}${BOLD}Available domains (from nginx):${NC}"
@@ -168,12 +163,18 @@ pick_domains_interactive() {
   done
 
   local ans=""
-  read -r -p "$(printf "%bSelect domain(s) (e.g. 1 2 5) or type domain list:%b " "$CYAN" "$NC")" ans
-  ans="$(trim "$ans")"
-  [[ -n "$ans" ]] || die "No domain provided."
+  while true; do
+    read -r -p "$(printf "%bSelect domain(s) (e.g. 1,2,6 or 1 2 6):%b " "$CYAN" "$NC")" ans
+    ans="$(trim "$ans")"
+    [[ -n "$ans" ]] || { err "Selection cannot be empty."; continue; }
 
-  parse_domain_input "$ans" || die "Invalid selection."
-  DOMAINS=("${PICKED_DOMAINS[@]}")
+    # allow digits, commas, spaces only
+    [[ "$ans" =~ ^[0-9,\ ]+$ ]] || { err "Only numbers, commas, spaces allowed."; continue; }
+
+    parse_domain_input "$ans" || { err "Invalid selection."; continue; }
+    DOMAINS=("${PICKED_DOMAINS[@]}")
+    return 0
+  done
 }
 
 ###############################################################################
@@ -195,7 +196,6 @@ any_vhost_references_php_version() {
   local ver="$1"
   [[ -n "$ver" ]] || return 1
   local pat="PHP_${ver}"
-
   [[ -d "$NGINX_DIR"  ]] && grep -R -n -F "$pat" "$NGINX_DIR"  >/dev/null 2>&1 && return 0
   [[ -d "$APACHE_DIR" ]] && grep -R -n -F "$pat" "$APACHE_DIR" >/dev/null 2>&1 && return 0
   return 1
@@ -203,14 +203,16 @@ any_vhost_references_php_version() {
 
 apache_has_any_vhosts() {
   [[ -d "$APACHE_DIR" ]] || return 1
-  find "$APACHE_DIR" -maxdepth 1 -type f -name '*.conf' -print -quit 2>/dev/null | grep -q .
+  for f in "$APACHE_DIR"/*.conf; do
+    [[ -f "$f" ]] && return 0
+  done
+  return 1
 }
 
 ###############################################################################
-# Plan build + execution
+# Plan build (batch) and execution
 ###############################################################################
-# Plan rows:
-# domain<TAB>token<TAB>nginx_conf<TAB>apache_conf<TAB>node_yaml<TAB>php_ver<TAB>del_nginx<TAB>del_apache<TAB>del_node
+# Plan rows: domain<TAB>token<TAB>nginx_conf<TAB>apache_conf<TAB>node_yaml<TAB>php_ver<TAB>del_nginx<TAB>del_apache<TAB>del_node
 build_plan_for_domain() {
   local domain="$1"
   validate_domain "$domain" || { warn "Skipping invalid domain: $domain"; return 3; }
@@ -253,36 +255,29 @@ print_plan() {
 execute_plan() {
   local plan="$1"
 
-  # Clear delete envs for this run; then set based on what actually got deleted
   env_set "APACHE_DELETE" ""
   env_set "DELETE_PHP_PROFILE" ""
   env_set "DELETE_NODE_PROFILE" ""
 
-  local any_apache_deleted="n"
-
   while IFS=$'\t' read -r domain token nginx_conf apache_conf node_yaml php_ver del_nginx del_apache del_node; do
-    say "${MAGENTA}${BOLD}Deleting:${NC} ${BOLD}${domain}${NC}"
+    say "${CYAN}${BOLD}Deleting:${NC} ${BOLD}${domain}${NC}"
 
     if [[ "$del_nginx" == "y" ]]; then
       rm -f -- "$nginx_conf"
-      ok "  ✔ ${domain}.conf removed (nginx)"
+      ok "  ✔ Deleted nginx:  ${domain}.conf"
     fi
 
     if [[ "$del_apache" == "y" ]]; then
       rm -f -- "$apache_conf"
-      ok "  ✔ ${domain}.conf removed (apache)"
-      any_apache_deleted="y"
+      ok "  ✔ Deleted apache: ${domain}.conf"
     fi
 
     if [[ "$del_node" == "y" ]]; then
       rm -f -- "$node_yaml"
-      ok "  ✔ ${token}.yaml removed (node)"
+      ok "  ✔ Deleted node:   ${token}.yaml"
       env_add_csv_unique "DELETE_NODE_PROFILE" "node_${token}"
     fi
 
-    # PHP profile cleanup signal:
-    # - infer version from deleted vhost
-    # - only mark for deletion if no other vhost references that PHP_#.# anymore
     if [[ -n "$php_ver" ]]; then
       local php_profile; php_profile="$(php_profile_from_version "$php_ver")"
       if [[ -n "$php_profile" ]] && ! any_vhost_references_php_version "$php_ver"; then
@@ -293,16 +288,12 @@ execute_plan() {
     echo
   done <"$plan"
 
-  # APACHE_DELETE rule (FIXED):
-  # If apache vhost dir is empty after deletion -> request removing apache profile.
+  # If there is no apache vhost conf left -> request removing apache profile.
   if ! apache_has_any_vhosts; then
     env_set "APACHE_DELETE" "apache"
   else
     env_set "APACHE_DELETE" ""
   fi
-
-  # note: any_apache_deleted is kept for future use; not required for the logic now
-  : "${any_apache_deleted:=n}"
 }
 
 ###############################################################################
@@ -319,17 +310,13 @@ case "${1:-}" in
 --DELETE_NODE_PROFILE) env_get "DELETE_NODE_PROFILE" ;;
 --APACHE_DELETE)       env_get "APACHE_DELETE" ;;
 *)
-# Multi-domain:
-# - Args may include comma/space separated domains.
-# - If no args: interactive multi-pick.
   plan="$(mktemp)"
-
   DOMAINS=()
 
   if (($# == 0)); then
     pick_domains_interactive
   else
-    # split all args by commas/spaces
+    # args mode still supported, but your main flow is list-only when no args.
     raw="$*"
     raw="${raw//,/ }"
     raw="$(trim "$raw")"
@@ -339,9 +326,8 @@ case "${1:-}" in
     done
   fi
 
-  ((${#DOMAINS[@]} > 0)) || die "No domain provided."
+  ((${#DOMAINS[@]} > 0)) || die "No domain selected."
 
-  # Build plan
   for d in "${DOMAINS[@]}"; do
     d="$(trim "$d")"
     [[ -n "$d" ]] || continue

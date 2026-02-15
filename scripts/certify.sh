@@ -4,9 +4,32 @@ set -euo pipefail
 CERT_DIR="/etc/mkcert"
 VHOST_DIR="/etc/share/vhosts"
 
+###############################################################################
+# UI (mkhost/rmhost-compatible, TTY-aware)
+###############################################################################
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  BOLD=$'\033[1m'
+  DIM=$'\033[2m'
+  RED=$'\033[1;31m'
+  GREEN=$'\033[1;32m'
+  CYAN=$'\033[1;36m'
+  YELLOW=$'\033[1;33m'
+  MAGENTA=$'\033[1;35m'
+  NC=$'\033[0m'
+else
+  BOLD='' DIM='' RED='' GREEN='' CYAN='' YELLOW='' MAGENTA='' NC=''
+fi
+
+say()  { echo -e "$*"; }
+ok()   { say "${GREEN}${BOLD}$*${NC}"; }
+warn() { say "${YELLOW}${BOLD}$*${NC}"; }
+err()  { say "${RED}${BOLD}$*${NC}"; }
+info() { say "${CYAN}${BOLD}$*${NC}"; }
+line() { say "${DIM}--------------------------------------------------------------${NC}"; }
+
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
-    echo "Error: missing required command: $1" >&2
+    err "Error: missing required command: $1"
     exit 1
   }
 }
@@ -161,21 +184,21 @@ validate_certificate() {
 }
 
 update_container_trust() {
-  echo ""
-  echo "--------------------------------------------------------------"
-  echo "[*] Updating trust store inside this container (best-effort)..."
+  echo
+  line
+  info "[*] Updating trust store inside this container (best-effort)..."
 
   if command -v update-ca-certificates >/dev/null 2>&1; then
-    echo " - Running: update-ca-certificates"
-    update-ca-certificates || echo " - WARN: update-ca-certificates failed (ignored)" >&2
-    echo ' - Note: "rehash: skipping ca-certificates.crt..." is normal (bundle).'
+    say " - ${DIM}Running:${NC} update-ca-certificates"
+    update-ca-certificates || warn " - WARN: update-ca-certificates failed (ignored)"
+    say " - ${DIM}Note:${NC} \"rehash: skipping ca-certificates.crt...\" is normal (bundle)."
   else
-    echo " - INFO: update-ca-certificates not found, skipping."
+    say " - ${DIM}INFO:${NC} update-ca-certificates not found, skipping."
   fi
 
   if command -v trust >/dev/null 2>&1; then
-    echo " - Running: trust extract-compat (optional)"
-    trust extract-compat >/dev/null 2>&1 || echo " - WARN: trust extract-compat failed (ignored)" >&2
+    say " - ${DIM}Running:${NC} trust extract-compat (optional)"
+    trust extract-compat >/dev/null 2>&1 || warn " - WARN: trust extract-compat failed (ignored)"
   fi
 }
 
@@ -217,8 +240,9 @@ generate_certificates() {
       exp_epoch="$(cert_expiry_epoch "$full_cert_path" || true)"
       exp_str=""
       [[ -n "$exp_epoch" ]] && exp_str="$(fmt_epoch_local "$exp_epoch" || true)"
-      [[ -n "$exp_str" ]] && exp_str=" (~$exp_str)"
-      output+=" - $label: Valid & up-to-date$exp_str; regeneration skipped"$'\n'
+      [[ -n "$exp_str" ]] && exp_str=" ${DIM}(~$exp_str)${NC}"
+
+      output+=" ${GREEN}${BOLD}- ${label}:${NC} Valid & up-to-date${exp_str}; ${DIM}regeneration skipped${NC}"$'\n'
       valid=$((valid + 1))
       continue
     fi
@@ -248,26 +272,26 @@ generate_certificates() {
     exp_epoch="$(cert_expiry_epoch "$full_cert_path" || true)"
     exp_str=""
     [[ -n "$exp_epoch" ]] && exp_str="$(fmt_epoch_local "$exp_epoch" || true)"
-    [[ -n "$exp_str" ]] && exp_str=" (~$exp_str)"
+    [[ -n "$exp_str" ]] && exp_str=" ${DIM}(~$exp_str)${NC}"
 
-    output+=" - $label: Generated & configured$exp_str"$'\n'
+    output+=" ${YELLOW}${BOLD}- ${label}:${NC} Generated & configured${exp_str}"$'\n'
     regenerated=$((regenerated + 1))
   done
 
   chmod 644 "$CERT_DIR"/apache-*.pem 2>/dev/null || true
 
-  run_mkcert -install || true
+  run_mkcert -install >/dev/null 2>&1 || true
 
-  output+=$'\n'"--------------------------------------------------------------"$'\n'
+  output+=$'\n'"${DIM}--------------------------------------------------------------${NC}"$'\n'
   if [[ $regenerated -eq 0 ]]; then
-    output+="[OK] All ($total) certificates are valid; no regeneration required."
+    output+="${GREEN}${BOLD}[OK]${NC} All (${total}) certificates are valid; no regeneration required."
   elif [[ $valid -eq 0 ]]; then
-    output+="[OK] All ($total) certificates were regenerated."
+    output+="${GREEN}${BOLD}[OK]${NC} All (${total}) certificates were regenerated."
   else
-    output+="[OK] Certificate validation complete; Regenerated: $regenerated, Valid: $valid."
+    output+="${GREEN}${BOLD}[OK]${NC} Certificate validation complete; Regenerated: ${regenerated}, Valid: ${valid}."
   fi
 
-  echo "$output"
+  echo -e "$output"
 }
 
 main() {
@@ -278,22 +302,22 @@ main() {
   mapfile -t CONF_FILES < <(find "$VHOST_DIR" -type f -name '*.conf' 2>/dev/null || true)
   CERT_DOMAINS="$(get_domains_from_files "${CONF_FILES[@]}")"
 
-  echo "=============================================================="
-  echo ""
-  echo "[~] List of domains (SAN):"
-  echo ""
+  say "${MAGENTA}${BOLD}==============================================================${NC}"
+  echo
+  info "[~] List of domains (SAN):"
+  echo
   echo "$CERT_DOMAINS" | awk '{print " - "$0}'
-  echo ""
-  echo "--------------------------------------------------------------"
-  echo "[*] Generating Certificates..."
-  echo ""
+  echo
+  line
+  info "[*] Generating Certificates..."
+  echo
 
   generate_certificates
 
   update_container_trust
 
-  echo ""
-  echo "=============================================================="
+  echo
+  say "${MAGENTA}${BOLD}==============================================================${NC}"
 }
 
 main "$@"

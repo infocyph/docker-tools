@@ -141,11 +141,12 @@ RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
-      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep \
+      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep tmux \
   && update-ca-certificates \
   && mkdir -p \
       /etc/mkcert \
       /etc/share/rootCA \
+      /etc/share/vhosts/node \
       /etc/share/vhosts/apache \
       /etc/share/vhosts/nginx \
       /etc/share/vhosts/sops \

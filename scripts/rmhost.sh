@@ -82,7 +82,12 @@ slugify() {
 
 confirm_default_n() {
   local prompt="$1" ans=""
-  read -r -p "$(printf "%b%b%s%b (y/N): %b" "$CYAN" "$BOLD" "$prompt" "$NC" "$YELLOW" "$NC")" ans
+  # prints exactly once:  "<prompt> (y/N): "
+  printf "%b%b%s%b %b(y/%bN%b): %b" \
+    "$CYAN" "$BOLD" "$prompt" "$NC" \
+    "$YELLOW" "$BOLD" "$NC" \
+    "$NC"
+  read -r ans
   ans="$(trim "$ans")"; ans="${ans,,}"
   [[ "$ans" == "y" || "$ans" == "yes" ]]
 }
@@ -264,17 +269,15 @@ execute_plan() {
 
     if [[ "$del_nginx" == "y" ]]; then
       rm -f -- "$nginx_conf"
-      ok "  ✔ Deleted nginx:  ${domain}.conf"
+      ok "  ✔ Deleted domain configuration"
     fi
 
     if [[ "$del_apache" == "y" ]]; then
       rm -f -- "$apache_conf"
-      ok "  ✔ Deleted apache: ${domain}.conf"
     fi
 
     if [[ "$del_node" == "y" ]]; then
       rm -f -- "$node_yaml"
-      ok "  ✔ Deleted node:   ${token}.yaml"
       env_add_csv_unique "DELETE_NODE_PROFILE" "node_${token}"
     fi
 
@@ -347,8 +350,5 @@ case "${1:-}" in
   rm -f "$plan"
 
   ok "Done."
-  ok "APACHE_DELETE=$(env_get APACHE_DELETE)"
-  ok "DELETE_NODE_PROFILE=$(env_get DELETE_NODE_PROFILE)"
-  ok "DELETE_PHP_PROFILE=$(env_get DELETE_PHP_PROFILE)"
   ;;
 esac

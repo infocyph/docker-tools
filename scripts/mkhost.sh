@@ -926,7 +926,6 @@ case "${1:-}" in
   env_set "APACHE_ACTIVE" ""
   env_set "ACTIVE_PHP_PROFILE" ""
   env_set "ACTIVE_NODE_PROFILE" ""
-  ok "Reset done."
   ;;
 --ACTIVE_PHP_PROFILE)  env_get "ACTIVE_PHP_PROFILE" ;;
 --ACTIVE_NODE_PROFILE) env_get "ACTIVE_NODE_PROFILE" ;;

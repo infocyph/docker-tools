@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# rmhost - remove vhost configs for domain(s) (nginx/apache/node) and track delete intents in ENV_STORE
+# rmhost - remove vhost configs for domain(s) (nginx/apache/node)
+#        - if no args: shows domain list from nginx and lets you select by numbers (1,2,6 / 1 2 6)
+#        - deletes relevant nginx/apache/node files
+#        - sets delete intents in ENV_STORE:
+#            APACHE_DELETE, DELETE_PHP_PROFILE, DELETE_NODE_PROFILE
 set -euo pipefail
 
 ###############################################################################
@@ -28,7 +32,6 @@ VHOST_ROOT="${VHOST_ROOT:-/etc/share/vhosts}"
 NGINX_DIR="${NGINX_DIR:-${VHOST_ROOT}/nginx}"
 APACHE_DIR="${APACHE_DIR:-${VHOST_ROOT}/apache}"
 NODE_DIR="${NODE_DIR:-${VHOST_ROOT}/node}"
-
 ENV_STORE="${ENV_STORE:-/etc/environment}"
 
 ###############################################################################
@@ -43,7 +46,6 @@ env_set() {
     echo "${key}=${value}" >>"$ENV_STORE"
   fi
 }
-
 env_get() { grep -E "^$1=" "$ENV_STORE" 2>/dev/null | cut -d'=' -f2- || true; }
 
 env_add_csv_unique() {
@@ -82,32 +84,25 @@ slugify() {
 
 confirm_default_n() {
   local prompt="$1" ans=""
-  # prints exactly once:  "<prompt> (y/N): "
-  printf "%b%b%s%b %b(y/%bN%b): %b" \
+  # single prompt line, default N
+  read -r -p "$(printf "%b%b%s%b %b(y/%bN%b): %b" \
     "$CYAN" "$BOLD" "$prompt" "$NC" \
     "$YELLOW" "$BOLD" "$NC" \
-    "$NC"
-  read -r ans
+    "$NC")" ans
   ans="$(trim "$ans")"; ans="${ans,,}"
   [[ "$ans" == "y" || "$ans" == "yes" ]]
 }
 
 ###############################################################################
-# Domain selection (MULTI, LIST-ONLY)
+# Domain selection (MULTI, LIST from nginx)
 ###############################################################################
 list_nginx_domains() {
-  # Alpine/BusyBox safe: no find -printf
   [[ -d "$NGINX_DIR" ]] || return 0
 
-  local f base
-  shopt -s nullglob 2>/dev/null || true
-
-  for f in "$NGINX_DIR"/*.conf; do
-    [[ -f "$f" ]] || continue
-    base="$(basename "$f")"
-    base="${base%.conf}"
-    [[ -n "$base" ]] && printf '%s\n' "$base"
-  done | LC_ALL=C sort -u
+  # BusyBox-safe find (no -printf)
+  find "$NGINX_DIR" -maxdepth 1 -type f -name '*.conf' 2>/dev/null \
+    -exec sh -c 'for f; do b="${f##*/}"; echo "${b%.conf}"; done' sh {} + \
+    | LC_ALL=C sort -u
 }
 
 load_domain_list() {
@@ -124,7 +119,7 @@ parse_domain_input() {
   PICKED_DOMAINS=()
   [[ -n "$input" ]] || return 1
 
-  # normalize: commas -> spaces, collapse multiple spaces
+  # normalize: commas -> spaces, collapse spaces
   input="${input//,/ }"
   input="$(echo "$input" | xargs)"
 
@@ -132,7 +127,6 @@ parse_domain_input() {
   for tok in $input; do
     tok="$(trim "$tok")"
     [[ -n "$tok" ]] || continue
-
     [[ "$tok" =~ ^[0-9]+$ ]] || return 1
 
     local idx=$((tok-1))
@@ -172,8 +166,6 @@ pick_domains_interactive() {
     read -r -p "$(printf "%bSelect domain(s) (e.g. 1,2,6 or 1 2 6):%b " "$CYAN" "$NC")" ans
     ans="$(trim "$ans")"
     [[ -n "$ans" ]] || { err "Selection cannot be empty."; continue; }
-
-    # allow digits, commas, spaces only
     [[ "$ans" =~ ^[0-9,\ ]+$ ]] || { err "Only numbers, commas, spaces allowed."; continue; }
 
     parse_domain_input "$ans" || { err "Invalid selection."; continue; }
@@ -183,7 +175,7 @@ pick_domains_interactive() {
 }
 
 ###############################################################################
-# PHP profile inference + reference scan (STRICT)
+# PHP profile inference + reference scan
 ###############################################################################
 extract_php_version_from_file() {
   local f="$1"
@@ -208,14 +200,11 @@ any_vhost_references_php_version() {
 
 apache_has_any_vhosts() {
   [[ -d "$APACHE_DIR" ]] || return 1
-  for f in "$APACHE_DIR"/*.conf; do
-    [[ -f "$f" ]] && return 0
-  done
-  return 1
+  find "$APACHE_DIR" -maxdepth 1 -type f -name '*.conf' -print -quit 2>/dev/null | grep -q .
 }
 
 ###############################################################################
-# Plan build (batch) and execution
+# Plan build + execution
 ###############################################################################
 # Plan rows: domain<TAB>token<TAB>nginx_conf<TAB>apache_conf<TAB>node_yaml<TAB>php_ver<TAB>del_nginx<TAB>del_apache<TAB>del_node
 build_plan_for_domain() {
@@ -260,6 +249,7 @@ print_plan() {
 execute_plan() {
   local plan="$1"
 
+  # Clear delete envs for this run
   env_set "APACHE_DELETE" ""
   env_set "DELETE_PHP_PROFILE" ""
   env_set "DELETE_NODE_PROFILE" ""
@@ -319,7 +309,7 @@ case "${1:-}" in
   if (($# == 0)); then
     pick_domains_interactive
   else
-    # args mode still supported, but your main flow is list-only when no args.
+    # args mode still supported (domains separated by spaces/commas)
     raw="$*"
     raw="${raw//,/ }"
     raw="$(trim "$raw")"

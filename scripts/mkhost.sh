@@ -523,21 +523,21 @@ create_configuration() {
 # 11) Flow + summary
 ###############################################################################
 cleanup_vars() {
-  unset -v DOMAINS DOMAIN_NAME APP_TYPE SERVER_TYPE \
-    ENABLE_HTTPS ENABLE_REDIRECTION KEEP_HTTP \
-    DOC_ROOT CLIENT_MAX_BODY_SIZE CLIENT_MAX_BODY_SIZE_APACHE \
-    ENABLE_STREAMING PROXY_STREAMING_INCLUDE FASTCGI_STREAMING_INCLUDE APACHE_STREAMING_INCLUDE \
-    ENABLE_CLIENT_VERIFICATION CLIENT_VERIF \
+  unset -v DOMAINS DOMAIN_NAME APP_TYPE SERVER_TYPE ENABLE_HTTPS ENABLE_REDIRECTION KEEP_HTTP \
+    DOC_ROOT CLIENT_MAX_BODY_SIZE CLIENT_MAX_BODY_SIZE_APACHE ENABLE_STREAMING PROXY_STREAMING_INCLUDE \
+    FASTCGI_STREAMING_INCLUDE APACHE_STREAMING_INCLUDE ENABLE_CLIENT_VERIFICATION CLIENT_VERIF \
     PHP_VERSION PHP_CONTAINER_PROFILE PHP_CONTAINER PHP_APACHE_CONTAINER_PROFILE PHP_APACHE_CONTAINER \
     NODE_VERSION NODE_CMD NODE_PROFILE NODE_SERVICE NODE_CONTAINER NODE_COMPOSE_FILE_BASENAME \
     NODE_DIR_TOKEN GENERATED_NGINX_CONF_BASENAME GENERATED_APACHE_CONF_BASENAME || true
 }
 
-choose_app_type_step2() {
+choose_app_type() {
+  # choose_app_type <n> <t>
+  local n="$1" t="$2"
   say "${CYAN}  1) PHP${NC}"
   say "${CYAN}  2) NodeJs${NC}"
   local sel
-  pick_index_required 2 9 "App type (choose 1-2)" 2 sel
+  pick_index_required "$n" "$t" "App type (choose 1-2)" 2 sel
   case "$sel" in
   1) APP_TYPE="php"; ok "Selected: PHP" ;;
   2) APP_TYPE="node"; ok "Selected: NodeJs" ;;
@@ -545,11 +545,13 @@ choose_app_type_step2() {
   esac
 }
 
-choose_server_type_step4() {
+choose_server_type() {
+  # choose_server_type <n> <t>
+  local n="$1" t="$2"
   say "${CYAN}  1) Nginx${NC}"
   say "${CYAN}  2) Apache${NC}"
   local sel
-  pick_index_required 4 9 "Server type (choose 1-2)" 2 sel
+  pick_index_required "$n" "$t" "Server type (choose 1-2)" 2 sel
   case "$sel" in
   1) SERVER_TYPE="Nginx"; ok "Selected: Nginx" ;;
   2) SERVER_TYPE="Apache"; ok "Selected: Apache" ;;
@@ -557,25 +559,29 @@ choose_server_type_step4() {
   esac
 }
 
-choose_protocol_step5() {
+choose_protocol() {
+  # choose_protocol <n> <t>
+  local n="$1" t="$2"
   say "${CYAN}  1) HTTP only${NC}"
   say "${CYAN}  2) HTTPS only${NC}"
   say "${CYAN}  3) Both HTTP and HTTPS${NC}"
   local sel
-  pick_index_default_value 5 9 "HTTP/HTTPS mode (choose 1-3)" 3 3 "Both" sel
+  pick_index_default_value "$n" "$t" "HTTP/HTTPS mode (choose 1-3)" 3 3 "Both" sel
   case "$sel" in
   1) ENABLE_HTTPS="n"; ENABLE_REDIRECTION="n"; KEEP_HTTP="y" ;;
   2) ENABLE_HTTPS="y"; ENABLE_REDIRECTION="n"; KEEP_HTTP="n" ;;
   3)
     ENABLE_HTTPS="y"
-    step_yn_default 5 9 "HTTP → HTTPS redirection" ENABLE_REDIRECTION "y"
+    step_yn_default "$n" "$t" "HTTP → HTTPS redirection" ENABLE_REDIRECTION "y"
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then KEEP_HTTP="n"; else KEEP_HTTP="y"; fi
     ;;
   *) err "Invalid selection."; exit 1 ;;
   esac
 }
 
-prompt_php_runtime_step3() {
+prompt_php_runtime() {
+  # prompt_php_runtime <n> <t>
+  local n="$1" t="$2"
   require_versions_db
   say "${CYAN}PHP versions:${NC}"
 
@@ -583,37 +589,37 @@ prompt_php_runtime_step3() {
   mapfile -t dep_rows    < <(jq -r '.php.deprecated[]? | "\(.version)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
 
   local idx_map_type=() idx_map_value=()
-  local n=0
+  local i=0
 
   printf "  %2d) %-7s %s\n" 0 "Custom" "Version"
   idx_map_type[0]="custom"; idx_map_value[0]=""
 
   say "${CYAN}Active (supported):${NC}"
   for r in "${active_rows[@]}"; do
-    [[ "$n" -ge "$MAX_VERSIONS" ]] && break
-    n=$((n+1))
+    [[ "$i" -ge "$MAX_VERSIONS" ]] && break
+    i=$((i+1))
     IFS='|' read -r v debut eol <<<"$r"
-    printf "  %2d) %-7s %s\n" "$n" "$v" "$(fmt_range "$debut" "$eol")"
-    idx_map_type[$n]="php"; idx_map_value[$n]="$v"
+    printf "  %2d) %-7s %s\n" "$i" "$v" "$(fmt_range "$debut" "$eol")"
+    idx_map_type[$i]="php"; idx_map_value[$i]="$v"
   done
 
   say "${CYAN}Deprecated (EOL):${NC}"
   for r in "${dep_rows[@]}"; do
-    [[ "$n" -ge "$MAX_VERSIONS" ]] && break
-    n=$((n+1))
+    [[ "$i" -ge "$MAX_VERSIONS" ]] && break
+    i=$((i+1))
     IFS='|' read -r v eol <<<"$r"
-    printf "  %2d) %-7s %s\n" "$n" "$v" "$(fmt_eol_tilde "$eol")"
-    idx_map_type[$n]="php"; idx_map_value[$n]="$v"
+    printf "  %2d) %-7s %s\n" "$i" "$v" "$(fmt_eol_tilde "$eol")"
+    idx_map_type[$i]="php"; idx_map_value[$i]="$v"
   done
 
-  local printed_max="$n"
+  local printed_max="$i"
   local sel def_idx=1 def_disp="${idx_map_value[1]:-1}"
-  pick_index_default_value 3 9 "Runtime (select 0-${printed_max})" "$printed_max" "$def_idx" "$def_disp" sel
+  pick_index_default_value "$n" "$t" "Runtime (select 0-${printed_max})" "$printed_max" "$def_idx" "$def_disp" sel
 
   if [[ "${idx_map_type[$sel]}" == "custom" ]]; then
     local custom=""
     while true; do
-      step_ask_text_required 3 9 "PHP version" custom "Major.Minor (e.g., 8.4)"
+      step_ask_text_required "$n" "$t" "PHP version" custom "Major.Minor (e.g., 8.4)"
       if php_is_valid_custom "$custom"; then PHP_VERSION="$custom"; break; fi
       err "Invalid / unknown PHP version."
     done
@@ -628,7 +634,9 @@ prompt_php_runtime_step3() {
   ok "Selected PHP version: $PHP_VERSION"
 }
 
-prompt_node_runtime_step3() {
+prompt_node_runtime() {
+  # prompt_node_runtime <n> <t>
+  local n="$1" t="$2"
   require_versions_db
 
   local current_major lts_major
@@ -641,44 +649,44 @@ prompt_node_runtime_step3() {
   mapfile -t dep_rows    < <(jq -r '.node.deprecated[]? | "\(.version)|\(.eol)"' "$RUNTIME_VERSIONS_DB")
 
   local idx_map_type=() idx_map_value=()
-  local n=0
+  local i=0
 
   printf "  %2d) %-7s %s\n" 0 "Custom" "Version"
   idx_map_type[0]="custom"; idx_map_value[0]=""
 
-  n=1; printf "  %2d) %-7s %s\n" "$n" "CURRENT" "(v${current_major})"
-  idx_map_type[$n]="tag"; idx_map_value[$n]="current"
+  i=1; printf "  %2d) %-7s %s\n" "$i" "CURRENT" "(v${current_major})"
+  idx_map_type[$i]="tag"; idx_map_value[$i]="current"
 
-  n=2; printf "  %2d) %-7s %s\n" "$n" "LTS" "(v${lts_major})"
-  idx_map_type[$n]="tag"; idx_map_value[$n]="lts"
+  i=2; printf "  %2d) %-7s %s\n" "$i" "LTS" "(v${lts_major})"
+  idx_map_type[$i]="tag"; idx_map_value[$i]="lts"
 
   local slots_left=$((MAX_VERSIONS - 3))
 
   say "${CYAN}Active (supported):${NC}"
   for r in "${active_rows[@]}"; do
     [[ "$slots_left" -le 0 ]] && break
-    n=$((n+1)); slots_left=$((slots_left-1))
+    i=$((i+1)); slots_left=$((slots_left-1))
     IFS='|' read -r v debut eol lts <<<"$r"
     if [[ "$lts" == "true" ]]; then
-      printf "  %2d) %-7s %s LTS\n" "$n" "v${v}" "$(fmt_range "$debut" "$eol")"
+      printf "  %2d) %-7s %s LTS\n" "$i" "v${v}" "$(fmt_range "$debut" "$eol")"
     else
-      printf "  %2d) %-7s %s\n" "$n" "v${v}" "$(fmt_range "$debut" "$eol")"
+      printf "  %2d) %-7s %s\n" "$i" "v${v}" "$(fmt_range "$debut" "$eol")"
     fi
-    idx_map_type[$n]="node"; idx_map_value[$n]="$v"
+    idx_map_type[$i]="node"; idx_map_value[$i]="$v"
   done
 
   say "${CYAN}Deprecated (EOL):${NC}"
   for r in "${dep_rows[@]}"; do
     [[ "$slots_left" -le 0 ]] && break
-    n=$((n+1)); slots_left=$((slots_left-1))
+    i=$((i+1)); slots_left=$((slots_left-1))
     IFS='|' read -r v eol <<<"$r"
-    printf "  %2d) %-7s %s\n" "$n" "v${v}" "$(fmt_eol_tilde "$eol")"
-    idx_map_type[$n]="node"; idx_map_value[$n]="$v"
+    printf "  %2d) %-7s %s\n" "$i" "v${v}" "$(fmt_eol_tilde "$eol")"
+    idx_map_type[$i]="node"; idx_map_value[$i]="$v"
   done
 
-  local printed_max="$n"
+  local printed_max="$i"
   local sel def_idx=2 def_disp="LTS"
-  pick_index_default_value 3 9 "Runtime (select 0-${printed_max})" "$printed_max" "$def_idx" "$def_disp" sel
+  pick_index_default_value "$n" "$t" "Runtime (select 0-${printed_max})" "$printed_max" "$def_idx" "$def_disp" sel
 
   case "${idx_map_type[$sel]:-}" in
   node) NODE_VERSION="${idx_map_value[$sel]}" ;;
@@ -686,7 +694,7 @@ prompt_node_runtime_step3() {
   custom)
     local custom=""
     while true; do
-      step_ask_text_required 3 9 "Node major" custom "e.g., 24"
+      step_ask_text_required "$n" "$t" "Node major" custom "e.g., 24"
       if node_is_valid_custom "$custom"; then NODE_VERSION="$custom"; break; fi
       err "Invalid / unknown Node major."
     done
@@ -697,7 +705,9 @@ prompt_node_runtime_step3() {
   ok "Selected Node version: $NODE_VERSION"
 }
 
-choose_doc_root_step6() {
+choose_doc_root() {
+  # choose_doc_root <n> <t>
+  local n="$1" t="$2"
   local opts=()
   opts+=("<Custom Path>")
   while IFS= read -r -d '' v; do opts+=("$v"); done < <(collect_docroot_options || true)
@@ -707,10 +717,10 @@ choose_doc_root_step6() {
 
   local max=$(( ${#opts[@]} - 1 ))
   local sel
-  pick_index_required 6 9 "Doc root (choose 0-${max})" "$max" sel
+  pick_index_required "$n" "$t" "Doc root (choose 0-${max})" "$max" sel
 
   if [[ "$sel" == "0" ]]; then
-    step_ask_text_required 6 9 "Doc root" DOC_ROOT "e.g., /site/public"
+    step_ask_text_required "$n" "$t" "Doc root" DOC_ROOT "e.g., /site/public"
     DOC_ROOT="$(normalize_rel_path "$DOC_ROOT")"
   else
     DOC_ROOT="$(normalize_rel_path "${opts[$sel]}")"
@@ -809,78 +819,39 @@ run_certify_if_available() {
   fi
 }
 
-configure_server() {
-  require_versions_db
-  preflight_templates
+finalize_common_settings() {
+  # finalize_common_settings <body_step> <t> <stream_step> <mtls_step>
+  local step_body="$1" t="$2" step_stream="$3" step_mtls="$4"
 
-  # 1) Domain(s) (required; supports multi-domain)
-  while true; do
-    local raw=""
-    step_ask_text_required 1 9 "Domain" raw "space/comma separated (e.g., a.localhost, b.localhost)"
-    if parse_domains_step1 "$raw"; then break; fi
-    warn "Invalid domain(s). Try again."
-  done
-
-  # 2) App type (NO default)
-  choose_app_type_step2
-
-  # 3) Runtime versions (default shows VALUE)
-  if [[ "$APP_TYPE" == "php" ]]; then
-    prompt_php_runtime_step3
-  else
-    prompt_node_runtime_step3
-  fi
-
-  # 4) Server type (NO default; PHP only) / Node command prompt
-  if [[ "$APP_TYPE" == "php" ]]; then
-    choose_server_type_step4
-  else
-    SERVER_TYPE="Nginx"
-    step_yn_default 4 9 "Custom Node start command" _NODE_CMD_YN "n"
-    if [[ "$_NODE_CMD_YN" == "y" ]]; then
-      step_ask_text_required 4 9 "Node command" NODE_CMD "npm run dev / npm start / node server.js"
-      NODE_CMD="$(trim "$NODE_CMD")"
-    else
-      NODE_CMD=""
-    fi
-    unset -v _NODE_CMD_YN || true
-  fi
-
-  # 5) HTTP/HTTPS mode (default Both; redirection default Y)
-  choose_protocol_step5
-
-  # 6) Doc root (NO default)
-  choose_doc_root_step6
-
-  # 7) Client body size (default 10)
+  # Client body size (default 10)
   local _MB=""
-  step_ask_text_default 7 9 "Client body size (MB)" _MB "10"
+  step_ask_text_default "$step_body" "$t" "Client body size (MB)" _MB "10"
   while [[ ! "$_MB" =~ ^[0-9]+$ ]]; do
     err "Invalid number."
-    step_ask_text_default 7 9 "Client body size (MB)" _MB "10"
+    step_ask_text_default "$step_body" "$t" "Client body size (MB)" _MB "10"
   done
   CLIENT_MAX_BODY_SIZE_APACHE=$((_MB * 1000000))
   CLIENT_MAX_BODY_SIZE="${_MB}M"
   unset -v _MB || true
 
-  # 8) Streaming/SSE mode (default n)
+  # Streaming/SSE mode (default n)
   PROXY_STREAMING_INCLUDE=""
   FASTCGI_STREAMING_INCLUDE=""
   APACHE_STREAMING_INCLUDE=""
-  step_yn_default 8 9 "Streaming/SSE mode" ENABLE_STREAMING "n"
+  step_yn_default "$step_stream" "$t" "Streaming/SSE mode" ENABLE_STREAMING "n"
   if [[ "$ENABLE_STREAMING" == "y" ]]; then
     PROXY_STREAMING_INCLUDE="include /etc/nginx/proxy_streaming;"
     FASTCGI_STREAMING_INCLUDE="include /etc/nginx/fastcgi_streaming;"
     APACHE_STREAMING_INCLUDE=$'  # Streaming/SSE tuning\n  ProxyTimeout 3600\n  Timeout 3600\n  Header set Cache-Control "no-cache"\n  Header set X-Accel-Buffering "no"\n'
   fi
 
-  # 9) Client verification (mTLS) (default n; only allowed if HTTPS)
+  # Client verification (mTLS) (default n; only allowed if HTTPS)
   CLIENT_VERIF="n"
   if [[ "${ENABLE_HTTPS:-n}" != "y" ]]; then
     ENABLE_CLIENT_VERIFICATION="ssl_verify_client off;"
     ok "Client verification disabled (HTTPS not enabled)."
   else
-    step_yn_default 9 9 "Client certificate verification (mTLS)" CLIENT_VERIF "n"
+    step_yn_default "$step_mtls" "$t" "Client certificate verification (mTLS)" CLIENT_VERIF "n"
     if [[ "$CLIENT_VERIF" == "y" ]]; then
       ENABLE_CLIENT_VERIFICATION="ssl_verify_client on;"
       warn "Client verification enabled. Ensure client certs are configured."
@@ -888,15 +859,10 @@ configure_server() {
       ENABLE_CLIENT_VERIFICATION="ssl_verify_client off;"
     fi
   fi
+}
 
-  # Summary + batch confirm (NOT a step; default Y)
-  print_summary
-  local PROCEED="y"
-  ask_yn_default "Proceed with generation" PROCEED "y"
-  [[ "$PROCEED" == "y" ]] || { warn "Cancelled."; return 0; }
-  echo
-
-  # Generate per-domain
+generate_all_domains() {
+  # Generate per-domain, using current globals.
   local d
   for d in "${DOMAINS[@]}"; do
     DOMAIN_NAME="$d"
@@ -918,6 +884,102 @@ configure_server() {
   run_certify_if_available
 }
 
+configure_php() {
+  # Total steps remain 9; Step 1 is app type (handled by dispatcher).
+  local T=9
+
+  # 2) Domain(s)
+  while true; do
+    local raw=""
+    step_ask_text_required 2 "$T" "Domain" raw "space/comma separated (e.g., a.localhost, b.localhost)"
+    if parse_domains_step1 "$raw"; then break; fi
+    warn "Invalid domain(s). Try again."
+  done
+
+  # 3) PHP runtime
+  prompt_php_runtime 3 "$T"
+
+  # 4) Server type
+  choose_server_type 4 "$T"
+
+  # 5) Protocol
+  choose_protocol 5 "$T"
+
+  # 6) Doc root
+  choose_doc_root 6 "$T"
+
+  # 7/8/9) Common flags
+  finalize_common_settings 7 "$T" 8 9
+
+  # Summary + confirm (NOT a step; default Y)
+  print_summary
+  local PROCEED="y"
+  ask_yn_default "Proceed with generation" PROCEED "y"
+  [[ "$PROCEED" == "y" ]] || { warn "Cancelled."; return 0; }
+  echo
+
+  generate_all_domains
+}
+
+configure_node() {
+  # Total steps remain 9; Step 1 is app type (handled by dispatcher).
+  local T=9
+
+  # 2) Domain(s)
+  while true; do
+    local raw=""
+    step_ask_text_required 2 "$T" "Domain" raw "space/comma separated (e.g., a.localhost, b.localhost)"
+    if parse_domains_step1 "$raw"; then break; fi
+    warn "Invalid domain(s). Try again."
+  done
+
+  # 3) Node runtime
+  prompt_node_runtime 3 "$T"
+
+  # 4) Node command
+  SERVER_TYPE="Nginx"
+  step_yn_default 4 "$T" "Custom Node start command" _NODE_CMD_YN "n"
+  if [[ "$_NODE_CMD_YN" == "y" ]]; then
+    step_ask_text_required 4 "$T" "Node command" NODE_CMD "npm run dev / npm start / node server.js"
+    NODE_CMD="$(trim "$NODE_CMD")"
+  else
+    NODE_CMD=""
+  fi
+  unset -v _NODE_CMD_YN || true
+
+  # 5) Protocol
+  choose_protocol 5 "$T"
+
+  # 6) Doc root
+  choose_doc_root 6 "$T"
+
+  # 7/8/9) Common flags
+  finalize_common_settings 7 "$T" 8 9
+
+  # Summary + confirm (NOT a step; default Y)
+  print_summary
+  local PROCEED="y"
+  ask_yn_default "Proceed with generation" PROCEED "y"
+  [[ "$PROCEED" == "y" ]] || { warn "Cancelled."; return 0; }
+  echo
+
+  generate_all_domains
+}
+
+configure_server() {
+  require_versions_db
+  preflight_templates
+
+  # 1) App type → dispatch to dedicated flow
+  choose_app_type 1 9
+
+  case "$APP_TYPE" in
+  php)  configure_php ;;
+  node) configure_node ;;
+  *) err "Invalid app type: ${APP_TYPE:-}"; exit 1 ;;
+  esac
+}
+
 ###############################################################################
 # 12) CLI flags
 ###############################################################################
@@ -926,7 +988,6 @@ case "${1:-}" in
   env_set "APACHE_ACTIVE" ""
   env_set "ACTIVE_PHP_PROFILE" ""
   env_set "ACTIVE_NODE_PROFILE" ""
-  ok "Reset done."
   ;;
 --ACTIVE_PHP_PROFILE)  env_get "ACTIVE_PHP_PROFILE" ;;
 --ACTIVE_NODE_PROFILE) env_get "ACTIVE_NODE_PROFILE" ;;

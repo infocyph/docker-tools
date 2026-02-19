@@ -232,6 +232,13 @@ validate_ip() {
   return 1
 }
 
+validate_port() {
+  local p="${1:-}"
+  [[ "$p" =~ ^[0-9]+$ ]] || return 1
+  (( p >= 1 && p <= 65535 ))
+}
+
+
 normalize_rel_path() {
   local p
   p="$(trim "${1:-}")"
@@ -358,6 +365,8 @@ render_template() {
     -e "s|{{NODE_CONTAINER}}|$(sed_escape_repl "${NODE_CONTAINER:-}")|g" \
     -e "s|{{NODE_PORT}}|$(sed_escape_repl "${NODE_PORT}")|g" \
     -e "s|{{PROXY_IP}}|$(sed_escape_repl "${PROXY_IP:-}")|g" \
+-e "s|{{PROXY_HTTP_PORT}}|$(sed_escape_repl "${PROXY_HTTP_PORT:-80}")|g" \
+-e "s|{{PROXY_HTTPS_PORT}}|$(sed_escape_repl "${PROXY_HTTPS_PORT:-443}")|g" \
     -e "s|{{PROXY_HOST}}|$(sed_escape_repl "${PROXY_HOST:-}")|g" \
     -e "s|{{PROXY_COOKIE_EXACT_INCLUDE}}|$(sed_escape_repl "${PROXY_COOKIE_EXACT_INCLUDE:-}")|g" \
     -e "s|{{PROXY_COOKIE_PARENT_INCLUDE}}|$(sed_escape_repl "${PROXY_COOKIE_PARENT_INCLUDE:-}")|g" \
@@ -581,7 +590,7 @@ cleanup_vars() {
     PHP_VERSION PHP_CONTAINER_PROFILE PHP_CONTAINER PHP_APACHE_CONTAINER_PROFILE PHP_APACHE_CONTAINER \
     NODE_VERSION NODE_CMD NODE_PROFILE NODE_SERVICE NODE_CONTAINER NODE_COMPOSE_FILE_BASENAME \
     NODE_DIR_TOKEN GENERATED_NGINX_CONF_BASENAME GENERATED_APACHE_CONF_BASENAME \
-    PROXY_HOST PROXY_IP PROXY_COOKIE_EXACT_INCLUDE PROXY_COOKIE_PARENT_INCLUDE PROXY_REDIRECT_INCLUDE \
+    PROXY_HOST PROXY_IP PROXY_HTTP_PORT PROXY_HTTPS_PORT PROXY_COOKIE_EXACT_INCLUDE PROXY_COOKIE_PARENT_INCLUDE PROXY_REDIRECT_INCLUDE \
     PROXY_WS_INCLUDE PROXY_SUBFILTER_INCLUDE PROXY_CSP_INCLUDE PROXY_REWRITE_YN PARENT_COOKIE_DOMAIN || true
 }
 
@@ -866,6 +875,7 @@ print_summary() {
     say "${key}Upstream host:${NC}        ${BOLD}${PROXY_HOST}${NC}"
     say "${key}Upstream IP:${NC}          ${BOLD}${PROXY_IP}${NC}"
     say "${key}Server type:${NC}          ${BOLD}Nginx${NC}"
+    say "${key}Upstream ports:${NC}       ${BOLD}http:${PROXY_HTTP_PORT:-80} https:${PROXY_HTTPS_PORT:-443}${NC}"
   fi
 
   say "${key}Protocol mode:${NC}        ${BOLD}${proto}${NC}"
@@ -995,6 +1005,72 @@ prompt_proxy_ip() {
   done
 }
 
+prompt_proxy_ports() {
+  # prompt_proxy_ports <step> <t>
+  local n="$1" t="$2"
+  local raw="" def="" p1="" p2="" extra=""
+
+  # Determine what we need based on selected protocol + redirection
+  # - HTTP only              => ask one port (http)
+  # - HTTPS only             => ask one port (https)
+  # - Both + redirection     => ask one port (https)
+  # - Both + no redirection  => ask two ports (http,https) as CSV
+  local need="both"
+  if [[ "${ENABLE_HTTPS:-n}" != "y" ]]; then
+    need="http"
+  elif [[ "${KEEP_HTTP:-n}" != "y" ]]; then
+    need="https"
+  elif [[ "${ENABLE_REDIRECTION:-n}" == "y" ]]; then
+    need="https"
+  else
+    need="both"
+  fi
+
+  case "$need" in
+    http)
+      def="80"
+      while true; do
+        step_ask_text_default "$n" "$t" "Upstream port" raw "$def" "http port (default 80)"
+        raw="$(trim "$raw")"
+        validate_port "$raw" || { err "Invalid port."; continue; }
+        PROXY_HTTP_PORT="$raw"
+        PROXY_HTTPS_PORT="${PROXY_HTTPS_PORT:-443}"
+        return 0
+      done
+      ;;
+    https)
+      def="443"
+      while true; do
+        step_ask_text_default "$n" "$t" "Upstream port" raw "$def" "https port (default 443)"
+        raw="$(trim "$raw")"
+        validate_port "$raw" || { err "Invalid port."; continue; }
+        PROXY_HTTPS_PORT="$raw"
+        PROXY_HTTP_PORT="${PROXY_HTTP_PORT:-80}"
+        return 0
+      done
+      ;;
+    both)
+      def="80,443"
+      while true; do
+        step_ask_text_default "$n" "$t" "Upstream ports" raw "$def" "http,https (e.g., 8080,8443)"
+        raw="$(trim "$raw")"
+        raw="${raw// /}"
+        IFS=',' read -r p1 p2 extra <<<"$raw"
+        [[ -n "${p1:-}" && -n "${p2:-}" && -z "${extra:-}" ]] || { err "Enter two ports as CSV: http,https"; continue; }
+        validate_port "$p1" || { err "Invalid http port."; continue; }
+        validate_port "$p2" || { err "Invalid https port."; continue; }
+        PROXY_HTTP_PORT="$p1"
+        PROXY_HTTPS_PORT="$p2"
+        return 0
+      done
+      ;;
+    *)
+      err "Internal error: port need mode invalid."
+      return 1
+      ;;
+  esac
+}
+
 proxyip_set_feature_includes() {
   # Called after protocol is chosen and after optional prompts
   PROXY_COOKIE_EXACT_INCLUDE=""
@@ -1100,7 +1176,7 @@ configure_node() {
 }
 
 configure_proxyip() {
-  local T=12
+  local T=13
 
   # 2) Domain(s)
   while true; do
@@ -1119,23 +1195,27 @@ configure_proxyip() {
   # 5) Protocol
   choose_protocol 4 "$T"
 
+  # 5) Upstream port(s)
+  prompt_proxy_ports 5 "$T"
+
+
   # 6) Body size
-  finalize_body_size 5 "$T"
+  finalize_body_size 6 "$T"
 
   # 7) Streaming
-  finalize_streaming 6 "$T"
+  finalize_streaming 7 "$T"
 
   # 8) WebSockets
   PROXY_WS_ENABLED="n"
-  step_yn_default 7 "$T" "WebSockets/HMR support" PROXY_WS_ENABLED "n"
+  step_yn_default 8 "$T" "WebSockets/HMR support" PROXY_WS_ENABLED "n"
 
   # 9) Rewrite/cookies/redirects + last resort tweaks + mTLS
   PROXY_REWRITE_YN="y"
-  step_yn_default 8 "$T" "Rewrite cookies + redirects for upstream host" PROXY_REWRITE_YN "y"
+  step_yn_default 9 "$T" "Rewrite cookies + redirects for upstream host" PROXY_REWRITE_YN "y"
 
   PARENT_COOKIE_DOMAIN=""
   if [[ "$PROXY_REWRITE_YN" == "y" ]]; then
-    step_ask_text_default 9 "$T" "Parent cookie domain (optional)" PARENT_COOKIE_DOMAIN "" "e.g., .example.com"
+    step_ask_text_default 10 "$T" "Parent cookie domain (optional)" PARENT_COOKIE_DOMAIN "" "e.g., .sslcommerz.com"
     PARENT_COOKIE_DOMAIN="$(trim "$PARENT_COOKIE_DOMAIN")"
     if [[ -n "$PARENT_COOKIE_DOMAIN" && "${PARENT_COOKIE_DOMAIN:0:1}" != "." ]]; then
       PARENT_COOKIE_DOMAIN=".${PARENT_COOKIE_DOMAIN}"
@@ -1143,13 +1223,13 @@ configure_proxyip() {
   fi
 
   PROXY_SUBFILTER_ENABLED="n"
-  step_yn_default 10 "$T" "Enable sub_filter URL rewrite (last resort)" PROXY_SUBFILTER_ENABLED "n"
+  step_yn_default 11 "$T" "Enable sub_filter URL rewrite (last resort)" PROXY_SUBFILTER_ENABLED "n"
 
   PROXY_CSP_ENABLED="n"
-  step_yn_default 11 "$T" "Relax Content-Security-Policy (last resort)" PROXY_CSP_ENABLED "n"
+  step_yn_default 12 "$T" "Relax Content-Security-Policy (last resort)" PROXY_CSP_ENABLED "n"
 
   # mTLS last (still step 9)
-  prompt_mtls 12 "$T"
+  prompt_mtls 13 "$T"
 
   # ProxyIP doesn't use docroot in templates
   DOC_ROOT="/"

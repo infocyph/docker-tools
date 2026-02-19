@@ -1092,17 +1092,21 @@ proxyip_set_feature_includes() {
     PROXY_CSP_INCLUDE="include /etc/nginx/proxy_csp_relax;"
   fi
 
+  # Always make proxy_redirect deterministic (disable built-in rewrite), and
+  # optionally add an explicit rule to keep the browser on {{SERVER_NAME}}.
+  PROXY_REDIRECT_INCLUDE="proxy_redirect off;"
+
   if [[ "${PROXY_REWRITE_YN:-n}" == "y" ]]; then
-    # cookie rewrite
-    PROXY_COOKIE_EXACT_INCLUDE=$'proxy_cookie_domain '"${PROXY_HOST}"' '"${DOMAIN_NAME}"';\n        proxy_cookie_path / /;'
+    # cookie rewrite (keep single-line to avoid literal "\\n" in output)
+    PROXY_COOKIE_EXACT_INCLUDE="proxy_cookie_domain ${PROXY_HOST} ${DOMAIN_NAME}; proxy_cookie_path / /;"
 
     if [[ -n "${PARENT_COOKIE_DOMAIN:-}" ]]; then
-      PROXY_COOKIE_PARENT_INCLUDE=$'proxy_cookie_domain '"${PARENT_COOKIE_DOMAIN}"' '"${DOMAIN_NAME}"';'
+      PROXY_COOKIE_PARENT_INCLUDE="proxy_cookie_domain ${PARENT_COOKIE_DOMAIN} ${DOMAIN_NAME};"
     fi
 
     # redirect rewrite
     local rehost="${PROXY_HOST//./\\.}"
-    PROXY_REDIRECT_INCLUDE=$'proxy_redirect ~^https?://'"${rehost}"'(/.*)?$ $scheme://$host$1;'
+    PROXY_REDIRECT_INCLUDE="proxy_redirect off; proxy_redirect ~^https?://${rehost}(/.*)?$ \\$scheme://\\$host\\$1;"
   fi
 }
 

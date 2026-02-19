@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# mkhost.sh — vhost + runtime chooser (PHP/Node) for LocalDevStack
+# mkhost.sh — vhost + runtime chooser (PHP/Node/ProxyIP) for LocalDevStack
+#
+# App types:
+#  - PHP: Nginx or Apache (proxied by Nginx)
+#  - NodeJs: Nginx reverse proxy to per-domain Node service
+#  - Proxy (Fixed IP): Nginx reverse proxy to a pinned upstream IP (:80/:443) with upstream Host/SNI
 
 set -euo pipefail
 
@@ -55,6 +60,8 @@ required_tpls=(
   http.node.nginx.conf https.node.nginx.conf
   proxy-http.nginx.conf proxy-https.nginx.conf
   http.apache.conf https.apache.conf
+  proxy-fixedip-http.nginx.conf
+  proxy-fixedip-https.nginx.conf
 )
 
 preflight_templates() {
@@ -198,6 +205,33 @@ validate_domain() {
   [[ "$d" =~ $re ]]
 }
 
+validate_ipv4() {
+  local ip="$1"
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  local o IFS='.'
+  read -r o1 o2 o3 o4 <<<"$ip"
+  for o in "$o1" "$o2" "$o3" "$o4"; do
+    [[ "$o" =~ ^[0-9]+$ ]] || return 1
+    (( o >= 0 && o <= 255 )) || return 1
+  done
+  return 0
+}
+
+validate_ipv6_loose() {
+  local ip="$1"
+  # Loose but practical validation (covers common forms including ::)
+  [[ "$ip" =~ ^[0-9a-fA-F:]+$ ]] || return 1
+  [[ "$ip" == *:* ]] || return 1
+  return 0
+}
+
+validate_ip() {
+  local ip="$1"
+  validate_ipv4 "$ip" && return 0
+  validate_ipv6_loose "$ip" && return 0
+  return 1
+}
+
 normalize_rel_path() {
   local p
   p="$(trim "${1:-}")"
@@ -310,9 +344,9 @@ render_template() {
 
   local tmp; tmp="$(mktemp)"
   sed \
-    -e "s|{{SERVER_NAME}}|$(sed_escape_repl "$DOMAIN_NAME")|g" \
-    -e "s|{{DOC_ROOT}}|$(sed_escape_repl "$DOC_ROOT")|g" \
-    -e "s|{{CLIENT_MAX_BODY_SIZE}}|$(sed_escape_repl "$CLIENT_MAX_BODY_SIZE")|g" \
+    -e "s|{{SERVER_NAME}}|$(sed_escape_repl "${DOMAIN_NAME:-}")|g" \
+    -e "s|{{DOC_ROOT}}|$(sed_escape_repl "${DOC_ROOT:-}")|g" \
+    -e "s|{{CLIENT_MAX_BODY_SIZE}}|$(sed_escape_repl "${CLIENT_MAX_BODY_SIZE:-10M}")|g" \
     -e "s|{{CLIENT_MAX_BODY_SIZE_APACHE}}|$(sed_escape_repl "${CLIENT_MAX_BODY_SIZE_APACHE:-}")|g" \
     -e "s|{{PROXY_STREAMING_INCLUDE}}|$(sed_escape_repl "${PROXY_STREAMING_INCLUDE:-}")|g" \
     -e "s|{{FASTCGI_STREAMING_INCLUDE}}|$(sed_escape_repl "${FASTCGI_STREAMING_INCLUDE:-}")|g" \
@@ -323,6 +357,14 @@ render_template() {
     -e "s|{{CLIENT_VERIFICATION}}|$(sed_escape_repl "${ENABLE_CLIENT_VERIFICATION:-ssl_verify_client off;}")|g" \
     -e "s|{{NODE_CONTAINER}}|$(sed_escape_repl "${NODE_CONTAINER:-}")|g" \
     -e "s|{{NODE_PORT}}|$(sed_escape_repl "${NODE_PORT}")|g" \
+    -e "s|{{PROXY_IP}}|$(sed_escape_repl "${PROXY_IP:-}")|g" \
+    -e "s|{{PROXY_HOST}}|$(sed_escape_repl "${PROXY_HOST:-}")|g" \
+    -e "s|{{PROXY_COOKIE_EXACT_INCLUDE}}|$(sed_escape_repl "${PROXY_COOKIE_EXACT_INCLUDE:-}")|g" \
+    -e "s|{{PROXY_COOKIE_PARENT_INCLUDE}}|$(sed_escape_repl "${PROXY_COOKIE_PARENT_INCLUDE:-}")|g" \
+    -e "s|{{PROXY_REDIRECT_INCLUDE}}|$(sed_escape_repl "${PROXY_REDIRECT_INCLUDE:-}")|g" \
+    -e "s|{{PROXY_WS_INCLUDE}}|$(sed_escape_repl "${PROXY_WS_INCLUDE:-}")|g" \
+    -e "s|{{PROXY_SUBFILTER_INCLUDE}}|$(sed_escape_repl "${PROXY_SUBFILTER_INCLUDE:-}")|g" \
+    -e "s|{{PROXY_CSP_INCLUDE}}|$(sed_escape_repl "${PROXY_CSP_INCLUDE:-}")|g" \
     "$tpl" >"$tmp"
 
   install -m 0644 "$tmp" "$out"
@@ -420,6 +462,19 @@ YAML
 ###############################################################################
 # 10) Config generation
 ###############################################################################
+_write_empty_conf() { : >"$1"; chmod 0644 "$1"; }
+
+_merge_confs() {
+  # merge existing content + new content into target
+  local existing="$1" target="$2"
+  if [[ -s "$existing" ]]; then
+    cat "$existing" >"${target}.tmpmerge"
+    cat "$target" >>"${target}.tmpmerge"
+    install -m 0644 "${target}.tmpmerge" "$target"
+    rm -f "${target}.tmpmerge"
+  fi
+}
+
 create_configuration() {
   mkdir -p "$VHOST_NGINX_DIR" "$VHOST_APACHE_DIR"
 
@@ -429,54 +484,56 @@ create_configuration() {
   ENABLE_CLIENT_VERIFICATION="${ENABLE_CLIENT_VERIFICATION:-ssl_verify_client off;}"
 
   # Node is always proxied by Nginx
-  if [[ "$APP_TYPE" == "node" ]]; then
+  if [[ "$APP_TYPE" == "node" || "$APP_TYPE" == "proxyip" ]]; then
     SERVER_TYPE="Nginx"
   fi
 
+  # ---------------------------------------------------------------------------
+  # NGINX (PHP/Node/ProxyIP) and Apache (PHP only)
+  # ---------------------------------------------------------------------------
   if [[ "$SERVER_TYPE" == "Nginx" ]]; then
+    # Nginx-only: php via fastcgi, node via proxy, proxyip via pinned upstream proxy
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then
       render_template "${TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
     elif [[ "$KEEP_HTTP" == "y" || "$ENABLE_HTTPS" == "n" ]]; then
-      if [[ "$APP_TYPE" == "node" ]]; then
-        render_template "${TEMPLATE_DIR}/http.node.nginx.conf" "$nginx_conf"
-      else
-        render_template "${TEMPLATE_DIR}/http.nginx.conf" "$nginx_conf"
-      fi
+      case "$APP_TYPE" in
+        node)    render_template "${TEMPLATE_DIR}/http.node.nginx.conf" "$nginx_conf" ;;
+        proxyip) render_template "${TEMPLATE_DIR}/proxy-fixedip-http.nginx.conf" "$nginx_conf" ;;
+        *)       render_template "${TEMPLATE_DIR}/http.nginx.conf" "$nginx_conf" ;;
+      esac
     else
-      : >"$nginx_conf"; chmod 0644 "$nginx_conf"
+      _write_empty_conf "$nginx_conf"
     fi
 
     if [[ "$ENABLE_HTTPS" == "y" ]]; then
       local tmp; tmp="$(mktemp)"
       cat "$nginx_conf" >"$tmp" 2>/dev/null || true
 
-      if [[ "$APP_TYPE" == "node" ]]; then
-        render_template "${TEMPLATE_DIR}/https.node.nginx.conf" "$nginx_conf"
-      else
-        render_template "${TEMPLATE_DIR}/https.nginx.conf" "$nginx_conf"
-      fi
+      case "$APP_TYPE" in
+        node)    render_template "${TEMPLATE_DIR}/https.node.nginx.conf" "$nginx_conf" ;;
+        proxyip) render_template "${TEMPLATE_DIR}/proxy-fixedip-https.nginx.conf" "$nginx_conf" ;;
+        *)       render_template "${TEMPLATE_DIR}/https.nginx.conf" "$nginx_conf" ;;
+      esac
 
-      if [[ -s "$tmp" ]]; then
-        cat "$tmp" >"${nginx_conf}.tmpmerge"
-        cat "$nginx_conf" >>"${nginx_conf}.tmpmerge"
-        install -m 0644 "${nginx_conf}.tmpmerge" "$nginx_conf"
-        rm -f "${nginx_conf}.tmpmerge"
-      fi
+      _merge_confs "$tmp" "$nginx_conf"
       rm -f "$tmp"
     fi
+
+    # Apache file not used in Nginx-only mode
+    _write_empty_conf "$apache_conf"
 
   elif [[ "$SERVER_TYPE" == "Apache" ]]; then
     env_set "APACHE_ACTIVE" "apache"
 
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then
       render_template "${TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
-      : >"$apache_conf"; chmod 0644 "$apache_conf"
+      _write_empty_conf "$apache_conf"
     elif [[ "$KEEP_HTTP" == "y" || "$ENABLE_HTTPS" == "n" ]]; then
       render_template "${TEMPLATE_DIR}/proxy-http.nginx.conf" "$nginx_conf"
       render_template "${TEMPLATE_DIR}/http.apache.conf" "$apache_conf"
     else
-      : >"$nginx_conf"; : >"$apache_conf"
-      chmod 0644 "$nginx_conf" "$apache_conf"
+      _write_empty_conf "$nginx_conf"
+      _write_empty_conf "$apache_conf"
     fi
 
     if [[ "$ENABLE_HTTPS" == "y" ]]; then
@@ -488,18 +545,8 @@ create_configuration() {
       render_template "${TEMPLATE_DIR}/proxy-https.nginx.conf" "$nginx_conf"
       render_template "${TEMPLATE_DIR}/https.apache.conf" "$apache_conf"
 
-      if [[ -s "$tmpn" ]]; then
-        cat "$tmpn" >"${nginx_conf}.tmpmerge"
-        cat "$nginx_conf" >>"${nginx_conf}.tmpmerge"
-        install -m 0644 "${nginx_conf}.tmpmerge" "$nginx_conf"
-        rm -f "${nginx_conf}.tmpmerge"
-      fi
-      if [[ -s "$tmpa" ]]; then
-        cat "$tmpa" >"${apache_conf}.tmpmerge"
-        cat "$apache_conf" >>"${apache_conf}.tmpmerge"
-        install -m 0644 "${apache_conf}.tmpmerge" "$apache_conf"
-        rm -f "${apache_conf}.tmpmerge"
-      fi
+      _merge_confs "$tmpn" "$nginx_conf"
+      _merge_confs "$tmpa" "$apache_conf"
       rm -f "$tmpn" "$tmpa"
     fi
   else
@@ -511,8 +558,13 @@ create_configuration() {
   if [[ "$APP_TYPE" == "php" ]]; then
     env_set "ACTIVE_PHP_PROFILE" "${PHP_CONTAINER_PROFILE}"
     env_set "ACTIVE_NODE_PROFILE" ""
-  else
+  elif [[ "$APP_TYPE" == "node" ]]; then
     env_set "ACTIVE_PHP_PROFILE" ""
+    # ACTIVE_NODE_PROFILE already set by create_node_compose
+  else
+    # proxyip
+    env_set "ACTIVE_PHP_PROFILE" ""
+    env_set "ACTIVE_NODE_PROFILE" ""
   fi
 
   GENERATED_NGINX_CONF_BASENAME="$(basename "$nginx_conf")"
@@ -528,22 +580,30 @@ cleanup_vars() {
     FASTCGI_STREAMING_INCLUDE APACHE_STREAMING_INCLUDE ENABLE_CLIENT_VERIFICATION CLIENT_VERIF \
     PHP_VERSION PHP_CONTAINER_PROFILE PHP_CONTAINER PHP_APACHE_CONTAINER_PROFILE PHP_APACHE_CONTAINER \
     NODE_VERSION NODE_CMD NODE_PROFILE NODE_SERVICE NODE_CONTAINER NODE_COMPOSE_FILE_BASENAME \
-    NODE_DIR_TOKEN GENERATED_NGINX_CONF_BASENAME GENERATED_APACHE_CONF_BASENAME || true
+    NODE_DIR_TOKEN GENERATED_NGINX_CONF_BASENAME GENERATED_APACHE_CONF_BASENAME \
+    PROXY_HOST PROXY_IP PROXY_COOKIE_EXACT_INCLUDE PROXY_COOKIE_PARENT_INCLUDE PROXY_REDIRECT_INCLUDE \
+    PROXY_WS_INCLUDE PROXY_SUBFILTER_INCLUDE PROXY_CSP_INCLUDE PROXY_REWRITE_YN PARENT_COOKIE_DOMAIN || true
 }
 
 choose_app_type() {
-  # choose_app_type <n> <t>
-  local n="$1" t="$2"
+  # Non-step prompt: app type selection happens before step counting in each flow.
   say "${CYAN}  1) PHP${NC}"
   say "${CYAN}  2) NodeJs${NC}"
-  local sel
-  pick_index_required "$n" "$t" "App type (choose 1-2)" 2 sel
+  say "${CYAN}  3) Proxy (Fixed IP)${NC}"
+  local sel=""
+  while true; do
+    read -e -r -p "$(echo -e "${YELLOW}${BOLD}App type (choose 1-3)${NC}: ")" sel
+    sel="$(trim "$sel")"
+    [[ "$sel" =~ ^[1-3]$ ]] || { err "Enter 1, 2 or 3."; continue; }
+    break
+  done
   case "$sel" in
   1) APP_TYPE="php"; ok "Selected: PHP" ;;
   2) APP_TYPE="node"; ok "Selected: NodeJs" ;;
-  *) err "Invalid selection."; exit 1 ;;
+  3) APP_TYPE="proxyip"; ok "Selected: Proxy (Fixed IP)" ;;
   esac
 }
+
 
 choose_server_type() {
   # choose_server_type <n> <t>
@@ -760,17 +820,15 @@ parse_domains_step1() {
 print_summary() {
   echo
 
-  local label="${DIM}"
   local key="${DIM}"
-  local val="${BOLD}${NC}"
   local head="${CYAN}${BOLD}"
   local line="${DIM}────────────────────────────────────────────────────────${NC}"
 
   _chip() { # _chip <y|n> <onText> <offText>
     if [[ "${1:-n}" == "y" ]]; then
-      echo -e "${GREEN}${BOLD}${2:-enabled}${NC}"
+      echo -e "${GREEN}${BOLD}${2:-Enabled}${NC}"
     else
-      echo -e "${YELLOW}${BOLD}${3:-disabled}${NC}"
+      echo -e "${YELLOW}${BOLD}${3:-Disabled}${NC}"
     fi
   }
 
@@ -789,21 +847,37 @@ print_summary() {
   say "${line}"
 
   say "${key}Domains:${NC}              ${BOLD}${CYAN}${DOMAINS[*]}${NC}"
-  say "${key}App type:${NC}             ${BOLD}${APP_TYPE^^}${NC}"
+  case "${APP_TYPE:-}" in
+    php)     say "${key}App type:${NC}             ${BOLD}PHP${NC}" ;;
+    node)    say "${key}App type:${NC}             ${BOLD}NODE${NC}" ;;
+    proxyip) say "${key}App type:${NC}             ${BOLD}PROXY (FIXED IP)${NC}" ;;
+    *)       say "${key}App type:${NC}             ${BOLD}${APP_TYPE^^}${NC}" ;;
+  esac
 
   if [[ "$APP_TYPE" == "php" ]]; then
     say "${key}PHP version:${NC}          ${BOLD}${PHP_VERSION}${NC} ${DIM}(profile: ${PHP_CONTAINER_PROFILE})${NC}"
-  else
+    say "${key}Server type:${NC}          ${BOLD}${SERVER_TYPE}${NC}"
+    say "${key}Doc root:${NC}             ${BOLD}${DOC_ROOT}${NC}"
+  elif [[ "$APP_TYPE" == "node" ]]; then
     say "${key}Node version:${NC}         ${BOLD}${NODE_VERSION}${NC}"
+    say "${key}Server type:${NC}          ${BOLD}Nginx${NC}"
+    say "${key}Doc root:${NC}             ${BOLD}${DOC_ROOT}${NC}"
+  elif [[ "$APP_TYPE" == "proxyip" ]]; then
+    say "${key}Upstream host:${NC}        ${BOLD}${PROXY_HOST}${NC}"
+    say "${key}Upstream IP:${NC}          ${BOLD}${PROXY_IP}${NC}"
+    say "${key}Server type:${NC}          ${BOLD}Nginx${NC}"
   fi
 
-  say "${key}Server type:${NC}          ${BOLD}${SERVER_TYPE}${NC}"
   say "${key}Protocol mode:${NC}        ${BOLD}${proto}${NC}"
-  say "${key}Doc root:${NC}             ${BOLD}${DOC_ROOT}${NC}"
   say "${key}Client body size:${NC}     ${BOLD}${CLIENT_MAX_BODY_SIZE}${NC}"
+  say "${key}Streaming/SSE:${NC}        $(_chip "${ENABLE_STREAMING:-n}" "Enabled" "Disabled")"
 
-  say "${key}Streaming/SSE:${NC}        $(_chip "${ENABLE_STREAMING:-n}" "enabled" "disabled")"
-  say "${key}mTLS:${NC}                 $(_chip "${CLIENT_VERIF:-n}" "enabled" "disabled")"
+  if [[ "$APP_TYPE" == "proxyip" ]]; then
+    say "${key}WebSockets:${NC}           $(_chip "${PROXY_WS_ENABLED:-n}" "Enabled" "Disabled")"
+    say "${key}Cookies/Redirects:${NC}        $(_chip "${PROXY_REWRITE_YN:-n}" "Rewrite Enabled" "Rewrite Disabled")"
+  fi
+
+  say "${key}mTLS:${NC}                 $(_chip "${CLIENT_VERIF:-n}" "Enabled" "Disabled")"
 
   echo
 }
@@ -819,11 +893,9 @@ run_certify_if_available() {
   fi
 }
 
-finalize_common_settings() {
-  # finalize_common_settings <body_step> <t> <stream_step> <mtls_step>
-  local step_body="$1" t="$2" step_stream="$3" step_mtls="$4"
-
-  # Client body size (default 10)
+finalize_body_size() {
+  # finalize_body_size <step> <t>
+  local step_body="$1" t="$2"
   local _MB=""
   step_ask_text_default "$step_body" "$t" "Client body size (MB)" _MB "10"
   while [[ ! "$_MB" =~ ^[0-9]+$ ]]; do
@@ -833,8 +905,11 @@ finalize_common_settings() {
   CLIENT_MAX_BODY_SIZE_APACHE=$((_MB * 1000000))
   CLIENT_MAX_BODY_SIZE="${_MB}M"
   unset -v _MB || true
+}
 
-  # Streaming/SSE mode (default n)
+finalize_streaming() {
+  # finalize_streaming <step> <t>
+  local step_stream="$1" t="$2"
   PROXY_STREAMING_INCLUDE=""
   FASTCGI_STREAMING_INCLUDE=""
   APACHE_STREAMING_INCLUDE=""
@@ -844,25 +919,27 @@ finalize_common_settings() {
     FASTCGI_STREAMING_INCLUDE="include /etc/nginx/fastcgi_streaming;"
     APACHE_STREAMING_INCLUDE=$'  # Streaming/SSE tuning\n  ProxyTimeout 3600\n  Timeout 3600\n  Header set Cache-Control "no-cache"\n  Header set X-Accel-Buffering "no"\n'
   fi
+}
 
-  # Client verification (mTLS) (default n; only allowed if HTTPS)
+prompt_mtls() {
+  # prompt_mtls <step> <t>
+  local step_mtls="$1" t="$2"
   CLIENT_VERIF="n"
   if [[ "${ENABLE_HTTPS:-n}" != "y" ]]; then
     ENABLE_CLIENT_VERIFICATION="ssl_verify_client off;"
     ok "Client verification disabled (HTTPS not enabled)."
+    return 0
+  fi
+  step_yn_default "$step_mtls" "$t" "Client certificate verification (mTLS)" CLIENT_VERIF "n"
+  if [[ "$CLIENT_VERIF" == "y" ]]; then
+    ENABLE_CLIENT_VERIFICATION="ssl_verify_client on;"
+    warn "Client verification enabled. Ensure client certs are configured."
   else
-    step_yn_default "$step_mtls" "$t" "Client certificate verification (mTLS)" CLIENT_VERIF "n"
-    if [[ "$CLIENT_VERIF" == "y" ]]; then
-      ENABLE_CLIENT_VERIFICATION="ssl_verify_client on;"
-      warn "Client verification enabled. Ensure client certs are configured."
-    else
-      ENABLE_CLIENT_VERIFICATION="ssl_verify_client off;"
-    fi
+    ENABLE_CLIENT_VERIFICATION="ssl_verify_client off;"
   fi
 }
 
 generate_all_domains() {
-  # Generate per-domain, using current globals.
   local d
   for d in "${DOMAINS[@]}"; do
     DOMAIN_NAME="$d"
@@ -884,34 +961,97 @@ generate_all_domains() {
   run_certify_if_available
 }
 
+###############################################################################
+# 12) ProxyIP helpers
+###############################################################################
+prompt_proxy_host() {
+  # prompt_proxy_host <step> <t>
+  local n="$1" t="$2"
+  local h=""
+  while true; do
+    step_ask_text_required "$n" "$t" "Upstream host" h "e.g., me.example.com or example.com"
+    h="$(trim "$h")"
+    # allow broad hostnames; just block spaces/slashes
+    if [[ "$h" =~ ^[A-Za-z0-9._-]+$ ]] && [[ "$h" == *.* ]]; then
+      PROXY_HOST="$h"
+      return 0
+    fi
+    err "Invalid host."
+  done
+}
+
+prompt_proxy_ip() {
+  # prompt_proxy_ip <step> <t>
+  local n="$1" t="$2"
+  local ip=""
+  while true; do
+    step_ask_text_required "$n" "$t" "Upstream IP" ip "IPv4/IPv6 (e.g., 192.40.2.67)"
+    ip="$(trim "$ip")"
+    if validate_ip "$ip"; then
+      PROXY_IP="$ip"
+      return 0
+    fi
+    err "Invalid IP."
+  done
+}
+
+proxyip_set_feature_includes() {
+  # Called after protocol is chosen and after optional prompts
+  PROXY_COOKIE_EXACT_INCLUDE=""
+  PROXY_COOKIE_PARENT_INCLUDE=""
+  PROXY_REDIRECT_INCLUDE=""
+  PROXY_WS_INCLUDE=""
+  PROXY_SUBFILTER_INCLUDE=""
+  PROXY_CSP_INCLUDE=""
+
+  if [[ "${PROXY_WS_ENABLED:-n}" == "y" ]]; then
+    PROXY_WS_INCLUDE="include /etc/nginx/proxy_websocket;"
+  fi
+
+  if [[ "${PROXY_SUBFILTER_ENABLED:-n}" == "y" ]]; then
+    PROXY_SUBFILTER_INCLUDE="include /etc/nginx/proxy_sub_filter;"
+  fi
+
+  if [[ "${PROXY_CSP_ENABLED:-n}" == "y" ]]; then
+    PROXY_CSP_INCLUDE="include /etc/nginx/proxy_csp_relax;"
+  fi
+
+  if [[ "${PROXY_REWRITE_YN:-n}" == "y" ]]; then
+    # cookie rewrite
+    PROXY_COOKIE_EXACT_INCLUDE=$'proxy_cookie_domain '"${PROXY_HOST}"' '"${DOMAIN_NAME}"';\n        proxy_cookie_path / /;'
+
+    if [[ -n "${PARENT_COOKIE_DOMAIN:-}" ]]; then
+      PROXY_COOKIE_PARENT_INCLUDE=$'proxy_cookie_domain '"${PARENT_COOKIE_DOMAIN}"' '"${DOMAIN_NAME}"';'
+    fi
+
+    # redirect rewrite
+    local rehost="${PROXY_HOST//./\\.}"
+    PROXY_REDIRECT_INCLUDE=$'proxy_redirect ~^https?://'"${rehost}"'(/.*)?$ $scheme://$host$1;'
+  fi
+}
+
+###############################################################################
+# 13) Config flows
+###############################################################################
 configure_php() {
-  # Total steps remain 9; Step 1 is app type (handled by dispatcher).
   local T=9
 
-  # 2) Domain(s)
   while true; do
     local raw=""
-    step_ask_text_required 2 "$T" "Domain" raw "space/comma separated (e.g., a.localhost, b.localhost)"
+    step_ask_text_required 1 "$T" "Domain" raw "space/comma separated (e.g., a.localhost, b.localhost)"
     if parse_domains_step1 "$raw"; then break; fi
     warn "Invalid domain(s). Try again."
   done
 
-  # 3) PHP runtime
-  prompt_php_runtime 3 "$T"
+  prompt_php_runtime 2 "$T"
+  choose_server_type 3 "$T"
+  choose_protocol 4 "$T"
+  choose_doc_root 5 "$T"
 
-  # 4) Server type
-  choose_server_type 4 "$T"
+  finalize_body_size 7 "$T"
+  finalize_streaming 8 "$T"
+  prompt_mtls 9 "$T"
 
-  # 5) Protocol
-  choose_protocol 5 "$T"
-
-  # 6) Doc root
-  choose_doc_root 6 "$T"
-
-  # 7/8/9) Common flags
-  finalize_common_settings 7 "$T" 8 9
-
-  # Summary + confirm (NOT a step; default Y)
   print_summary
   local PROCEED="y"
   ask_yn_default "Proceed with generation" PROCEED "y"
@@ -922,41 +1062,34 @@ configure_php() {
 }
 
 configure_node() {
-  # Total steps remain 9; Step 1 is app type (handled by dispatcher).
   local T=9
 
-  # 2) Domain(s)
   while true; do
     local raw=""
-    step_ask_text_required 2 "$T" "Domain" raw "space/comma separated (e.g., a.localhost, b.localhost)"
+    step_ask_text_required 1 "$T" "Domain" raw "space/comma separated (e.g., a.localhost, b.localhost)"
     if parse_domains_step1 "$raw"; then break; fi
     warn "Invalid domain(s). Try again."
   done
 
-  # 3) Node runtime
-  prompt_node_runtime 3 "$T"
+  prompt_node_runtime 2 "$T"
 
-  # 4) Node command
   SERVER_TYPE="Nginx"
-  step_yn_default 4 "$T" "Custom Node start command" _NODE_CMD_YN "n"
+  step_yn_default 3 "$T" "Custom Node start command" _NODE_CMD_YN "n"
   if [[ "$_NODE_CMD_YN" == "y" ]]; then
-    step_ask_text_required 4 "$T" "Node command" NODE_CMD "npm run dev / npm start / node server.js"
+    step_ask_text_required 3 "$T" "Node command" NODE_CMD "npm run dev / npm start / node server.js"
     NODE_CMD="$(trim "$NODE_CMD")"
   else
     NODE_CMD=""
   fi
   unset -v _NODE_CMD_YN || true
 
-  # 5) Protocol
-  choose_protocol 5 "$T"
+  choose_protocol 4 "$T"
+  choose_doc_root 5 "$T"
 
-  # 6) Doc root
-  choose_doc_root 6 "$T"
+  finalize_body_size 7 "$T"
+  finalize_streaming 8 "$T"
+  prompt_mtls 9 "$T"
 
-  # 7/8/9) Common flags
-  finalize_common_settings 7 "$T" 8 9
-
-  # Summary + confirm (NOT a step; default Y)
   print_summary
   local PROCEED="y"
   ask_yn_default "Proceed with generation" PROCEED "y"
@@ -966,22 +1099,98 @@ configure_node() {
   generate_all_domains
 }
 
+configure_proxyip() {
+  local T=12
+
+  # 2) Domain(s)
+  while true; do
+    local raw=""
+    step_ask_text_required 1 "$T" "Domain" raw "space/comma separated (e.g., xyz.localhost)"
+    if parse_domains_step1 "$raw"; then break; fi
+    warn "Invalid domain(s). Try again."
+  done
+
+  # 3) Upstream host
+  prompt_proxy_host 2 "$T"
+
+  # 4) Upstream IP
+  prompt_proxy_ip 3 "$T"
+
+  # 5) Protocol
+  choose_protocol 4 "$T"
+
+  # 6) Body size
+  finalize_body_size 5 "$T"
+
+  # 7) Streaming
+  finalize_streaming 6 "$T"
+
+  # 8) WebSockets
+  PROXY_WS_ENABLED="n"
+  step_yn_default 7 "$T" "WebSockets/HMR support" PROXY_WS_ENABLED "n"
+
+  # 9) Rewrite/cookies/redirects + last resort tweaks + mTLS
+  PROXY_REWRITE_YN="y"
+  step_yn_default 8 "$T" "Rewrite cookies + redirects for upstream host" PROXY_REWRITE_YN "y"
+
+  PARENT_COOKIE_DOMAIN=""
+  if [[ "$PROXY_REWRITE_YN" == "y" ]]; then
+    step_ask_text_default 9 "$T" "Parent cookie domain (optional)" PARENT_COOKIE_DOMAIN "" "e.g., .example.com"
+    PARENT_COOKIE_DOMAIN="$(trim "$PARENT_COOKIE_DOMAIN")"
+    if [[ -n "$PARENT_COOKIE_DOMAIN" && "${PARENT_COOKIE_DOMAIN:0:1}" != "." ]]; then
+      PARENT_COOKIE_DOMAIN=".${PARENT_COOKIE_DOMAIN}"
+    fi
+  fi
+
+  PROXY_SUBFILTER_ENABLED="n"
+  step_yn_default 10 "$T" "Enable sub_filter URL rewrite (last resort)" PROXY_SUBFILTER_ENABLED "n"
+
+  PROXY_CSP_ENABLED="n"
+  step_yn_default 11 "$T" "Relax Content-Security-Policy (last resort)" PROXY_CSP_ENABLED "n"
+
+  # mTLS last (still step 9)
+  prompt_mtls 12 "$T"
+
+  # ProxyIP doesn't use docroot in templates
+  DOC_ROOT="/"
+
+  # Summary + confirm
+  print_summary
+  local PROCEED="y"
+  ask_yn_default "Proceed with generation" PROCEED "y"
+  [[ "$PROCEED" == "y" ]] || { warn "Cancelled."; return 0; }
+  echo
+
+  # Generate with proxyip includes computed per-domain (needs DOMAIN_NAME)
+  local d
+  for d in "${DOMAINS[@]}"; do
+    DOMAIN_NAME="$d"
+    proxyip_set_feature_includes
+    say "${MAGENTA}${BOLD}Generating:${NC} ${BOLD}${DOMAIN_NAME}${NC}"
+    create_configuration
+    ok "  ✔ Configuration Saved"
+    echo
+  done
+
+  run_certify_if_available
+}
+
 configure_server() {
   require_versions_db
   preflight_templates
 
-  # 1) App type → dispatch to dedicated flow
-  choose_app_type 1 9
+  choose_app_type
 
   case "$APP_TYPE" in
-  php)  configure_php ;;
-  node) configure_node ;;
-  *) err "Invalid app type: ${APP_TYPE:-}"; exit 1 ;;
+    php)     configure_php ;;
+    node)    configure_node ;;
+    proxyip) configure_proxyip ;;
+    *) err "Invalid app type: ${APP_TYPE:-}"; exit 1 ;;
   esac
 }
 
 ###############################################################################
-# 12) CLI flags
+# 14) CLI flags
 ###############################################################################
 case "${1:-}" in
 --RESET)

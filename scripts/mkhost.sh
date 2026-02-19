@@ -319,6 +319,39 @@ collect_docroot_options() {
 print_two_column_menu() {
   local arr_name="$1" start="$2"
   local -n arr="$arr_name"
+
+  # Sort arr[start..] while keeping arr[0..start-1] intact (e.g. "<Custom Path>")
+  if ((${#arr[@]} > start)); then
+    local -a head tail sorted
+    head=("${arr[@]:0:start}")
+    tail=("${arr[@]:start}")
+
+    local x full flag depth
+    while IFS= read -r -d '' x; do
+      sorted+=("$x")
+    done < <(
+      for x in "${tail[@]}"; do
+        full="${APP_SCAN_DIR%/}${x}"
+
+        # 0 = directory exists (comes first), 1 = not found
+        if [[ -d "$full" ]]; then flag=0; else flag=1; fi
+
+        # depth = number of path segments (slash count), smaller first
+        # "/foo" -> 1, "/foo/public" -> 2
+        depth="$(awk -v s="$x" 'BEGIN{ gsub(/[^\/]/,"",s); print length(s) }')"
+
+        # NUL-safe records: flag<TAB>depth<TAB>value<NUL>
+        printf '%s\t%s\t%s\0' "$flag" "$depth" "$x"
+      done \
+        | LC_ALL=C sort -z -t $'\t' -k1,1n -k2,2n -k3,3V \
+        | tr '\t' '\n' \
+        | awk 'NR%3==0{ printf "%s\0",$0 }'
+    )
+
+    arr=("${head[@]}" "${sorted[@]}")
+  fi
+
+  # ---- existing printing logic (unchanged) ----
   local i width=0
   for ((i=start; i<${#arr[@]}; i++)); do
     ((${#arr[i]} > width)) && width=${#arr[i]}
@@ -884,7 +917,7 @@ print_summary() {
 
   if [[ "$APP_TYPE" == "proxyip" ]]; then
     say "${key}WebSockets:${NC}           $(_chip "${PROXY_WS_ENABLED:-n}" "Enabled" "Disabled")"
-    say "${key}Cookies/Redirects:${NC}        $(_chip "${PROXY_REWRITE_YN:-n}" "Rewrite Enabled" "Rewrite Disabled")"
+    say "${key}Cookies/Redirects:${NC}    $(_chip "${PROXY_REWRITE_YN:-n}" "Rewrite Enabled" "Rewrite Disabled")"
   fi
 
   say "${key}mTLS:${NC}                 $(_chip "${CLIENT_VERIF:-n}" "Enabled" "Disabled")"
@@ -1092,17 +1125,21 @@ proxyip_set_feature_includes() {
     PROXY_CSP_INCLUDE="include /etc/nginx/proxy_csp_relax;"
   fi
 
+  # Always make proxy_redirect deterministic (disable built-in rewrite), and
+  # optionally add an explicit rule to keep the browser on {{SERVER_NAME}}.
+  PROXY_REDIRECT_INCLUDE="proxy_redirect off;"
+
   if [[ "${PROXY_REWRITE_YN:-n}" == "y" ]]; then
-    # cookie rewrite
-    PROXY_COOKIE_EXACT_INCLUDE=$'proxy_cookie_domain '"${PROXY_HOST}"' '"${DOMAIN_NAME}"';\n        proxy_cookie_path / /;'
+    # cookie rewrite (keep single-line to avoid literal "\\n" in output)
+    PROXY_COOKIE_EXACT_INCLUDE="proxy_cookie_domain ${PROXY_HOST} ${DOMAIN_NAME}; proxy_cookie_path / /;"
 
     if [[ -n "${PARENT_COOKIE_DOMAIN:-}" ]]; then
-      PROXY_COOKIE_PARENT_INCLUDE=$'proxy_cookie_domain '"${PARENT_COOKIE_DOMAIN}"' '"${DOMAIN_NAME}"';'
+      PROXY_COOKIE_PARENT_INCLUDE="proxy_cookie_domain ${PARENT_COOKIE_DOMAIN} ${DOMAIN_NAME};"
     fi
 
     # redirect rewrite
     local rehost="${PROXY_HOST//./\\.}"
-    PROXY_REDIRECT_INCLUDE=$'proxy_redirect ~^https?://'"${rehost}"'(/.*)?$ $scheme://$host$1;'
+    PROXY_REDIRECT_INCLUDE="proxy_redirect off; proxy_redirect ~^https?://${rehost}(/.*)?$ \\$scheme://\\$host\\$1;"
   fi
 }
 

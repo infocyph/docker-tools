@@ -319,6 +319,39 @@ collect_docroot_options() {
 print_two_column_menu() {
   local arr_name="$1" start="$2"
   local -n arr="$arr_name"
+
+  # Sort arr[start..] while keeping arr[0..start-1] intact (e.g. "<Custom Path>")
+  if ((${#arr[@]} > start)); then
+    local -a head tail sorted
+    head=("${arr[@]:0:start}")
+    tail=("${arr[@]:start}")
+
+    local x full flag depth
+    while IFS= read -r -d '' x; do
+      sorted+=("$x")
+    done < <(
+      for x in "${tail[@]}"; do
+        full="${APP_SCAN_DIR%/}${x}"
+
+        # 0 = directory exists (comes first), 1 = not found
+        if [[ -d "$full" ]]; then flag=0; else flag=1; fi
+
+        # depth = number of path segments (slash count), smaller first
+        # "/foo" -> 1, "/foo/public" -> 2
+        depth="$(awk -v s="$x" 'BEGIN{ gsub(/[^\/]/,"",s); print length(s) }')"
+
+        # NUL-safe records: flag<TAB>depth<TAB>value<NUL>
+        printf '%s\t%s\t%s\0' "$flag" "$depth" "$x"
+      done \
+        | LC_ALL=C sort -z -t $'\t' -k1,1n -k2,2n -k3,3V \
+        | tr '\t' '\n' \
+        | awk 'NR%3==0{ printf "%s\0",$0 }'
+    )
+
+    arr=("${head[@]}" "${sorted[@]}")
+  fi
+
+  # ---- existing printing logic (unchanged) ----
   local i width=0
   for ((i=start; i<${#arr[@]}; i++)); do
     ((${#arr[i]} > width)) && width=${#arr[i]}

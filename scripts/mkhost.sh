@@ -884,7 +884,7 @@ print_summary() {
 
   if [[ "$APP_TYPE" == "proxyip" ]]; then
     say "${key}WebSockets:${NC}           $(_chip "${PROXY_WS_ENABLED:-n}" "Enabled" "Disabled")"
-    say "${key}Cookies/Redirects:${NC}        $(_chip "${PROXY_REWRITE_YN:-n}" "Rewrite Enabled" "Rewrite Disabled")"
+    say "${key}Cookies/Redirects:${NC}    $(_chip "${PROXY_REWRITE_YN:-n}" "Rewrite Enabled" "Rewrite Disabled")"
   fi
 
   say "${key}mTLS:${NC}                 $(_chip "${CLIENT_VERIF:-n}" "Enabled" "Disabled")"

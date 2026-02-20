@@ -593,9 +593,6 @@ create_configuration() {
       rm -f "$tmp"
     fi
 
-    # Apache file not used in Nginx-only mode
-    _write_empty_conf "$apache_conf"
-
   elif [[ "$SERVER_TYPE" == "Apache" ]]; then
     env_set "APACHE_ACTIVE" "apache"
 

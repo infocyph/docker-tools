@@ -310,24 +310,29 @@ collect_docroot_options() {
   local seen="|" opt
   local -a uniq=()
   for opt in "${out[@]}"; do
+    opt="${opt:-}"
+    [[ -n "$opt" ]] || continue
     if [[ "$seen" != *"|$opt|"* ]]; then
       seen="${seen}${opt}|"
       uniq+=("$opt")
     fi
   done
 
-  # Sort: existing directories first, then shallower path first (/foo before /foo/public), then lexicographic
-  local x full flag depth
-  while IFS= read -r -d '' x; do
-    printf '%s\0' "$x"
+  # Sort NUL-safe: flag<TAB>depth<TAB>path<NUL>  then extract path in bash
+  local rec path full flag depth x
+  while IFS= read -r -d '' rec; do
+    # Extract 3rd field (path) from "flag\tdepth\tpath"
+    path="${rec#*$'\t'}"
+    path="${path#*$'\t'}"
+    [[ -n "$path" ]] && printf '%s\0' "$path"
   done < <(
     for x in "${uniq[@]}"; do
+      [[ -n "$x" ]] || continue
       full="${base%/}${x}"
       [[ -d "$full" ]] && flag=0 || flag=1
       depth="${x//[^\/]/}"; depth="${#depth}"
-      printf '%s	%s	%s
-' "$flag" "$depth" "$x"
-    done | LC_ALL=C sort -t $'	' -k1,1n -k2,2n -k3,3V | cut -f3
+      printf '%s\t%s\t%s\0' "$flag" "$depth" "$x"
+    done | LC_ALL=C sort -z -t $'\t' -k1,1n -k2,2n -k3,3V
   )
 }
 
@@ -335,38 +340,6 @@ print_two_column_menu() {
   local arr_name="$1" start="$2"
   local -n arr="$arr_name"
 
-  # Sort arr[start..] while keeping arr[0..start-1] intact (e.g. "<Custom Path>")
-  if ((${#arr[@]} > start)); then
-    local -a head tail sorted
-    head=("${arr[@]:0:start}")
-    tail=("${arr[@]:start}")
-
-    local x full flag depth
-    while IFS= read -r -d '' x; do
-      sorted+=("$x")
-    done < <(
-      for x in "${tail[@]}"; do
-        full="${APP_SCAN_DIR%/}${x}"
-
-        # 0 = directory exists (comes first), 1 = not found
-        if [[ -d "$full" ]]; then flag=0; else flag=1; fi
-
-        # depth = number of path segments (slash count), smaller first
-        # "/foo" -> 1, "/foo/public" -> 2
-        depth="$(awk -v s="$x" 'BEGIN{ gsub(/[^\/]/,"",s); print length(s) }')"
-
-        # NUL-safe records: flag<TAB>depth<TAB>value<NUL>
-        printf '%s\t%s\t%s\0' "$flag" "$depth" "$x"
-      done \
-        | LC_ALL=C sort -z -t $'\t' -k1,1n -k2,2n -k3,3V \
-        | tr '\t' '\n' \
-        | awk 'NR%3==0{ printf "%s\0",$0 }'
-    )
-
-    arr=("${head[@]}" "${sorted[@]}")
-  fi
-
-  # ---- existing printing logic (unchanged) ----
   local i width=0
   for ((i=start; i<${#arr[@]}; i++)); do
     ((${#arr[i]} > width)) && width=${#arr[i]}
@@ -866,7 +839,10 @@ choose_doc_root() {
   local n="$1" t="$2"
   local opts=()
   opts+=("<Custom Path>")
-  while IFS= read -r -d '' v; do opts+=("$v"); done < <(collect_docroot_options || true)
+  while IFS= read -r -d '' v; do
+    v="$(trim "$v")"
+    [[ -n "$v" ]] && opts+=("$v")
+  done < <(collect_docroot_options || true)
 
   say "${CYAN}Doc root suggestions from ${APP_SCAN_DIR}:${NC}"
   print_two_column_menu opts 0

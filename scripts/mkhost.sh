@@ -293,7 +293,7 @@ node_is_valid_custom() {
 ###############################################################################
 collect_docroot_options() {
   local base="$APP_SCAN_DIR"
-  local out=()
+  local -a out=()
 
   [[ -d "$base/public" ]] && out+=("/public")
 
@@ -306,14 +306,29 @@ collect_docroot_options() {
     done < <(find "$base" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null || true)
   fi
 
-  local seen="|"
-  local opt
+  # de-dup
+  local seen="|" opt
+  local -a uniq=()
   for opt in "${out[@]}"; do
     if [[ "$seen" != *"|$opt|"* ]]; then
       seen="${seen}${opt}|"
-      printf '%s\0' "$opt"
+      uniq+=("$opt")
     fi
   done
+
+  # Sort: existing directories first, then shallower path first (/foo before /foo/public), then lexicographic
+  local x full flag depth
+  while IFS= read -r -d '' x; do
+    printf '%s\0' "$x"
+  done < <(
+    for x in "${uniq[@]}"; do
+      full="${base%/}${x}"
+      [[ -d "$full" ]] && flag=0 || flag=1
+      depth="${x//[^\/]/}"; depth="${#depth}"
+      printf '%s	%s	%s
+' "$flag" "$depth" "$x"
+    done | LC_ALL=C sort -t $'	' -k1,1n -k2,2n -k3,3V | cut -f3
+  )
 }
 
 print_two_column_menu() {
@@ -383,31 +398,70 @@ render_template() {
   [[ -r "$tpl" ]] || { err "Template not readable: $(basename "$tpl")"; exit 1; }
 
   local tmp; tmp="$(mktemp)"
-  sed \
-    -e "s|{{SERVER_NAME}}|$(sed_escape_repl "${DOMAIN_NAME:-}")|g" \
-    -e "s|{{DOC_ROOT}}|$(sed_escape_repl "${DOC_ROOT:-}")|g" \
-    -e "s|{{CLIENT_MAX_BODY_SIZE}}|$(sed_escape_repl "${CLIENT_MAX_BODY_SIZE:-10M}")|g" \
-    -e "s|{{CLIENT_MAX_BODY_SIZE_APACHE}}|$(sed_escape_repl "${CLIENT_MAX_BODY_SIZE_APACHE:-}")|g" \
-    -e "s|{{PROXY_STREAMING_INCLUDE}}|$(sed_escape_repl "${PROXY_STREAMING_INCLUDE:-}")|g" \
-    -e "s|{{FASTCGI_STREAMING_INCLUDE}}|$(sed_escape_repl "${FASTCGI_STREAMING_INCLUDE:-}")|g" \
-    -e "s|{{APACHE_STREAMING_INCLUDE}}|$(sed_escape_repl "${APACHE_STREAMING_INCLUDE:-}")|g" \
-    -e "s|{{PHP_APACHE_CONTAINER}}|$(sed_escape_repl "${PHP_APACHE_CONTAINER:-}")|g" \
-    -e "s|{{APACHE_CONTAINER}}|$(sed_escape_repl "${APACHE_CONTAINER:-APACHE}")|g" \
-    -e "s|{{PHP_CONTAINER}}|$(sed_escape_repl "${PHP_CONTAINER:-}")|g" \
-    -e "s|{{CLIENT_VERIFICATION}}|$(sed_escape_repl "${ENABLE_CLIENT_VERIFICATION:-ssl_verify_client off;}")|g" \
-    -e "s|{{NODE_CONTAINER}}|$(sed_escape_repl "${NODE_CONTAINER:-}")|g" \
-    -e "s|{{NODE_PORT}}|$(sed_escape_repl "${NODE_PORT}")|g" \
-    -e "s|{{PROXY_IP}}|$(sed_escape_repl "${PROXY_IP:-}")|g" \
--e "s|{{PROXY_HTTP_PORT}}|$(sed_escape_repl "${PROXY_HTTP_PORT:-80}")|g" \
--e "s|{{PROXY_HTTPS_PORT}}|$(sed_escape_repl "${PROXY_HTTPS_PORT:-443}")|g" \
-    -e "s|{{PROXY_HOST}}|$(sed_escape_repl "${PROXY_HOST:-}")|g" \
-    -e "s|{{PROXY_COOKIE_EXACT_INCLUDE}}|$(sed_escape_repl "${PROXY_COOKIE_EXACT_INCLUDE:-}")|g" \
-    -e "s|{{PROXY_COOKIE_PARENT_INCLUDE}}|$(sed_escape_repl "${PROXY_COOKIE_PARENT_INCLUDE:-}")|g" \
-    -e "s|{{PROXY_REDIRECT_INCLUDE}}|$(sed_escape_repl "${PROXY_REDIRECT_INCLUDE:-}")|g" \
-    -e "s|{{PROXY_WS_INCLUDE}}|$(sed_escape_repl "${PROXY_WS_INCLUDE:-}")|g" \
-    -e "s|{{PROXY_SUBFILTER_INCLUDE}}|$(sed_escape_repl "${PROXY_SUBFILTER_INCLUDE:-}")|g" \
-    -e "s|{{PROXY_CSP_INCLUDE}}|$(sed_escape_repl "${PROXY_CSP_INCLUDE:-}")|g" \
-    "$tpl" >"$tmp"
+
+  # Defaults (avoid set -u surprises)
+  : "${DOMAIN_NAME:=}"
+  : "${DOC_ROOT:=}"
+  : "${CLIENT_MAX_BODY_SIZE:=}"
+  : "${CLIENT_MAX_BODY_SIZE_APACHE:=}"
+  : "${PROXY_STREAMING_INCLUDE:=}"
+  : "${FASTCGI_STREAMING_INCLUDE:=}"
+  : "${APACHE_STREAMING_INCLUDE:=}"
+  : "${PHP_APACHE_CONTAINER:=}"
+  : "${APACHE_CONTAINER:=APACHE}"
+  : "${PHP_CONTAINER:=}"
+  : "${ENABLE_CLIENT_VERIFICATION:=ssl_verify_client off;}"
+  : "${NODE_CONTAINER:=}"
+  : "${NODE_PORT:=3000}"
+
+  : "${PROXY_IP:=}"
+  : "${PROXY_HOST:=}"
+  : "${PROXY_HTTP_PORT:=80}"
+  : "${PROXY_HTTPS_PORT:=443}"
+  : "${PROXY_COOKIE_EXACT_INCLUDE:=}"
+  : "${PROXY_COOKIE_PARENT_INCLUDE:=}"
+  : "${PROXY_REDIRECT_INCLUDE:=}"
+  : "${PROXY_WS_INCLUDE:=}"
+  : "${PROXY_SUBFILTER_INCLUDE:=}"
+  : "${PROXY_CSP_INCLUDE:=}"
+
+  # Bash-native templating (supports multiline replacements safely).
+  # Note: ${var//pattern/repl} uses glob patterns; our tokens are literal.
+  local line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line//\{\{SERVER_NAME\}\}/$DOMAIN_NAME}"
+    line="${line//\{\{DOC_ROOT\}\}/$DOC_ROOT}"
+    line="${line//\{\{CLIENT_MAX_BODY_SIZE\}\}/$CLIENT_MAX_BODY_SIZE}"
+    line="${line//\{\{CLIENT_MAX_BODY_SIZE_APACHE\}\}/$CLIENT_MAX_BODY_SIZE_APACHE}"
+
+    line="${line//\{\{PROXY_STREAMING_INCLUDE\}\}/$PROXY_STREAMING_INCLUDE}"
+    line="${line//\{\{FASTCGI_STREAMING_INCLUDE\}\}/$FASTCGI_STREAMING_INCLUDE}"
+    line="${line//\{\{APACHE_STREAMING_INCLUDE\}\}/$APACHE_STREAMING_INCLUDE}"
+
+    line="${line//\{\{PHP_APACHE_CONTAINER\}\}/$PHP_APACHE_CONTAINER}"
+    line="${line//\{\{APACHE_CONTAINER\}\}/$APACHE_CONTAINER}"
+    line="${line//\{\{PHP_CONTAINER\}\}/$PHP_CONTAINER}"
+
+    line="${line//\{\{CLIENT_VERIFICATION\}\}/$ENABLE_CLIENT_VERIFICATION}"
+
+    line="${line//\{\{NODE_CONTAINER\}\}/$NODE_CONTAINER}"
+    line="${line//\{\{NODE_PORT\}\}/$NODE_PORT}"
+
+    line="${line//\{\{PROXY_IP\}\}/$PROXY_IP}"
+    line="${line//\{\{PROXY_HOST\}\}/$PROXY_HOST}"
+    line="${line//\{\{PROXY_HTTP_PORT\}\}/$PROXY_HTTP_PORT}"
+    line="${line//\{\{PROXY_HTTPS_PORT\}\}/$PROXY_HTTPS_PORT}"
+
+    line="${line//\{\{PROXY_COOKIE_EXACT_INCLUDE\}\}/$PROXY_COOKIE_EXACT_INCLUDE}"
+    line="${line//\{\{PROXY_COOKIE_PARENT_INCLUDE\}\}/$PROXY_COOKIE_PARENT_INCLUDE}"
+    line="${line//\{\{PROXY_REDIRECT_INCLUDE\}\}/$PROXY_REDIRECT_INCLUDE}"
+    line="${line//\{\{PROXY_WS_INCLUDE\}\}/$PROXY_WS_INCLUDE}"
+    line="${line//\{\{PROXY_SUBFILTER_INCLUDE\}\}/$PROXY_SUBFILTER_INCLUDE}"
+    line="${line//\{\{PROXY_CSP_INCLUDE\}\}/$PROXY_CSP_INCLUDE}"
+
+    printf '%s
+' "$line"
+  done <"$tpl" >"$tmp"
 
   install -m 0644 "$tmp" "$out"
   rm -f "$tmp"
@@ -1117,29 +1171,34 @@ proxyip_set_feature_includes() {
     PROXY_WS_INCLUDE="include /etc/nginx/proxy_websocket;"
   fi
 
+  # Inline sub_filter rules (proxy-params.sh doesn't generate proxy_sub_filter include)
   if [[ "${PROXY_SUBFILTER_ENABLED:-n}" == "y" ]]; then
-    PROXY_SUBFILTER_INCLUDE="include /etc/nginx/proxy_sub_filter;"
+    PROXY_SUBFILTER_INCLUDE=$'sub_filter_once off;
+sub_filter_types text/html text/css application/javascript;
+'
+    PROXY_SUBFILTER_INCLUDE+=$'sub_filter "https://'"${PROXY_HOST}"'" "$scheme://$host";
+'
+    PROXY_SUBFILTER_INCLUDE+=$'sub_filter "http://'"${PROXY_HOST}"'" "$scheme://$host";
+'
   fi
 
   if [[ "${PROXY_CSP_ENABLED:-n}" == "y" ]]; then
     PROXY_CSP_INCLUDE="include /etc/nginx/proxy_csp_relax;"
   fi
 
-  # Always make proxy_redirect deterministic (disable built-in rewrite), and
-  # optionally add an explicit rule to keep the browser on {{SERVER_NAME}}.
-  PROXY_REDIRECT_INCLUDE="proxy_redirect off;"
-
+  # Templates already contain: proxy_redirect off;
+  # Only add explicit rewrite rule when enabled (keep the browser on {{SERVER_NAME}})
   if [[ "${PROXY_REWRITE_YN:-n}" == "y" ]]; then
-    # cookie rewrite (keep single-line to avoid literal "\\n" in output)
+    # cookie rewrite (keep single-line to avoid literal "\n" in output)
     PROXY_COOKIE_EXACT_INCLUDE="proxy_cookie_domain ${PROXY_HOST} ${DOMAIN_NAME}; proxy_cookie_path / /;"
 
     if [[ -n "${PARENT_COOKIE_DOMAIN:-}" ]]; then
       PROXY_COOKIE_PARENT_INCLUDE="proxy_cookie_domain ${PARENT_COOKIE_DOMAIN} ${DOMAIN_NAME};"
     fi
 
-    # redirect rewrite
-    local rehost="${PROXY_HOST//./\\.}"
-    PROXY_REDIRECT_INCLUDE="proxy_redirect off; proxy_redirect ~^https?://${rehost}(/.*)?$ \\$scheme://\\$host\\$1;"
+    # redirect rewrite (avoid expanding $scheme/$host under set -u)
+    local rehost="${PROXY_HOST//./\.}"
+    PROXY_REDIRECT_INCLUDE="proxy_redirect ~^https?://${rehost}(/.*)?$ "'$scheme://$host$1;'
   fi
 }
 

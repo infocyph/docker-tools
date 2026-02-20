@@ -318,21 +318,26 @@ collect_docroot_options() {
     fi
   done
 
-  # Sort NUL-safe: flag<TAB>depth<TAB>path<NUL>  then extract path in bash
-  local rec path full flag depth x
+  # Grouped sort:
+  #  - group_key: "/x" for "/x" and "/x/public"
+  #  - depth: slash count ("/x" < "/x/public")
+  #  - full path: final tiebreaker
+  local rec path full depth group key
   while IFS= read -r -d '' rec; do
-    # Extract 3rd field (path) from "flag\tdepth\tpath"
-    path="${rec#*$'\t'}"
-    path="${path#*$'\t'}"
+    path="${rec#*$'\t'}"; path="${path#*$'\t'}"; path="${path#*$'\t'}"
     [[ -n "$path" ]] && printf '%s\0' "$path"
   done < <(
-    for x in "${uniq[@]}"; do
-      [[ -n "$x" ]] || continue
-      full="${base%/}${x}"
-      [[ -d "$full" ]] && flag=0 || flag=1
-      depth="${x//[^\/]/}"; depth="${#depth}"
-      printf '%s\t%s\t%s\0' "$flag" "$depth" "$x"
-    done | LC_ALL=C sort -z -t $'\t' -k1,1n -k2,2n -k3,3V
+    for path in "${uniq[@]}"; do
+      [[ -n "$path" ]] || continue
+      depth="${path//[^\/]/}"; depth="${#depth}"
+      group="$path"
+      if [[ "$group" == */public ]]; then
+        group="${group%/public}"
+        [[ -n "$group" ]] || group="/"
+      fi
+      key="${group,,}"
+      printf '%s\t%s\t%s\t%s\0' "$key" "$depth" "$path" "$path"
+    done | LC_ALL=C sort -z -f -t $'\t' -k1,1 -k2,2n -k3,3
   )
 }
 

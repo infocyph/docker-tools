@@ -1176,7 +1176,7 @@ sub_filter_types text/html text/css application/javascript;
 
     # redirect rewrite (avoid expanding $scheme/$host under set -u)
     local rehost="${PROXY_HOST//./\.}"
-    PROXY_REDIRECT_INCLUDE="proxy_redirect ~^https?://${rehost}(/.*)?$ "'$scheme://$host$1;'
+    PROXY_REDIRECT_INCLUDE="proxy_redirect ~^https?://${rehost}(:[0-9]+)?(/.*)?$ "'$scheme://$host$2;'
   fi
 }
 

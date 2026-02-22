@@ -193,7 +193,7 @@ RUN chmod +x \
       /usr/local/bin/entrypoint \
       /usr/local/bin/mkcert \
       /usr/local/bin/lazydocker \
-      /usr/local/bin/es-month-policy \
+      /usr/local/bin/es-policy \
       /usr/local/bin/senv \
   && touch /etc/environment \
   && chmod -R 755 /etc/share/vhosts \

@@ -166,7 +166,7 @@ COPY --from=fetch /out/runtime-versions.json /etc/share/runtime-versions.json
 COPY scripts/certify.sh /usr/local/bin/certify
 COPY scripts/mkhost.sh /usr/local/bin/mkhost
 COPY scripts/rmhost.sh /usr/local/bin/rmhost
-COPY scripts/es-month-policy.sh /usr/local/bin/es-month-policy
+COPY scripts/es-policy.sh /usr/local/bin/es-policy
 COPY scripts/notifierd.sh /usr/local/bin/notifierd
 COPY scripts/notify.sh /usr/local/bin/notify
 COPY scripts/senv.sh /usr/local/bin/senv

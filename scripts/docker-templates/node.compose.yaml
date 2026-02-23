@@ -1,0 +1,44 @@
+name: {{COMPOSE_PROJECT_NAME}}
+
+services:
+    {{NODE_SERVICE}}:
+      container_name: {{NODE_CONTAINER_NAME}}
+      hostname: {{NODE_HOSTNAME}}
+      build:
+        context: docker/dockerfiles
+        dockerfile: node.Dockerfile
+        args:
+          UID: ${UID:-1000}
+          GID: ${GID:-1000}
+          USERNAME: ${USER}
+          NODE_VERSION: {{NODE_VERSION}}
+          LINUX_PKG: ${LINUX_PKG:-}
+          LINUX_PKG_VERSIONED: ${LINUX_PKG_{{NODE_KEY}}:-}
+          NODE_GLOBAL: ${NODE_GLOBAL:-}
+          NODE_GLOBAL_VERSIONED: ${NODE_GLOBAL_{{NODE_KEY}}:-}
+      environment:
+        - TZ=${TZ:-}
+        - PORT={{NODE_PORT}}
+        - HOST=0.0.0.0
+        - NPM_AUDIT=${NPM_AUDIT:-0}
+        - NPM_FUND=${NPM_FUND:-0}
+        {{NODE_CMD_LINE}}
+      env_file:
+        - .env
+      networks:
+        frontend: {}
+        backend: {}
+        datastore: {}
+      volumes:
+        - "${PROJECT_DIR:-./../application}{{DOC_ROOT}}:/app"
+        - "./configuration/ssh:/home/${USER}/.ssh:ro"
+        - ./configuration/rootCA:/etc/share/rootCA:ro
+        - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+      depends_on:
+        - server-tools
+      healthcheck:
+        test: ["CMD-SHELL", "node -e \"const net=require('net');const h=process.env.HOST||'127.0.0.1';const p=+process.env.PORT||{{NODE_PORT}};const s=net.connect(p,h);s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));\""]
+        interval: 30s
+        timeout: 5s
+        retries: 5
+      profiles: ["node","{{NODE_PROFILE}}"]

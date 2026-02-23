@@ -14,7 +14,9 @@ set -euo pipefail
 readonly RUNTIME_VERSIONS_DB="${RUNTIME_VERSIONS_DB:-/etc/share/runtime-versions.json}"
 readonly MAX_VERSIONS="${MAX_VERSIONS:-16}"
 
-readonly TEMPLATE_DIR="${TEMPLATE_DIR:-/etc/http-templates}"
+readonly NGINX_TEMPLATE_DIR="${NGINX_TEMPLATE_DIR:-/etc/http-templates/nginx}"
+readonly APACHE_TEMPLATE_DIR="${APACHE_TEMPLATE_DIR:-/etc/http-templates/apache}"
+readonly DOCKER_TEMPLATE_DIRECTORY="${DOCKER_TEMPLATE_DIRECTORY:-/etc/docker-templates}"
 readonly VHOST_NGINX_DIR="${VHOST_NGINX_DIR:-/etc/share/vhosts/nginx}"
 readonly VHOST_APACHE_DIR="${VHOST_APACHE_DIR:-/etc/share/vhosts/apache}"
 readonly VHOST_NODE_DIR="${VHOST_NODE_DIR:-/etc/share/vhosts/node}"
@@ -55,19 +57,32 @@ require_versions_db() {
 
 # Preflight templates (fail fast; do NOT print template directory)
 required_tpls=(
-  redirect.nginx.conf
-  http.nginx.conf https.nginx.conf
-  http.node.nginx.conf https.node.nginx.conf
-  proxy-http.nginx.conf proxy-https.nginx.conf
-  http.apache.conf https.apache.conf
-  proxy-fixedip-http.nginx.conf
-  proxy-fixedip-https.nginx.conf
+  "nginx:redirect.nginx.conf"
+  "nginx:http.nginx.conf"
+  "nginx:https.nginx.conf"
+  "nginx:http.node.nginx.conf"
+  "nginx:https.node.nginx.conf"
+  "nginx:proxy-http.nginx.conf"
+  "nginx:proxy-https.nginx.conf"
+  "nginx:proxy-fixedip-http.nginx.conf"
+  "nginx:proxy-fixedip-https.nginx.conf"
+  "apache:http.apache.conf"
+  "apache:https.apache.conf"
+  "node:node.compose.yaml"
 )
 
 preflight_templates() {
-  local f
-  for f in "${required_tpls[@]}"; do
-    [[ -r "$TEMPLATE_DIR/$f" ]] || { err "Error: missing template: $f"; exit 1; }
+  local entry kind f dir
+  for entry in "${required_tpls[@]}"; do
+    kind="${entry%%:*}"
+    f="${entry#*:}"
+    case "$kind" in
+      nginx)  dir="$NGINX_TEMPLATE_DIR" ;;
+      apache) dir="$APACHE_TEMPLATE_DIR" ;;
+      node)   dir="$DOCKER_TEMPLATE_DIRECTORY" ;;
+      *) err "Error: invalid template kind: $kind"; exit 1 ;;
+    esac
+    [[ -r "$dir/$f" ]] || { err "Error: missing template: $f"; exit 1; }
   done
 }
 
@@ -372,7 +387,7 @@ print_two_column_menu() {
 sed_escape_repl() { echo "${1:-}" | sed -e 's/[\/&|\\]/\\&/g'; }
 
 render_template() {
-  local tpl="$1" out="$2"
+  local tpl="$1" outFile="$2"
   [[ -r "$tpl" ]] || { err "Template not readable: $(basename "$tpl")"; exit 1; }
 
   local tmp; tmp="$(mktemp)"
@@ -403,51 +418,52 @@ render_template() {
   : "${PROXY_SUBFILTER_INCLUDE:=}"
   : "${PROXY_CSP_INCLUDE:=}"
 
-  # Bash-native templating (supports multiline replacements safely).
-  # Note: ${var//pattern/repl} uses glob patterns; our tokens are literal.
-  local line
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line//\{\{SERVER_NAME\}\}/$DOMAIN_NAME}"
-    line="${line//\{\{DOC_ROOT\}\}/$DOC_ROOT}"
-    line="${line//\{\{CLIENT_MAX_BODY_SIZE\}\}/$CLIENT_MAX_BODY_SIZE}"
-    line="${line//\{\{CLIENT_MAX_BODY_SIZE_APACHE\}\}/$CLIENT_MAX_BODY_SIZE_APACHE}"
+# Bash-native templating (supports multiline replacements safely).
+# We keep a deterministic replacement order via a pair-list.
+local -a _tpl_tokens=(
+  '{{SERVER_NAME}}' '{{DOC_ROOT}}' '{{CLIENT_MAX_BODY_SIZE}}' '{{CLIENT_MAX_BODY_SIZE_APACHE}}'
+  '{{PROXY_STREAMING_INCLUDE}}' '{{FASTCGI_STREAMING_INCLUDE}}' '{{APACHE_STREAMING_INCLUDE}}'
+  '{{PHP_APACHE_CONTAINER}}' '{{APACHE_CONTAINER}}' '{{PHP_CONTAINER}}'
+  '{{CLIENT_VERIFICATION}}'
+  '{{NODE_CONTAINER}}' '{{NODE_PORT}}'
+  '{{PROXY_IP}}' '{{PROXY_HOST}}' '{{PROXY_HTTP_PORT}}' '{{PROXY_HTTPS_PORT}}'
+  '{{PROXY_COOKIE_EXACT_INCLUDE}}' '{{PROXY_COOKIE_PARENT_INCLUDE}}' '{{PROXY_REDIRECT_INCLUDE}}'
+  '{{PROXY_WS_INCLUDE}}' '{{PROXY_SUBFILTER_INCLUDE}}' '{{PROXY_CSP_INCLUDE}}'
+  '{{COMPOSE_PROJECT_NAME}}' '{{NODE_SERVICE}}' '{{NODE_CONTAINER_NAME}}' '{{NODE_HOSTNAME}}'
+  '{{NODE_PROFILE}}' '{{NODE_VERSION}}' '{{NODE_KEY}}' '{{NODE_CMD_LINE}}'
+)
+local -a _tpl_values=(
+  "$DOMAIN_NAME" "$DOC_ROOT" "$CLIENT_MAX_BODY_SIZE" "$CLIENT_MAX_BODY_SIZE_APACHE"
+  "$PROXY_STREAMING_INCLUDE" "$FASTCGI_STREAMING_INCLUDE" "$APACHE_STREAMING_INCLUDE"
+  "$PHP_APACHE_CONTAINER" "$APACHE_CONTAINER" "$PHP_CONTAINER"
+  "$ENABLE_CLIENT_VERIFICATION"
+  "$NODE_CONTAINER" "$NODE_PORT"
+  "$PROXY_IP" "$PROXY_HOST" "$PROXY_HTTP_PORT" "$PROXY_HTTPS_PORT"
+  "$PROXY_COOKIE_EXACT_INCLUDE" "$PROXY_COOKIE_PARENT_INCLUDE" "$PROXY_REDIRECT_INCLUDE"
+  "$PROXY_WS_INCLUDE" "$PROXY_SUBFILTER_INCLUDE" "$PROXY_CSP_INCLUDE"
+  "${COMPOSE_PROJECT_NAME:-}" "${NODE_SERVICE:-}" "${NODE_CONTAINER_NAME:-}" "${NODE_HOSTNAME:-}"
+  "${NODE_PROFILE:-}" "${NODE_VERSION:-}" "${NODE_KEY:-}" "${NODE_CMD_LINE:-}"
+)
 
-    line="${line//\{\{PROXY_STREAMING_INCLUDE\}\}/$PROXY_STREAMING_INCLUDE}"
-    line="${line//\{\{FASTCGI_STREAMING_INCLUDE\}\}/$FASTCGI_STREAMING_INCLUDE}"
-    line="${line//\{\{APACHE_STREAMING_INCLUDE\}\}/$APACHE_STREAMING_INCLUDE}"
-
-    line="${line//\{\{PHP_APACHE_CONTAINER\}\}/$PHP_APACHE_CONTAINER}"
-    line="${line//\{\{APACHE_CONTAINER\}\}/$APACHE_CONTAINER}"
-    line="${line//\{\{PHP_CONTAINER\}\}/$PHP_CONTAINER}"
-
-    line="${line//\{\{CLIENT_VERIFICATION\}\}/$ENABLE_CLIENT_VERIFICATION}"
-
-    line="${line//\{\{NODE_CONTAINER\}\}/$NODE_CONTAINER}"
-    line="${line//\{\{NODE_PORT\}\}/$NODE_PORT}"
-
-    line="${line//\{\{PROXY_IP\}\}/$PROXY_IP}"
-    line="${line//\{\{PROXY_HOST\}\}/$PROXY_HOST}"
-    line="${line//\{\{PROXY_HTTP_PORT\}\}/$PROXY_HTTP_PORT}"
-    line="${line//\{\{PROXY_HTTPS_PORT\}\}/$PROXY_HTTPS_PORT}"
-
-    line="${line//\{\{PROXY_COOKIE_EXACT_INCLUDE\}\}/$PROXY_COOKIE_EXACT_INCLUDE}"
-    line="${line//\{\{PROXY_COOKIE_PARENT_INCLUDE\}\}/$PROXY_COOKIE_PARENT_INCLUDE}"
-    line="${line//\{\{PROXY_REDIRECT_INCLUDE\}\}/$PROXY_REDIRECT_INCLUDE}"
-    line="${line//\{\{PROXY_WS_INCLUDE\}\}/$PROXY_WS_INCLUDE}"
-    line="${line//\{\{PROXY_SUBFILTER_INCLUDE\}\}/$PROXY_SUBFILTER_INCLUDE}"
-    line="${line//\{\{PROXY_CSP_INCLUDE\}\}/$PROXY_CSP_INCLUDE}"
-
-    printf '%s
+local line i tok val
+while IFS= read -r line || [[ -n "$line" ]]; do
+  for ((i=0; i<${#_tpl_tokens[@]}; i++)); do
+    tok="${_tpl_tokens[$i]}"
+    val="${_tpl_values[$i]}"
+    line="${line//$tok/$val}"
+  done
+  printf '%s
 ' "$line"
-  done <"$tpl" >"$tmp"
+done <"$tpl" >"$tmp"
 
-  install -m 0644 "$tmp" "$out"
+  install -m 0644 "$tmp" "$outFile"
   rm -f "$tmp"
 }
 
 ###############################################################################
 # 9) Node compose generator
 ###############################################################################
+
 create_node_compose() {
   mkdir -p "$VHOST_NODE_DIR"
 
@@ -465,72 +481,30 @@ create_node_compose() {
 
   node_key="$(to_env_key "$NODE_VERSION")"
 
-  local out="${VHOST_NODE_DIR}/${token}.yaml"
-  local tmp; tmp="$(mktemp)"
+  local outPath="${VHOST_NODE_DIR}/${token}.yaml"
 
-  local node_cmd_line esc
+  # Prepare compose templating vars
+  NODE_CONTAINER_NAME="$cname"
+  NODE_HOSTNAME="$svc"
+  NODE_KEY="$node_key"
+
   if [[ -n "${NODE_CMD:-}" ]]; then
+    # Preserve one-line command (no newlines) and keep YAML safe.
+    local esc
     esc="${NODE_CMD//$'\r'/}"
     esc="${esc//$'\n'/ }"
     esc="${esc//\\/\\\\}"
     esc="${esc//\"/\\\"}"
-    node_cmd_line='- NODE_CMD=${NODE_CMD:-"'"${esc}"'"}'
+    NODE_CMD_LINE='- NODE_CMD=${NODE_CMD:-"'"${esc}"'"}'
   else
-    node_cmd_line='- NODE_CMD=${NODE_CMD:-}'
+    NODE_CMD_LINE='- NODE_CMD=${NODE_CMD:-}'
   fi
 
-  cat >"$tmp" <<YAML
-name: ${COMPOSE_PROJECT_NAME}
-
-services:
-  ${svc}:
-    container_name: ${cname}
-    hostname: ${svc}
-    build:
-      context: docker/dockerfiles
-      dockerfile: node.Dockerfile
-      args:
-        UID: \${UID:-1000}
-        GID: \${GID:-1000}
-        USERNAME: \${USER}
-        NODE_VERSION: ${NODE_VERSION}
-        LINUX_PKG: \${LINUX_PKG:-}
-        LINUX_PKG_VERSIONED: \${LINUX_PKG_${node_key}:-}
-        NODE_GLOBAL: \${NODE_GLOBAL:-}
-        NODE_GLOBAL_VERSIONED: \${NODE_GLOBAL_${node_key}:-}
-    environment:
-      - TZ=\${TZ:-}
-      - PORT=${NODE_PORT}
-      - HOST=0.0.0.0
-      ${node_cmd_line}
-      - NPM_AUDIT=\${NPM_AUDIT:-0}
-      - NPM_FUND=\${NPM_FUND:-0}
-    env_file:
-      - .env
-    networks:
-      frontend: {}
-      backend: {}
-      datastore: {}
-    volumes:
-      - "\${PROJECT_DIR:-./../application}${DOC_ROOT}:/app"
-      - "./configuration/ssh:/home/\${USER}/.ssh:ro"
-      - ./configuration/rootCA:/etc/share/rootCA:ro
-      - "\${HOME}/.gitconfig:/home/\${USER}/.gitconfig:ro"
-    depends_on:
-      - server-tools
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"const net=require('net');const h=process.env.HOST||'127.0.0.1';const p=+process.env.PORT||${NODE_PORT};const s=net.connect(p,h);s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));\""]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-    profiles: ["node","${profile}"]
-YAML
-
-  install -m 0644 "$tmp" "$out"
-  rm -f "$tmp"
+  local tpl="${DOCKER_TEMPLATE_DIRECTORY}/node.compose.yaml"
+  render_template "$tpl" "$outPath"
 
   env_set "ACTIVE_NODE_PROFILE" "$profile"
-  NODE_COMPOSE_FILE_BASENAME="$(basename "$out")"
+  NODE_COMPOSE_FILE_BASENAME="$(basename "$outPath")"
 }
 
 ###############################################################################
@@ -568,12 +542,12 @@ create_configuration() {
   if [[ "$SERVER_TYPE" == "Nginx" ]]; then
     # Nginx-only: php via fastcgi, node via proxy, proxyip via pinned upstream proxy
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then
-      render_template "${TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
+      render_template "${NGINX_TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
     elif [[ "$KEEP_HTTP" == "y" || "$ENABLE_HTTPS" == "n" ]]; then
       case "$APP_TYPE" in
-        node)    render_template "${TEMPLATE_DIR}/http.node.nginx.conf" "$nginx_conf" ;;
-        proxyip) render_template "${TEMPLATE_DIR}/proxy-fixedip-http.nginx.conf" "$nginx_conf" ;;
-        *)       render_template "${TEMPLATE_DIR}/http.nginx.conf" "$nginx_conf" ;;
+        node)    render_template "${NGINX_TEMPLATE_DIR}/http.node.nginx.conf" "$nginx_conf" ;;
+        proxyip) render_template "${NGINX_TEMPLATE_DIR}/proxy-fixedip-http.nginx.conf" "$nginx_conf" ;;
+        *)       render_template "${NGINX_TEMPLATE_DIR}/http.nginx.conf" "$nginx_conf" ;;
       esac
     else
       _write_empty_conf "$nginx_conf"
@@ -584,9 +558,9 @@ create_configuration() {
       cat "$nginx_conf" >"$tmp" 2>/dev/null || true
 
       case "$APP_TYPE" in
-        node)    render_template "${TEMPLATE_DIR}/https.node.nginx.conf" "$nginx_conf" ;;
-        proxyip) render_template "${TEMPLATE_DIR}/proxy-fixedip-https.nginx.conf" "$nginx_conf" ;;
-        *)       render_template "${TEMPLATE_DIR}/https.nginx.conf" "$nginx_conf" ;;
+        node)    render_template "${NGINX_TEMPLATE_DIR}/https.node.nginx.conf" "$nginx_conf" ;;
+        proxyip) render_template "${NGINX_TEMPLATE_DIR}/proxy-fixedip-https.nginx.conf" "$nginx_conf" ;;
+        *)       render_template "${NGINX_TEMPLATE_DIR}/https.nginx.conf" "$nginx_conf" ;;
       esac
 
       _merge_confs "$tmp" "$nginx_conf"
@@ -597,11 +571,11 @@ create_configuration() {
     env_set "APACHE_ACTIVE" "apache"
 
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then
-      render_template "${TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
+      render_template "${NGINX_TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
       _write_empty_conf "$apache_conf"
     elif [[ "$KEEP_HTTP" == "y" || "$ENABLE_HTTPS" == "n" ]]; then
-      render_template "${TEMPLATE_DIR}/proxy-http.nginx.conf" "$nginx_conf"
-      render_template "${TEMPLATE_DIR}/http.apache.conf" "$apache_conf"
+      render_template "${NGINX_TEMPLATE_DIR}/proxy-http.nginx.conf" "$nginx_conf"
+      render_template "${APACHE_TEMPLATE_DIR}/http.apache.conf" "$apache_conf"
     else
       _write_empty_conf "$nginx_conf"
       _write_empty_conf "$apache_conf"
@@ -613,8 +587,8 @@ create_configuration() {
       cat "$nginx_conf"  >"$tmpn" 2>/dev/null || true
       cat "$apache_conf" >"$tmpa" 2>/dev/null || true
 
-      render_template "${TEMPLATE_DIR}/proxy-https.nginx.conf" "$nginx_conf"
-      render_template "${TEMPLATE_DIR}/https.apache.conf" "$apache_conf"
+      render_template "${NGINX_TEMPLATE_DIR}/proxy-https.nginx.conf" "$nginx_conf"
+      render_template "${APACHE_TEMPLATE_DIR}/https.apache.conf" "$apache_conf"
 
       _merge_confs "$tmpn" "$nginx_conf"
       _merge_confs "$tmpa" "$apache_conf"

@@ -150,6 +150,7 @@ RUN apk add --no-cache \
       /etc/share/vhosts/apache \
       /etc/share/vhosts/nginx \
       /etc/share/vhosts/sops \
+      /etc/share/vhosts/fpm \
       /etc/share/sops/global \
       /etc/share/sops/keys \
       /etc/share/sops/config \
@@ -163,15 +164,16 @@ COPY --from=fetch /out/mkcert /usr/local/bin/mkcert
 COPY --from=fetch /out/lazydocker /usr/local/bin/lazydocker
 COPY --from=fetch /out/runtime-versions.json /etc/share/runtime-versions.json
 
-COPY scripts/certify.sh /usr/local/bin/certify
-COPY scripts/mkhost.sh /usr/local/bin/mkhost
-COPY scripts/rmhost.sh /usr/local/bin/rmhost
-COPY scripts/es-policy.sh /usr/local/bin/es-policy
-COPY scripts/notifierd.sh /usr/local/bin/notifierd
-COPY scripts/notify.sh /usr/local/bin/notify
-COPY scripts/senv.sh /usr/local/bin/senv
-COPY scripts/entrypoint.sh /usr/local/bin/entrypoint
+COPY scripts/shells/certify.sh /usr/local/bin/certify
+COPY scripts/shells/mkhost.sh /usr/local/bin/mkhost
+COPY scripts/shells/rmhost.sh /usr/local/bin/rmhost
+COPY scripts/shells/es-policy.sh /usr/local/bin/es-policy
+COPY scripts/shells/notifierd.sh /usr/local/bin/notifierd
+COPY scripts/shells/notify.sh /usr/local/bin/notify
+COPY scripts/shells/senv.sh /usr/local/bin/senv
+COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/http-templates/ /etc/http-templates/
+COPY scripts/docker-templates/ /etc/docker-templates/
 
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner

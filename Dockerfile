@@ -174,6 +174,7 @@ COPY scripts/shells/senv.sh /usr/local/bin/senv
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/http-templates/ /etc/http-templates/
 COPY scripts/docker-templates/ /etc/docker-templates/
+COPY scripts/fpm-templates/ /etc/fpm-templates/
 
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner

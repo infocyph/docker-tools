@@ -997,6 +997,16 @@ print_summary() {
     say "${key}PHP version:${NC}          ${BOLD}${PHP_VERSION}${NC} ${DIM}(profile: ${PHP_CONTAINER_PROFILE})${NC}"
     say "${key}Server type:${NC}          ${BOLD}${SERVER_TYPE}${NC}"
     say "${key}Doc root:${NC}             ${BOLD}${DOC_ROOT}${NC}"
+  # PHP-FPM mode (kept concise in summary)
+    if [[ "${PHP_UPSTREAM_MODE:-tcp}" == "socket" ]]; then
+      say "${key}PHP-FPM mode:${NC}         ${BOLD}Unix socket${NC}"
+      if [[ -n "${PHP_FPM_TEMPLATE:-}" ]]; then
+        say "${key}FPM template:${NC}         ${BOLD}$(basename "${PHP_FPM_TEMPLATE}")${NC}"
+      fi
+    else
+      say "${key}PHP-FPM mode:${NC}         ${BOLD}TCP (${PHP_CONTAINER}:9000)${NC}"
+    fi
+
   elif [[ "$APP_TYPE" == "node" ]]; then
     say "${key}Node version:${NC}         ${BOLD}${NODE_VERSION}${NC}"
     say "${key}Server type:${NC}          ${BOLD}Nginx${NC}"

@@ -19,6 +19,8 @@ readonly APACHE_TEMPLATE_DIR="${APACHE_TEMPLATE_DIR:-/etc/http-templates/apache}
 readonly DOCKER_TEMPLATE_DIRECTORY="${DOCKER_TEMPLATE_DIRECTORY:-/etc/docker-templates}"
 readonly VHOST_NGINX_DIR="${VHOST_NGINX_DIR:-/etc/share/vhosts/nginx}"
 readonly VHOST_APACHE_DIR="${VHOST_APACHE_DIR:-/etc/share/vhosts/apache}"
+readonly VHOST_FPM_DIR="${VHOST_FPM_DIR:-/etc/share/vhosts/fpm}"
+readonly FPM_TEMPLATE_DIR="${FPM_TEMPLATE_DIR:-/etc/fpm-templates}"
 readonly VHOST_NODE_DIR="${VHOST_NODE_DIR:-/etc/share/vhosts/node}"
 
 readonly ENV_STORE="${ENV_STORE:-/etc/environment}"
@@ -403,6 +405,15 @@ render_template() {
   : "${PHP_APACHE_CONTAINER:=}"
   : "${APACHE_CONTAINER:=APACHE}"
   : "${PHP_CONTAINER:=}"
+
+  : "${PHP_FCGI_PASS:=}"
+  : "${APACHE_PHP_HANDLER:=}"
+  : "${FPM_POOL_NAME:=}"
+  : "${FPM_SOCK_PATH:=}"
+  : "${FPM_ERROR_LOG:=}"
+  : "${FPM_ACCESS_LOG:=}"
+  : "${FPM_USER:=www-data}"
+  : "${FPM_GROUP:=www-data}"
   : "${ENABLE_CLIENT_VERIFICATION:=ssl_verify_client off;}"
   : "${NODE_CONTAINER:=}"
   : "${NODE_PORT:=3000}"
@@ -430,6 +441,8 @@ local -a _tpl_tokens=(
   '{{PROXY_COOKIE_EXACT_INCLUDE}}' '{{PROXY_COOKIE_PARENT_INCLUDE}}' '{{PROXY_REDIRECT_INCLUDE}}'
   '{{PROXY_WS_INCLUDE}}' '{{PROXY_SUBFILTER_INCLUDE}}' '{{PROXY_CSP_INCLUDE}}'
   '{{COMPOSE_PROJECT_NAME}}' '{{NODE_SERVICE}}' '{{NODE_CONTAINER_NAME}}' '{{NODE_HOSTNAME}}'
+  '{{PHP_FCGI_PASS}}' '{{APACHE_PHP_HANDLER}}'
+  '{{POOL_NAME}}' '{{SOCK_PATH}}' '{{ERROR_LOG}}' '{{ACCESS_LOG}}' '{{FPM_USER}}' '{{FPM_GROUP}}'
   '{{NODE_PROFILE}}' '{{NODE_VERSION}}' '{{NODE_KEY}}' '{{NODE_CMD_LINE}}'
 )
 local -a _tpl_values=(
@@ -441,6 +454,8 @@ local -a _tpl_values=(
   "$PROXY_IP" "$PROXY_HOST" "$PROXY_HTTP_PORT" "$PROXY_HTTPS_PORT"
   "$PROXY_COOKIE_EXACT_INCLUDE" "$PROXY_COOKIE_PARENT_INCLUDE" "$PROXY_REDIRECT_INCLUDE"
   "$PROXY_WS_INCLUDE" "$PROXY_SUBFILTER_INCLUDE" "$PROXY_CSP_INCLUDE"
+  "$PHP_FCGI_PASS" "$APACHE_PHP_HANDLER"
+  "$FPM_POOL_NAME" "$FPM_SOCK_PATH" "$FPM_ERROR_LOG" "$FPM_ACCESS_LOG" "$FPM_USER" "$FPM_GROUP"
   "${COMPOSE_PROJECT_NAME:-}" "${NODE_SERVICE:-}" "${NODE_CONTAINER_NAME:-}" "${NODE_HOSTNAME:-}"
   "${NODE_PROFILE:-}" "${NODE_VERSION:-}" "${NODE_KEY:-}" "${NODE_CMD_LINE:-}"
 )
@@ -524,10 +539,40 @@ _merge_confs() {
 }
 
 create_configuration() {
-  mkdir -p "$VHOST_NGINX_DIR" "$VHOST_APACHE_DIR"
+  mkdir -p "$VHOST_NGINX_DIR" "$VHOST_APACHE_DIR" "$VHOST_FPM_DIR"
 
   local nginx_conf="${VHOST_NGINX_DIR}/${DOMAIN_NAME}.conf"
   local apache_conf="${VHOST_APACHE_DIR}/${DOMAIN_NAME}.conf"
+  local fpm_conf="${VHOST_FPM_DIR}/${DOMAIN_NAME}.conf"
+
+  # Compute PHP upstream placeholders for templates
+  if [[ "${APP_TYPE:-}" == "php" ]]; then
+    if [[ "${PHP_UPSTREAM_MODE:-tcp}" == "socket" ]]; then
+      local sock="/run/php-fpm/${DOMAIN_NAME}.sock"
+      PHP_FCGI_PASS="unix:${sock}"
+      APACHE_PHP_HANDLER="SetHandler \"proxy:unix:${sock}|fcgi://localhost/\""
+
+      # Render per-domain FPM pool config (used by php-fpm include dir mounting)
+      if [[ -n "${PHP_FPM_TEMPLATE:-}" ]]; then
+        FPM_POOL_NAME="$DOMAIN_NAME"
+        FPM_SOCK_PATH="$sock"
+        FPM_ERROR_LOG="/var/log/php-fpm/${DOMAIN_NAME}.error.log"
+        FPM_ACCESS_LOG="/var/log/php-fpm/${DOMAIN_NAME}.access.log"
+        render_template "$PHP_FPM_TEMPLATE" "$fpm_conf"
+      else
+        warn "Socket mode enabled but no FPM template selected; skipping pool generation for ${DOMAIN_NAME}"
+        _write_empty_conf "$fpm_conf"
+      fi
+    else
+      # TCP (current behavior)
+      PHP_FCGI_PASS="${PHP_CONTAINER}:9000"
+      APACHE_PHP_HANDLER="SetHandler \"proxy:fcgi://${PHP_CONTAINER}:9000\""
+      _write_empty_conf "$fpm_conf"
+    fi
+  else
+    _write_empty_conf "$fpm_conf"
+  fi
+
 
   ENABLE_CLIENT_VERIFICATION="${ENABLE_CLIENT_VERIFICATION:-ssl_verify_client off;}"
 
@@ -624,7 +669,7 @@ cleanup_vars() {
     DOC_ROOT CLIENT_MAX_BODY_SIZE CLIENT_MAX_BODY_SIZE_APACHE ENABLE_STREAMING PROXY_STREAMING_INCLUDE \
     FASTCGI_STREAMING_INCLUDE APACHE_STREAMING_INCLUDE ENABLE_CLIENT_VERIFICATION CLIENT_VERIF \
     PHP_VERSION PHP_CONTAINER_PROFILE PHP_CONTAINER PHP_APACHE_CONTAINER_PROFILE PHP_APACHE_CONTAINER \
-    NODE_VERSION NODE_CMD NODE_PROFILE NODE_SERVICE NODE_CONTAINER NODE_COMPOSE_FILE_BASENAME \
+    NODE_VERSION NODE_CMD PHP_UPSTREAM_MODE PHP_FPM_SOCKET PHP_FPM_TEMPLATE PHP_FCGI_PASS APACHE_PHP_HANDLER FPM_POOL_NAME FPM_SOCK_PATH FPM_ERROR_LOG FPM_ACCESS_LOG NODE_PROFILE NODE_SERVICE NODE_CONTAINER NODE_COMPOSE_FILE_BASENAME \
     NODE_DIR_TOKEN GENERATED_NGINX_CONF_BASENAME GENERATED_APACHE_CONF_BASENAME \
     PROXY_HOST PROXY_IP PROXY_HTTP_PORT PROXY_HTTPS_PORT PROXY_COOKIE_EXACT_INCLUDE PROXY_COOKIE_PARENT_INCLUDE PROXY_REDIRECT_INCLUDE \
     PROXY_WS_INCLUDE PROXY_SUBFILTER_INCLUDE PROXY_CSP_INCLUDE PROXY_REWRITE_YN PARENT_COOKIE_DOMAIN || true
@@ -836,6 +881,52 @@ choose_doc_root() {
   fi
 }
 
+prompt_php_fpm_socket_mode() {
+  # prompt_php_fpm_socket_mode <step> <t>
+  local step="$1" t="$2"
+  PHP_UPSTREAM_MODE="tcp"
+  PHP_FPM_TEMPLATE=""
+  step_yn_default "$step" "$t" "Use a dedicated PHP-FPM unix socket for this domain" PHP_FPM_SOCKET "n" "isolates per-domain logs"
+  if [[ "${PHP_FPM_SOCKET:-n}" == "y" ]]; then
+    PHP_UPSTREAM_MODE="socket"
+
+    # Template selection (only if multiple templates exist)
+    local -a tpls=()
+    if [[ -d "$FPM_TEMPLATE_DIR" ]]; then
+      while IFS= read -r -d '' f; do tpls+=("$f"); done < <(find "$FPM_TEMPLATE_DIR" -maxdepth 1 -type f \( -name '*.conf.tpl' -o -name '*.tpl' \) -print0 | sort -z)
+    fi
+
+    if ((${#tpls[@]} == 0)); then
+      warn "No FPM templates found in: $FPM_TEMPLATE_DIR (socket mode will fail unless templates are added)"
+      PHP_FPM_TEMPLATE=""
+      return 0
+    fi
+
+    if ((${#tpls[@]} == 1)); then
+      PHP_FPM_TEMPLATE="${tpls[0]}"
+      ok "Using FPM template: $(basename "$PHP_FPM_TEMPLATE")"
+      return 0
+    fi
+
+    say "${DIM}Available FPM templates:${NC}"
+    local i
+    for ((i=0; i<${#tpls[@]}; i++)); do
+      say "  $((i+1))) $(basename "${tpls[$i]}")"
+    done
+
+    local pick=""
+    while true; do
+      read -e -r -p "$(echo -e "${YELLOW}Select template${NC} ${DIM}(1-${#tpls[@]})${NC}: ")" pick
+      pick="$(trim "$pick")"
+      [[ "$pick" =~ ^[0-9]+$ ]] || { warn "Enter a number."; continue; }
+      ((pick>=1 && pick<=${#tpls[@]})) || { warn "Out of range."; continue; }
+      PHP_FPM_TEMPLATE="${tpls[$((pick-1))]}"
+      ok "Selected FPM template: $(basename "$PHP_FPM_TEMPLATE")"
+      break
+    done
+  fi
+}
+
 parse_domains_step1() {
   local raw="$1"
   raw="${raw//,/ }"
@@ -906,6 +997,16 @@ print_summary() {
     say "${key}PHP version:${NC}          ${BOLD}${PHP_VERSION}${NC} ${DIM}(profile: ${PHP_CONTAINER_PROFILE})${NC}"
     say "${key}Server type:${NC}          ${BOLD}${SERVER_TYPE}${NC}"
     say "${key}Doc root:${NC}             ${BOLD}${DOC_ROOT}${NC}"
+  # PHP-FPM mode (kept concise in summary)
+    if [[ "${PHP_UPSTREAM_MODE:-tcp}" == "socket" ]]; then
+      say "${key}PHP-FPM mode:${NC}         ${BOLD}Unix socket${NC}"
+      if [[ -n "${PHP_FPM_TEMPLATE:-}" ]]; then
+        say "${key}FPM template:${NC}         ${BOLD}$(basename "${PHP_FPM_TEMPLATE}")${NC}"
+      fi
+    else
+      say "${key}PHP-FPM mode:${NC}         ${BOLD}TCP (${PHP_CONTAINER}:9000)${NC}"
+    fi
+
   elif [[ "$APP_TYPE" == "node" ]]; then
     say "${key}Node version:${NC}         ${BOLD}${NODE_VERSION}${NC}"
     say "${key}Server type:${NC}          ${BOLD}Nginx${NC}"
@@ -1158,7 +1259,7 @@ sub_filter_types text/html text/css application/javascript;
 # 13) Config flows
 ###############################################################################
 configure_php() {
-  local T=9
+  local T=10
 
   while true; do
     local raw=""
@@ -1171,10 +1272,11 @@ configure_php() {
   choose_server_type 3 "$T"
   choose_protocol 4 "$T"
   choose_doc_root 5 "$T"
+  prompt_php_fpm_socket_mode 6 "$T"
 
-  finalize_body_size 7 "$T"
-  finalize_streaming 8 "$T"
-  prompt_mtls 9 "$T"
+  finalize_body_size 8 "$T"
+  finalize_streaming 9 "$T"
+  prompt_mtls 10 "$T"
 
   print_summary
   local PROCEED="y"

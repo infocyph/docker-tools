@@ -32,6 +32,7 @@ VHOST_ROOT="${VHOST_ROOT:-/etc/share/vhosts}"
 NGINX_DIR="${NGINX_DIR:-${VHOST_ROOT}/nginx}"
 APACHE_DIR="${APACHE_DIR:-${VHOST_ROOT}/apache}"
 NODE_DIR="${NODE_DIR:-${VHOST_ROOT}/node}"
+FPM_DIR="${FPM_DIR:-${VHOST_ROOT}/fpm}"
 ENV_STORE="${ENV_STORE:-/etc/environment}"
 
 ###############################################################################
@@ -215,13 +216,15 @@ build_plan_for_domain() {
   local nginx_conf="${NGINX_DIR}/${domain}.conf"
   local apache_conf="${APACHE_DIR}/${domain}.conf"
   local node_yaml="${NODE_DIR}/${token}.yaml"
+  local fpm_conf="${FPM_DIR}/${domain}.conf"
 
-  local del_nginx="n" del_apache="n" del_node="n"
+  local del_nginx="n" del_apache="n" del_node="n" del_fpm="n"
   [[ -e "$nginx_conf"  ]] && del_nginx="y"
   [[ -e "$apache_conf" ]] && del_apache="y"
   [[ -e "$node_yaml"   ]] && del_node="y"
+  [[ -e "$fpm_conf"   ]] && del_fpm="y"
 
-  if [[ "$del_nginx$del_apache$del_node" == "nnn" ]]; then
+  if [[ "$del_nginx$del_apache$del_node$del_fpm" == "nnnn" ]]; then
     warn "Nothing to delete for ${domain}"
     return 2
   fi
@@ -230,18 +233,19 @@ build_plan_for_domain() {
   [[ "$del_nginx" == "y"  ]] && php_ver="$(extract_php_version_from_file "$nginx_conf"  || true)"
   [[ -z "$php_ver" && "$del_apache" == "y" ]] && php_ver="$(extract_php_version_from_file "$apache_conf" || true)"
 
-  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-    "$domain" "$token" "$nginx_conf" "$apache_conf" "$node_yaml" "$php_ver" "$del_nginx" "$del_apache" "$del_node"
+  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+    "$domain" "$token" "$nginx_conf" "$apache_conf" "$node_yaml" "$fpm_conf" "$php_ver" "$del_nginx" "$del_apache" "$del_node" "$del_fpm"
 }
 
 print_plan() {
   local plan="$1"
   say "${CYAN}${BOLD}Planned deletions:${NC}"
-  while IFS=$'\t' read -r domain token nginx_conf apache_conf node_yaml php_ver del_nginx del_apache del_node; do
+  while IFS=$'\t' read -r domain token nginx_conf apache_conf node_yaml fpm_conf php_ver del_nginx del_apache del_node del_fpm; do
     say "${YELLOW}- ${domain}${NC} ${DIM}(token=${token})${NC}"
     [[ "$del_nginx"  == "y" ]] && say "   ${DIM}- ${nginx_conf}${NC}"
     [[ "$del_apache" == "y" ]] && say "   ${DIM}- ${apache_conf}${NC}"
     [[ "$del_node"   == "y" ]] && say "   ${DIM}- ${node_yaml}${NC}"
+    [[ "$del_fpm"    == "y" ]] && say "   ${DIM}- ${fpm_conf}${NC}"
   done <"$plan"
   echo
 }
@@ -254,7 +258,7 @@ execute_plan() {
   env_set "DELETE_PHP_PROFILE" ""
   env_set "DELETE_NODE_PROFILE" ""
 
-  while IFS=$'\t' read -r domain token nginx_conf apache_conf node_yaml php_ver del_nginx del_apache del_node; do
+  while IFS=$'\t' read -r domain token nginx_conf apache_conf node_yaml fpm_conf php_ver del_nginx del_apache del_node del_fpm; do
     say "${CYAN}${BOLD}Deleting:${NC} ${BOLD}${domain}${NC}"
 
     if [[ "$del_nginx" == "y" ]]; then
@@ -269,6 +273,10 @@ execute_plan() {
     if [[ "$del_node" == "y" ]]; then
       rm -f -- "$node_yaml"
       env_add_csv_unique "DELETE_NODE_PROFILE" "node_${token}"
+    fi
+
+    if [[ "$del_fpm" == "y" ]]; then
+      rm -f -- "$fpm_conf"
     fi
 
     if [[ -n "$php_ver" ]]; then

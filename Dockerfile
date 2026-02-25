@@ -4,22 +4,21 @@
 FROM alpine:latest AS fetch
 SHELL ["/bin/sh", "-euo", "pipefail", "-c"]
 
-# 1) Tools needed to download + build JSON
 RUN apk add --no-cache curl bash ca-certificates jq \
   && update-ca-certificates \
   && mkdir -p /out
 
-# 2) mkcert + lazydocker
 ENV DIR=/usr/local/bin
-RUN apk add --no-cache curl bash ca-certificates && update-ca-certificates && \
-  mkdir -p /out && \
-  curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" && \
-  chmod +x /out/mkcert && \
-  curl -fsSL "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash && \
-  cp /usr/local/bin/lazydocker /out/lazydocker && \
-  chmod +x /out/lazydocker
 
-# 3) Build runtime versions JSON (separate step; cached; no Dockerfile parser issues)
+RUN apk add --no-cache curl bash ca-certificates \
+  && update-ca-certificates \
+  && mkdir -p /out \
+  && curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" \
+  && chmod +x /out/mkcert \
+  && curl -fsSL "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash \
+  && cp /usr/local/bin/lazydocker /out/lazydocker \
+  && chmod +x /out/lazydocker
+
 RUN <<'SH'
 set -euo pipefail
 
@@ -142,6 +141,7 @@ RUN apk add --no-cache \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
       bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep tmux \
+      lnav multitail less php \
   && update-ca-certificates \
   && mkdir -p \
       /etc/mkcert \
@@ -159,7 +159,6 @@ RUN apk add --no-cache \
 
 SHELL ["/bin/bash", "-c"]
 
-# bring binaries + runtime versions db from stage 1
 COPY --from=fetch /out/mkcert /usr/local/bin/mkcert
 COPY --from=fetch /out/lazydocker /usr/local/bin/lazydocker
 COPY --from=fetch /out/runtime-versions.json /etc/share/runtime-versions.json

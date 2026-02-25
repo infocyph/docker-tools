@@ -3,12 +3,12 @@ set -euo pipefail
 
 # es-policy.sh
 # - Ensures ILM delete-after-30d policies + data-stream index templates for:
-#     1) lds-*-*
+#     1) lds-*-*-*
 #     2) log-*-*
 # - Applies ILM policy + replicas=0 to existing indices (and .ds backing indices)
 # - Provisions Kibana Data Views:
-#     1) "LDS logs"         -> lds-*-*
-#     2) "All logs + LDS"   -> logs-*-*,logs-*,lds-*-*
+#     1) "LDS logs"         -> lds-*-*-*
+#     2) "All logs + LDS"   -> logs-*-*,logs-*,lds-*-*-*
 #   and sets "All logs + LDS" as the default data view.
 #
 # Flags:
@@ -27,22 +27,23 @@ POLICY_LOG="${POLICY_LOG:-log-delete-30d}"
 TPL_LDS="${TPL_LDS:-lds-template}"
 TPL_LOG="${TPL_LOG:-log-template}"
 
-PAT_LDS="${PAT_LDS:-lds-*-*}"
+# UPDATED: lds indices now have 3 segments: lds-[service]-[kind]-YYYYMMDD
+PAT_LDS="${PAT_LDS:-lds-*-*-*}"
 PAT_LOG="${PAT_LOG:-log-*-*}"
 
 # Single-node: replicas must be 0 to avoid yellow
 REPLICAS="${REPLICAS:-0}"
 
 # Data stream backing index patterns
-PAT_DS_LDS="${PAT_DS_LDS:-.ds-lds-*-*}"
+PAT_DS_LDS="${PAT_DS_LDS:-.ds-lds-*-*-*}"
 PAT_DS_LOG="${PAT_DS_LOG:-.ds-log-*-*}"
 
 # Kibana data views requested
 DV1_NAME="${DV1_NAME:-LDS logs}"
-DV1_TITLE="${DV1_TITLE:-lds-*-*}"
+DV1_TITLE="${DV1_TITLE:-lds-*-*-*}"
 
 DV2_NAME="${DV2_NAME:-All logs + LDS}"
-DV2_TITLE="${DV2_TITLE:-logs-*-*,logs-*,lds-*-*}"
+DV2_TITLE="${DV2_TITLE:-logs-*-*,logs-*,lds-*-*-*}"
 
 FORCE=0
 while [[ "${1:-}" != "" ]]; do
@@ -60,9 +61,9 @@ Env:
 
 Kibana Data Views:
   DV1_NAME="LDS logs"
-  DV1_TITLE="lds-*-*"
+  DV1_TITLE="lds-*-*-*"
   DV2_NAME="All logs + LDS"
-  DV2_TITLE="logs-*-*,logs-*,lds-*-*"
+  DV2_TITLE="logs-*-*,logs-*,lds-*-*-*"
 EOF
     exit 0
     ;;
@@ -193,7 +194,6 @@ apply_settings_to_existing() {
 
 ensure_kibana_up() {
   local code="000"
-  # /api/status exists and doesn't require auth when security disabled (in most setups)
   code="$(http_code "$KIBANA_URL/api/status")"
   if [[ "$code" != "200" ]]; then
     echo "WARN: Kibana not reachable at: $KIBANA_URL (HTTP $code) — skipping data view setup" >&2
@@ -203,7 +203,6 @@ ensure_kibana_up() {
 }
 
 kbn_get_all_data_views() {
-  # returns JSON
   curl -sS --connect-timeout 3 --max-time 25 -H 'kbn-xsrf: true' "$KIBANA_URL/api/data_views"
 }
 
@@ -212,7 +211,6 @@ kbn_find_data_view_id_by_title() {
   if command -v jq >/dev/null 2>&1; then
     kbn_get_all_data_views | jq -r --arg t "$title" '.data_view[]? | select(.title==$t) | .id' | head -n1
   else
-    # best-effort fallback (not perfect JSON parsing)
     kbn_get_all_data_views | tr '\n' ' ' | sed -n "s/.*\"title\":\"$title\"[^}]*\"id\":\"\([^\"]*\)\".*/\1/p" | head -n1
   fi
 }
@@ -232,8 +230,6 @@ kbn_create_data_view() {
 kbn_update_data_view() {
   local id="$1" name="$2" title="$3" timefield="$4"
 
-  # Kibana supports update via POST /api/data_views/data_view/<id>
-  # Some versions also accept PUT. We'll try PUT then fallback to POST.
   if curl -sS --connect-timeout 3 --max-time 25 -o /dev/null -w '%{http_code}' \
     -X PUT "$KIBANA_URL/api/data_views/data_view/$id" \
     -H 'kbn-xsrf: true' -H 'Content-Type: application/json' \
@@ -305,7 +301,6 @@ ensure_data_view() {
 setup_kibana_data_views() {
   ensure_kibana_up || return 0
 
-  # Always use @timestamp for Discover
   local tf="@timestamp"
 
   local id1="" id2=""

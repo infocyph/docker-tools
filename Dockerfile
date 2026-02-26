@@ -4,22 +4,21 @@
 FROM alpine:latest AS fetch
 SHELL ["/bin/sh", "-euo", "pipefail", "-c"]
 
-# 1) Tools needed to download + build JSON
 RUN apk add --no-cache curl bash ca-certificates jq \
   && update-ca-certificates \
   && mkdir -p /out
 
-# 2) mkcert + lazydocker
 ENV DIR=/usr/local/bin
-RUN apk add --no-cache curl bash ca-certificates && update-ca-certificates && \
-  mkdir -p /out && \
-  curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" && \
-  chmod +x /out/mkcert && \
-  curl -fsSL "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash && \
-  cp /usr/local/bin/lazydocker /out/lazydocker && \
-  chmod +x /out/lazydocker
 
-# 3) Build runtime versions JSON (separate step; cached; no Dockerfile parser issues)
+RUN apk add --no-cache curl bash ca-certificates \
+  && update-ca-certificates \
+  && mkdir -p /out \
+  && curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" \
+  && chmod +x /out/mkcert \
+  && curl -fsSL "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash \
+  && cp /usr/local/bin/lazydocker /out/lazydocker \
+  && chmod +x /out/lazydocker
+
 RUN <<'SH'
 set -euo pipefail
 
@@ -135,13 +134,20 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     SOPS_BASE_DIR=/etc/share/sops \
     SOPS_KEYS_DIR=/etc/share/sops/keys \
     SOPS_CFG_DIR=/etc/share/sops/config \
-    SOPS_REPO_DIR=/etc/share/vhosts/sops
+    SOPS_REPO_DIR=/etc/share/vhosts/sops \
+    LOGVIEW_AUTOSTART=1 \
+    LOGVIEW_PORT=9911 \
+    LOGVIEW_BIND=0.0.0.0 \
+    LOGVIEW_ROOTS=/global/log \
+    LOGVIEW_MAX_TAIL_LINES=25000 \
+    LOGVIEW_CACHE_TTL=2
 
 RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
-      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep tmux \
+      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep tmux gzip \
+      lnav multitail less php \
   && update-ca-certificates \
   && mkdir -p \
       /etc/mkcert \
@@ -154,12 +160,12 @@ RUN apk add --no-cache \
       /etc/share/sops/global \
       /etc/share/sops/keys \
       /etc/share/sops/config \
+      /app/logviewer \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*
 
 SHELL ["/bin/bash", "-c"]
 
-# bring binaries + runtime versions db from stage 1
 COPY --from=fetch /out/mkcert /usr/local/bin/mkcert
 COPY --from=fetch /out/lazydocker /usr/local/bin/lazydocker
 COPY --from=fetch /out/runtime-versions.json /etc/share/runtime-versions.json
@@ -175,6 +181,7 @@ COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/http-templates/ /etc/http-templates/
 COPY scripts/docker-templates/ /etc/docker-templates/
 COPY scripts/fpm-templates/ /etc/fpm-templates/
+COPY scripts/logviewer/ /app/logviewer/
 
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner

@@ -5,16 +5,18 @@ if ! certify >/dev/null 2>&1; then
   echo "[entrypoint] Certification failed" >&2
 fi
 
-# Optional: start Log Viewer in background (keep main CMD running)
-# Enable by setting: LOGVIEW_AUTOSTART=1
 if [[ "${LOGVIEW_AUTOSTART:-0}" == "1" ]]; then
   : "${LOGVIEW_BIND:=0.0.0.0}"
   : "${LOGVIEW_PORT:=9911}"
+  : "${LOGVIEW_DOCROOT:=/etc/share/logviewer/app/index.php}"
 
-  # Avoid spawning twice (in case of restart scripts)
-  if ! pgrep -f "php -S ${LOGVIEW_BIND}:${LOGVIEW_PORT} .*etc/share/logviewer/app/index.php" >/dev/null 2>&1; then
-    echo "[entrypoint] Starting Log Viewer on ${LOGVIEW_BIND}:${LOGVIEW_PORT}" >&2
-    php -S "${LOGVIEW_BIND}:${LOGVIEW_PORT}" /etc/share/logviewer/app/index.php >/dev/null 2>&1 &
+  if [[ ! -f "$LOGVIEW_DOCROOT" ]]; then
+    echo "[entrypoint] LogViewer index not found: $LOGVIEW_DOCROOT" >&2
+  else
+    if ! pgrep -f "php -S ${LOGVIEW_BIND}:${LOGVIEW_PORT}" >/dev/null 2>&1; then
+      echo "[entrypoint] Starting Log Viewer on ${LOGVIEW_BIND}:${LOGVIEW_PORT}" >&2
+      php -S "${LOGVIEW_BIND}:${LOGVIEW_PORT}" "$LOGVIEW_DOCROOT" &
+    fi
   fi
 fi
 

@@ -144,16 +144,104 @@ function is_gz(string $file): bool
     return str_ends_with(strtolower($file), '.gz');
 }
 
+function tail_plain_php(string $file, int $lines): array
+{
+    $lines = max(10, $lines);
+
+    $fp = @fopen($file, 'rb');
+    if (!$fp) {
+        return [1, '', 'fopen failed'];
+    }
+
+    $buf = '';
+    $chunk = 8192;
+    $pos = 0;
+
+    // seek to end
+    if (fseek($fp, 0, SEEK_END) !== 0) {
+        fclose($fp);
+        return [1, '', 'fseek failed'];
+    }
+
+    $pos = ftell($fp);
+    if ($pos === false) {
+        fclose($fp);
+        return [1, '', 'ftell failed'];
+    }
+
+    $need = $lines + 1; // newline count target
+    while ($pos > 0 && $need > 0) {
+        $read = ($pos >= $chunk) ? $chunk : $pos;
+        $pos -= $read;
+
+        if (fseek($fp, $pos, SEEK_SET) !== 0) {
+            break;
+        }
+
+        $data = fread($fp, $read);
+        if ($data === false || $data === '') {
+            break;
+        }
+
+        $buf = $data . $buf;
+
+        // count newlines quickly
+        $need = ($lines + 1) - substr_count($buf, "\n");
+        if (strlen($buf) > 8_000_000) { // safety cap
+            break;
+        }
+    }
+
+    fclose($fp);
+
+    $all = preg_split("/\r\n|\n|\r/", $buf) ?: [];
+    $slice = array_slice($all, -$lines);
+
+    return [0, implode("\n", $slice), ''];
+}
+
+/**
+ * Tail last N lines.
+ * - .gz: gzopen read + slice
+ * - plain: try system tail, but if empty while filesize>0 -> PHP tail fallback
+ */
 function tail_text(string $file, int $lines): array
 {
     $lines = max(10, $lines);
 
     if (is_gz($file)) {
-        $cmd = 'gzip -dc -- ' . escapeshellarg($file) . ' | tail -n ' . (int)$lines;
-        return sh_pipe($cmd, 12);
+        $h = @gzopen($file, 'rb');
+        if (!$h) {
+            return [1, '', 'gzopen failed'];
+        }
+
+        $content = '';
+        while (!gzeof($h)) {
+            $content .= gzread($h, 8192);
+            if (strlen($content) > 32_000_000) { // safety cap
+                break;
+            }
+        }
+        gzclose($h);
+
+        $all = preg_split("/\r\n|\n|\r/", $content) ?: [];
+        $slice = array_slice($all, -$lines);
+
+        return [0, implode("\n", $slice), ''];
     }
 
-    return sh(['tail', '-n', (string)$lines, $file], 8);
+    // Try system tail first (fast)
+    [$code, $out, $err] = sh(['tail', '-n', (string)$lines, $file], 8);
+
+    // If tail says OK but returns empty while file has bytes, fallback to PHP tail
+    if ($code === 0 && trim((string)$out) === '') {
+        $sz = @filesize($file);
+        if (is_int($sz) && $sz > 0) {
+            return tail_plain_php($file, $lines);
+        }
+    }
+
+    return [$code, $out, $err];
 }
 
 /**

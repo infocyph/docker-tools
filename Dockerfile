@@ -147,7 +147,7 @@ RUN apk add --no-cache \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
       bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep tmux gzip \
-      lnav multitail less php \
+      lnav multitail less php php-mbstring php-curl php-zip \
   && update-ca-certificates \
   && mkdir -p \
       /etc/mkcert \

@@ -135,6 +135,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     SOPS_KEYS_DIR=/etc/share/sops/keys \
     SOPS_CFG_DIR=/etc/share/sops/config \
     SOPS_REPO_DIR=/etc/share/vhosts/sops \
+    LOGVIEW_AUTOSTART=1 \
     LOGVIEW_PORT=9911 \
     LOGVIEW_BIND=0.0.0.0 \
     LOGVIEW_ROOTS=/global/log \
@@ -177,7 +178,6 @@ COPY scripts/shells/notifierd.sh /usr/local/bin/notifierd
 COPY scripts/shells/notify.sh /usr/local/bin/notify
 COPY scripts/shells/senv.sh /usr/local/bin/senv
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
-COPY scripts/shells/logview.sh /usr/local/bin/logview
 COPY scripts/http-templates/ /etc/http-templates/
 COPY scripts/docker-templates/ /etc/docker-templates/
 COPY scripts/fpm-templates/ /etc/fpm-templates/
@@ -205,7 +205,6 @@ RUN chmod +x \
       /usr/local/bin/lazydocker \
       /usr/local/bin/es-policy \
       /usr/local/bin/senv \
-      /usr/local/bin/logview \
   && touch /etc/environment \
   && chmod -R 755 /etc/share/vhosts \
   && chmod 644 /etc/environment \

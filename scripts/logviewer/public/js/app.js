@@ -7,9 +7,11 @@
   let page = 1;
 
   const BOOT = (window.LV_BOOT || { page: "logs", domain: "" });
-  const DOMAIN_FILTER = (BOOT.domain || "").trim();
   const urlParams = new URLSearchParams(window.location.search || "");
   const Q_INIT = (urlParams.get("q") || "").trim();
+
+  // Domain state (from dashboard param, can be changed by UI)
+  let activeDomain = (BOOT.domain || "").trim();
 
   // ───────────────────────────────────────────────────────────────────────────
   // Theme (Toggle): default Auto(System), user can force Light/Dark
@@ -103,15 +105,70 @@
     return Array.from(s).sort();
   }
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // Domain dropdown support (nginx/apache/php*)
+  function serviceDomainSupported(svc) {
+    const v = String(svc || "").toLowerCase();
+    return v === "nginx" || v === "apache" || v === "php" || v === "php-fpm" || v === "phpfpm";
+  }
+
+  function extractDomainFromName(name) {
+    let s = String(name || "");
+
+    s = s.replace(/\.gz$/i, "");
+    s = s.replace(/(\.access|\.error)\.log$/i, "");
+    s = s.replace(/\.log$/i, "");
+    s = s.replace(/([.-])\d{8}$/i, "");
+    s = s.replace(/([.-])\d+$/i, "");
+
+    const low = s.toLowerCase();
+    if (!s || low === "error" || low === "access") return "";
+    return s;
+  }
+
+  function buildDomainListForService(svc) {
+    const set = new Set();
+    for (const f of files) {
+      if (String(f.service) !== String(svc)) continue;
+      const d = extractDomainFromName(f.name);
+      if (d) set.add(d);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }
+
+  function syncDomainFilterUI() {
+    const svc = $("serviceFilter")?.value || "";
+    const domSel = $("domainFilter");
+    if (!domSel) return;
+
+    if (!svc || !serviceDomainSupported(svc)) {
+      domSel.classList.add("d-none");
+      domSel.value = "";
+      return;
+    }
+
+    const domains = buildDomainListForService(svc);
+    domSel.innerHTML =
+      `<option value="">All Domains</option>` +
+      domains.map((d) => `<option value="${String(d).replace(/"/g, "&quot;")}">${d}</option>`).join("");
+
+    domSel.classList.remove("d-none");
+
+    if (activeDomain && domains.includes(activeDomain)) domSel.value = activeDomain;
+    else domSel.value = "";
+  }
+  // ───────────────────────────────────────────────────────────────────────────
+
   function renderFiles(serviceFilter = "") {
     const list = $("fileList");
     list.innerHTML = "";
 
     const shown = files.filter((f) => {
       if (serviceFilter && f.service !== serviceFilter) return false;
-      if (DOMAIN_FILTER) {
+
+      if (activeDomain) {
         const hay = (f.name + " " + f.path).toLowerCase();
-        if (!hay.includes(DOMAIN_FILTER.toLowerCase())) return false;
+        if (!hay.includes(activeDomain.toLowerCase())) return false;
       }
       return true;
     });
@@ -145,6 +202,7 @@
 
     const sv = $("serviceFilter");
     const curr = sv.value;
+
     sv.innerHTML = `<option value="">All Services</option>`;
     for (const s of uniqServices(files)) {
       const o = document.createElement("option");
@@ -152,9 +210,26 @@
       o.textContent = s;
       sv.appendChild(o);
     }
-    sv.value = curr;
 
-    renderFiles(curr);
+    // If arriving with domain param, auto-pick a service that has matches
+    if (activeDomain) {
+      const services = uniqServices(files);
+      let picked = "";
+      for (const s of services) {
+        const has = files.some((f) =>
+          String(f.service) === String(s) &&
+          (String(f.name) + " " + String(f.path)).toLowerCase().includes(activeDomain.toLowerCase())
+        );
+        if (has) { picked = s; break; }
+      }
+      if (picked) sv.value = picked;
+      else sv.value = curr;
+    } else {
+      sv.value = curr;
+    }
+
+    syncDomainFilterUI();
+    renderFiles(sv.value);
   }
 
   function setCounts(meta) {
@@ -236,17 +311,43 @@
       `Total: ${j.total} · Cached: ${new Date((j.meta.generated_at || 0) * 1000).toLocaleTimeString()}`;
   }
 
-  $("btnRefreshFiles").addEventListener("click", loadFiles);
-  $("serviceFilter").addEventListener("change", () => renderFiles($("serviceFilter").value));
-  $("perPage").addEventListener("change", () => { page = 1; loadEntries(); });
+  $("btnRefreshFiles")?.addEventListener("click", loadFiles);
 
-  $("btnSearch").addEventListener("click", () => { page = 1; loadEntries(); });
-  $("q").addEventListener("keydown", (e) => {
+  $("serviceFilter")?.addEventListener("change", () => {
+    const svc = $("serviceFilter").value;
+
+    // Sync domain dropdown per service
+    syncDomainFilterUI();
+
+    // If service doesn't support domain, clear it
+    if (!svc || !serviceDomainSupported(svc)) {
+      activeDomain = "";
+      $("domainFilter") && ($("domainFilter").value = "");
+    } else {
+      const domains = buildDomainListForService(svc);
+      if (activeDomain && !domains.includes(activeDomain)) {
+        activeDomain = "";
+        $("domainFilter") && ($("domainFilter").value = "");
+      }
+    }
+
+    renderFiles(svc);
+  });
+
+  $("domainFilter")?.addEventListener("change", () => {
+    activeDomain = $("domainFilter").value || "";
+    renderFiles($("serviceFilter").value);
+  });
+
+  $("perPage")?.addEventListener("change", () => { page = 1; loadEntries(); });
+
+  $("btnSearch")?.addEventListener("click", () => { page = 1; loadEntries(); });
+  $("q")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { page = 1; loadEntries(); }
   });
 
-  $("prevPage").addEventListener("click", () => { if (page > 1) { page--; loadEntries(); } });
-  $("nextPage").addEventListener("click", () => { page++; loadEntries(); });
+  $("prevPage")?.addEventListener("click", () => { if (page > 1) { page--; loadEntries(); } });
+  $("nextPage")?.addEventListener("click", () => { page++; loadEntries(); });
 
   document.querySelectorAll("#levelPills [data-level]").forEach((btn) => {
     btn.addEventListener("click", () => {

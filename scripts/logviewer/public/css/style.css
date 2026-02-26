@@ -45,16 +45,36 @@ body{
 
 .lv-shell{ color: var(--lv-text); }
 
+/* Topbar + dropdown stacking */
 .lv-topbar{
   backdrop-filter: blur(14px);
   background: var(--lv-topbar-bg);
+  position: sticky;
+  top: 0;
+  z-index: 1050;
 }
-
-.lv-topbar{ position: sticky; top: 0; z-index: 1050; }
 .lv-topbar .dropdown-menu{
   z-index: 2000;
   position: absolute;
 }
+
+/* Bootstrap dropdown menu in glass UI */
+.dropdown-menu{
+  background: var(--lv-card-bg);
+  border: 1px solid var(--lv-card-border);
+  backdrop-filter: blur(14px);
+}
+.dropdown-item{ color: var(--lv-text); }
+.dropdown-item:hover,
+.dropdown-item:focus{ background: var(--lv-soft); color: var(--lv-text); }
+
+/* Make native selects/options readable in dark mode */
+[data-bs-theme="dark"] select,
+[data-bs-theme="dark"] option{
+  background-color: rgba(15,23,42,.92);
+  color: #e5e7eb;
+}
+
 .lv-title{ font-weight: 700; font-size: 18px; }
 
 .lv-dot{

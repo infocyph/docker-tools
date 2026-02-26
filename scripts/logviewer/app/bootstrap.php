@@ -5,122 +5,93 @@ declare(strict_types=1);
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
-$LOGVIEW_DEBUG = (bool)(getenv('LOGVIEW_DEBUG') ?: false);
+/**
+ * Dev-first defaults, but still avoid stupid foot-guns.
+ */
+$LOGVIEW_DEBUG = filter_var(getenv('LOGVIEW_DEBUG') ?: '0', FILTER_VALIDATE_BOOL);
 
+/**
+ * Roots can be colon separated:
+ *   LOGVIEW_ROOTS=/global/log:/var/log/nginx
+ */
 $LOGVIEW_ROOTS = array_values(
   array_filter(
     array_map('trim', explode(':', getenv('LOGVIEW_ROOTS') ?: '/global/log')),
-  ),
+    static fn($v) => $v !== ''
+  )
 );
 
-$LOGVIEW_CACHE_TTL = max(1, (int)(getenv('LOGVIEW_CACHE_TTL') ?: 2));
 $NGINX_VHOST_DIR = getenv('NGINX_VHOST_DIR') ?: '/etc/share/vhosts/nginx';
 
 /**
- * Tail lines for parsing entries (NOT raw).
- * Keep moderate (parsing is heavier than raw tail).
+ * Memory-aware default for max tail lines.
+ * You can still override with LOGVIEW_MAX_TAIL_LINES.
  */
+function lv_detect_mem_mb(): int
+{
+    // Best-effort; this is a dev tool.
+    $meminfo = @file_get_contents('/proc/meminfo');
+    if ($meminfo === false) {
+        return 0;
+    }
+    if (preg_match('~^MemTotal:\s+(\d+)\s+kB~mi', $meminfo, $m)) {
+        $kb = (int)$m[1];
+        return (int)floor($kb / 1024);
+    }
+    return 0;
+}
+
+function lv_default_tail_lines(): int
+{
+    $mb = lv_detect_mem_mb();
+
+    // Conservative, but scales up on beefier machines.
+    // (Logs can be huge; we only tail. Parsing can still be expensive.)
+    if ($mb >= 64000) return 60000; // 64GB+
+    if ($mb >= 32000) return 45000; // 32GB+
+    if ($mb >= 16000) return 35000; // 16GB+
+    if ($mb >=  8000) return 25000; // 8GB+
+    if ($mb >=  4000) return 18000; // 4GB+
+    return 12000;                   // fallback
+}
+
 $LOGVIEW_MAX_TAIL_LINES = max(
   2000,
-  (int)(getenv('LOGVIEW_MAX_TAIL_LINES') ?: 25000),
+  (int)(getenv('LOGVIEW_MAX_TAIL_LINES') ?: lv_default_tail_lines())
 );
 
+$LOGVIEW_CACHE_TTL = max(1, (int)(getenv('LOGVIEW_CACHE_TTL') ?: 2));
+
 /**
- * Hard caps (dev-safe but not insane).
+ * Security-ish headers (still dev tool).
  */
-$LOGVIEW_GZ_MAX_BYTES = (int)(getenv(
-  'LOGVIEW_GZ_MAX_BYTES',
-) ?: 0);     // if 0 => auto
-$LOGVIEW_RG_MAX_BYTES = (int)(getenv(
-  'LOGVIEW_RG_MAX_BYTES',
-) ?: 0);     // if 0 => auto
-$LOGVIEW_TAIL_MAX_BYTES = (int)(getenv(
-  'LOGVIEW_TAIL_MAX_BYTES',
-) ?: 0);   // if 0 => auto
-
-function lv_mem_available_bytes(): int
+function lv_common_headers(bool $isAsset = false): void
 {
-    // Prefer MemAvailable from /proc/meminfo (Linux containers)
-    $p = '/proc/meminfo';
-    if (is_readable($p)) {
-        $txt = @file_get_contents($p);
-        if ($txt !== false && preg_match(
-            '~^MemAvailable:\s+(\d+)\s+kB~mi',
-            $txt,
-            $m,
-          )) {
-            return (int)$m[1] * 1024;
-        }
-    }
-
-    // Fallback: memory_limit
-    $ml = ini_get('memory_limit');
-    if (!$ml || $ml === '-1') {
-        return 256 * 1024 * 1024; // assume 256MB if unlimited/unknown
-    }
-    $ml = trim((string)$ml);
-    $unit = strtolower(substr($ml, -1));
-    $num = (int)$ml;
-    return match ($unit) {
-        'g' => $num * 1024 * 1024 * 1024,
-        'm' => $num * 1024 * 1024,
-        'k' => $num * 1024,
-        default => (int)$ml,
-    };
-}
-
-function lv_auto_caps(): array
-{
-    $mem = lv_mem_available_bytes();
-
-    // Very conservative fractions (dev-safe):
-    // - gz: up to 10% of available, clamp 16–96MB
-    // - rg output: up to 6% of available, clamp 1–32MB
-    // - tail buffer: up to 8% of available, clamp 8–64MB
-    $gz = max(16 * 1024 * 1024, min(96 * 1024 * 1024, (int)($mem * 0.10)));
-    $rg = max(1 * 1024 * 1024, min(32 * 1024 * 1024, (int)($mem * 0.06)));
-    $tail = max(8 * 1024 * 1024, min(64 * 1024 * 1024, (int)($mem * 0.08)));
-
-    return [$gz, $rg, $tail];
-}
-
-function lv_caps(): array
-{
-    global $LOGVIEW_GZ_MAX_BYTES, $LOGVIEW_RG_MAX_BYTES, $LOGVIEW_TAIL_MAX_BYTES;
-
-    [$gz, $rg, $tail] = lv_auto_caps();
-
-    if ($LOGVIEW_GZ_MAX_BYTES > 0) {
-        $gz = $LOGVIEW_GZ_MAX_BYTES;
-    }
-    if ($LOGVIEW_RG_MAX_BYTES > 0) {
-        $rg = $LOGVIEW_RG_MAX_BYTES;
-    }
-    if ($LOGVIEW_TAIL_MAX_BYTES > 0) {
-        $tail = $LOGVIEW_TAIL_MAX_BYTES;
-    }
-
-    return [$gz, $rg, $tail];
-}
-
-function lv_security_headers(bool $isJson = true): void
-{
-    header('Cache-Control: no-store');
     header('X-Content-Type-Options: nosniff');
-    header('Referrer-Policy: no-referrer');
+    header('Referrer-Policy: same-origin');
     header('X-Frame-Options: SAMEORIGIN');
-    header('Permissions-Policy: interest-cohort=()');
+    header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
+    header('X-Robots-Tag: noindex, nofollow');
 
-    if ($isJson) {
-        header('Content-Type: application/json; charset=utf-8');
+    if (!$isAsset) {
+        header('Cache-Control: no-store');
     }
 }
 
 function json_out(array $data, int $code = 200): never
 {
     http_response_code($code);
-    lv_security_headers(true);
-    echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    lv_common_headers(false);
+    header('Content-Type: application/json; charset=utf-8');
+
+    $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($json === false) {
+        // Fallback (should be rare)
+        $json = '{"ok":false,"error":"json_encode failed"}';
+        http_response_code(500);
+    }
+
+    echo $json;
     exit;
 }
 
@@ -141,18 +112,32 @@ function serve_asset(string $relPath): never
 
     $ext = strtolower(pathinfo($full, PATHINFO_EXTENSION));
     $map = [
-      'css' => 'text/css; charset=utf-8',
-      'js' => 'application/javascript; charset=utf-8',
-      'png' => 'image/png',
-      'jpg' => 'image/jpeg',
+      'css'  => 'text/css; charset=utf-8',
+      'js'   => 'application/javascript; charset=utf-8',
+      'png'  => 'image/png',
+      'jpg'  => 'image/jpeg',
       'jpeg' => 'image/jpeg',
-      'svg' => 'image/svg+xml',
-      'ico' => 'image/x-icon',
+      'svg'  => 'image/svg+xml',
+      'ico'  => 'image/x-icon',
     ];
 
+    $st = @stat($full) ?: null;
+    $mtime = (int)($st['mtime'] ?? 0);
+    $size  = (int)($st['size'] ?? 0);
+
+    // Strong enough for dev caching, avoids re-downloads.
+    $etag = '"' . hash('sha256', $full . '|' . $mtime . '|' . $size) . '"';
+    header('ETag: ' . $etag);
+
+    if (isset($_SERVER['HTTP_IF_NONE_MATCH']) && trim((string)$_SERVER['HTTP_IF_NONE_MATCH']) === $etag) {
+        http_response_code(304);
+        exit;
+    }
+
+    lv_common_headers(true);
     header('Content-Type: ' . ($map[$ext] ?? 'application/octet-stream'));
     header('Cache-Control: public, max-age=3600');
-    header('X-Content-Type-Options: nosniff');
+
     readfile($full);
     exit;
 }
@@ -192,7 +177,6 @@ function resolve_file(string $input, array $roots): string
     if (!is_under_roots($real, $roots)) {
         json_out(['ok' => false, 'error' => 'not allowed'], 403);
     }
-
     return $real;
 }
 
@@ -200,6 +184,7 @@ function sh(array $cmd, int $timeout = 8): array
 {
     $des = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
     $p = @proc_open($cmd, $des, $pipes, null, null);
+
     if (!is_resource($p)) {
         return [1, '', 'proc_open failed'];
     }
@@ -240,12 +225,10 @@ function is_gz(string $file): bool
 }
 
 /**
- * PHP-native tail for plain files (fast + dependency-free).
+ * PHP-native tail for plain files (reliable inside any minimal container).
  */
 function tail_plain_php(string $file, int $lines): array
 {
-    [$gzCap, $rgCap, $tailCap] = lv_caps();
-
     $lines = max(10, $lines);
 
     $fp = @fopen($file, 'rb');
@@ -282,26 +265,26 @@ function tail_plain_php(string $file, int $lines): array
 
         $buf = $data . $buf;
 
-        if (strlen($buf) > $tailCap) {
+        if (strlen($buf) > 8_000_000) { // safety cap
             break;
-        } // dynamic safety cap
+        }
     }
 
     fclose($fp);
 
     $all = preg_split("/\r\n|\n|\r/", $buf) ?: [];
     $slice = array_slice($all, -$lines);
+
     return [0, implode("\n", $slice), ''];
 }
 
 /**
  * Tail last N lines.
- * - .gz: stream decompress with cap
- * - plain: PHP tail
+ * - .gz: gzopen read + slice (reliable even for tiny gz)
+ * - plain: PHP native tail (no external tail dependency)
  */
 function tail_text(string $file, int $lines): array
 {
-    [$gzCap, $rgCap, $tailCap] = lv_caps();
     $lines = max(10, $lines);
 
     if (is_gz($file)) {
@@ -313,14 +296,15 @@ function tail_text(string $file, int $lines): array
         $content = '';
         while (!gzeof($h)) {
             $content .= gzread($h, 8192);
-            if (strlen($content) > $gzCap) {
+            if (strlen($content) > 32_000_000) { // safety cap
                 break;
-            } // dynamic cap
+            }
         }
         gzclose($h);
 
         $all = preg_split("/\r\n|\n|\r/", $content) ?: [];
         $slice = array_slice($all, -$lines);
+
         return [0, implode("\n", $slice), ''];
     }
 
@@ -329,32 +313,24 @@ function tail_text(string $file, int $lines): array
 
 /**
  * Deep search across full file (works for .gz too).
- * Exit code 1 = no matches.
- * Output is byte-capped to avoid browser/memory pain.
+ * Uses rg for consistent output. Exit code 1 = no matches.
  */
 function grep_text(string $file, string $q, int $limit = 500): array
 {
-    [$gzCap, $rgCap, $tailCap] = lv_caps();
-
     $q = trim($q);
     if ($q === '') {
         return [0, '', 'missing q'];
     }
 
     $limit = max(50, min(5000, $limit));
-    $rg = 'rg --no-heading --line-number --max-count ' . (int)$limit . ' -S -- ' . escapeshellarg(
-        $q,
-      );
-
-    // Byte cap (lines can be enormous)
-    $capCmd = ' | head -c ' . (int)$rgCap;
+    $rg = 'rg --no-heading --line-number --max-count ' . (int)$limit . ' -S -- ' . escapeshellarg($q);
 
     if (is_gz($file)) {
-        $cmd = 'gzip -dc -- ' . escapeshellarg($file) . ' | ' . $rg . $capCmd;
-        return sh_pipe($cmd, 20);
+        $cmd = 'gzip -dc -- ' . escapeshellarg($file) . ' | ' . $rg;
+        return sh_pipe($cmd, 15);
     }
 
-    return sh_pipe($rg . ' ' . escapeshellarg($file) . $capCmd, 15);
+    return sh_pipe($rg . ' ' . escapeshellarg($file), 12);
 }
 
 function list_files(array $roots): array
@@ -369,7 +345,7 @@ function list_files(array $roots): array
 
         $it = new RecursiveIteratorIterator(
           new RecursiveDirectoryIterator($rr, FilesystemIterator::SKIP_DOTS),
-          RecursiveIteratorIterator::SELF_FIRST,
+          RecursiveIteratorIterator::SELF_FIRST
         );
 
         foreach ($it as $f) {
@@ -394,22 +370,18 @@ function list_files(array $roots): array
 
             $out[] = [
               'service' => $service,
-              'name' => $name,
-              'path' => $path,
-              'size' => $f->getSize(),
-              'mtime' => $f->getMTime(),
-              'gz' => is_gz($path),
+              'name'    => $name,
+              'path'    => $path,
+              'size'    => $f->getSize(),
+              'mtime'   => $f->getMTime(),
+              'gz'      => is_gz($path),
             ];
         }
     }
 
     usort(
       $out,
-      static fn(
-        $a,
-        $b,
-      )
-          => ($b['mtime'] <=> $a['mtime']) ?: ($b['size'] <=> $a['size']),
+      static fn($a, $b) => ($b['mtime'] <=> $a['mtime']) ?: ($b['size'] <=> $a['size'])
     );
 
     return $out;
@@ -422,10 +394,10 @@ function cache_key(string $file): string
 
 /**
  * Parse into entries:
- * - JSON line logs (level/message/timestamp common patterns)
- * - Access logs (status-based)
- * - Laravel grouped
- * - Generic grouped
+ * - Access logs: one line = one entry (level inferred from status)
+ * - Laravel/PHP: multi-line grouped
+ * - Generic: best-effort grouping
+ * - Fallback: each line is an entry
  */
 function parse_entries(string $text): array
 {
@@ -447,129 +419,73 @@ function parse_entries(string $text): array
             continue;
         }
 
-        // 0) JSON logs (one line = one entry)
-        // Common shapes:
-        // {"level":"error","message":"...","timestamp":"..."} OR {"severity":"WARN",...}
-        if ($line !== '' && $line[0] === '{') {
-            $j = json_decode($line, true);
-            if (is_array($j)) {
-                $lvlRaw = (string)($j['level'] ?? $j['severity'] ?? $j['lvl'] ?? $j['log_level'] ?? '');
-                $msg = (string)($j['message'] ?? $j['msg'] ?? $j['event'] ?? $j['error'] ?? '');
-                $ts = (string)($j['timestamp'] ?? $j['time'] ?? $j['datetime'] ?? $j['ts'] ?? '');
-
-                $lvl = strtolower(trim($lvlRaw));
-                if ($lvl === 'warning') {
-                    $lvl = 'warn';
-                }
-                if ($lvl === 'critical' || $lvl === 'fatal') {
-                    $lvl = 'error';
-                }
-                if (!in_array($lvl, ['debug', 'info', 'warn', 'error'], true)) {
-                    // nginx json access: status present
-                    if (isset($j['status']) && is_numeric($j['status'])) {
-                        $code = (int)$j['status'];
-                        $lvl = ($code >= 500) ? 'error' : (($code >= 400) ? 'warn' : 'info');
-                    } else {
-                        $lvl = 'info';
-                    }
-                }
-
-                $summary = $msg !== '' ? $msg : mb_substr($line, 0, 220);
-
-                $flush();
-                $entries[] = [
-                  'ts' => $ts,
-                  'level' => $lvl,
-                  'summary' => $summary,
-                  'body' => $line,
-                ];
-                continue;
-            }
-        }
-
-        // 1) Access log detectors
+        // Access log detectors
         if (preg_match('~"\s*[A-Z]+\s+[^"]+"\s+(\d{3})\b~', $line, $m)) {
             $code = (int)$m[1];
             $lvl = ($code >= 500) ? 'error' : (($code >= 400) ? 'warn' : 'info');
 
             $flush();
             $entries[] = [
-              'ts' => '',
-              'level' => $lvl,
+              'ts'      => '',
+              'level'   => $lvl,
               'summary' => mb_substr($line, 0, 220),
-              'body' => $line,
+              'body'    => $line,
             ];
             continue;
         }
 
         if (
           preg_match('~\b(1\d{2}|2\d{2}|3\d{2}|4\d{2}|5\d{2})\b~', $line, $m)
-          && (preg_match(
-              '~\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b~',
-              $line,
-            ) || str_contains($line, 'HTTP/'))
+          && (preg_match('~\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b~', $line) || str_contains($line, 'HTTP/'))
         ) {
             $code = (int)$m[1];
             $lvl = ($code >= 500) ? 'error' : (($code >= 400) ? 'warn' : 'info');
 
             $flush();
             $entries[] = [
-              'ts' => '',
-              'level' => $lvl,
+              'ts'      => '',
+              'level'   => $lvl,
               'summary' => mb_substr($line, 0, 220),
-              'body' => $line,
+              'body'    => $line,
             ];
             continue;
         }
 
-        // 2) Laravel
+        // Laravel: [YYYY-MM-DD HH:MM:SS] env.LEVEL: message...
         if (preg_match(
           '~^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\]\s+([^.]+)\.([A-Z]+):\s*(.*)$~',
           $line,
-          $m,
+          $m
         )) {
             $flush();
             $lvl = strtolower($m[4]);
             if ($lvl === 'warning') {
                 $lvl = 'warn';
             }
-
             $cur = [
-              'ts' => $m[1] . ' ' . $m[2],
-              'level' => $lvl,
+              'ts'      => $m[1] . ' ' . $m[2],
+              'level'   => $lvl,
               'summary' => $m[5] !== '' ? $m[5] : '(no message)',
-              'body' => $line . "\n",
+              'body'    => $line . "\n",
             ];
             continue;
         }
 
-        // 3) Generic grouping
+        // Generic heuristics
         $isNew = false;
         $lvl = 'info';
         $ts = '';
 
-        if (preg_match(
-          '~^\[(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2})\]\s+([A-Z]+)\b~',
-          $line,
-          $m,
-        )) {
+        if (preg_match('~^\[(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2})\]\s+([A-Z]+)\b~', $line, $m)) {
             $isNew = true;
             $ts = $m[1];
             $lvl = strtolower($m[2]);
-            if ($lvl === 'warning') {
-                $lvl = 'warn';
-            }
-        } elseif (preg_match(
-          '~^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}).*\b(ERROR|WARN|WARNING|INFO|DEBUG)\b~i',
-          $line,
-          $m,
-        )) {
+            if ($lvl === 'warning') $lvl = 'warn';
+        } elseif (preg_match('~^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}).*\b(ERROR|WARN|WARNING|INFO|DEBUG)\b~i', $line, $m)) {
             $isNew = true;
             $ts = $m[1];
             $lvl = strtolower($m[2]);
-            if ($lvl === 'warning') {
-                $lvl = 'warn';
-            }
+            if ($lvl === 'warning') $lvl = 'warn';
         } elseif (preg_match('~\b(FATAL|CRITICAL)\b~i', $line)) {
             $isNew = true;
             $lvl = 'error';
@@ -581,18 +497,18 @@ function parse_entries(string $text): array
         if ($isNew) {
             $flush();
             $cur = [
-              'ts' => $ts,
-              'level' => $lvl,
+              'ts'      => $ts,
+              'level'   => $lvl,
               'summary' => mb_substr($line, 0, 220),
-              'body' => $line . "\n",
+              'body'    => $line . "\n",
             ];
         } else {
             if (!$cur) {
                 $cur = [
-                  'ts' => '',
-                  'level' => 'info',
+                  'ts'      => '',
+                  'level'   => 'info',
                   'summary' => mb_substr($line, 0, 220),
-                  'body' => $line . "\n",
+                  'body'    => $line . "\n",
                 ];
             } else {
                 $cur['body'] .= $line . "\n";
@@ -604,14 +520,12 @@ function parse_entries(string $text): array
 
     if (!$entries) {
         foreach ($lines as $line) {
-            if ($line === '') {
-                continue;
-            }
+            if ($line === '') continue;
             $entries[] = [
-              'ts' => '',
-              'level' => 'info',
+              'ts'      => '',
+              'level'   => 'info',
               'summary' => mb_substr($line, 0, 220),
-              'body' => $line,
+              'body'    => $line,
             ];
         }
     }
@@ -619,154 +533,61 @@ function parse_entries(string $text): array
     return $entries;
 }
 
-function lv_counts(array $entries): array
-{
-    $counts = ['debug' => 0, 'info' => 0, 'warn' => 0, 'error' => 0];
-    foreach ($entries as $e) {
-        $l = (string)($e['level'] ?? 'info');
-        if ($l === 'warning') {
-            $l = 'warn';
-        }
-        if (!isset($counts[$l])) {
-            $l = 'info';
-        }
-        $counts[$l]++;
-    }
-    return $counts;
-}
-
-/**
- * Incremental cache update (plain files only):
- * - If file grew and growth is small, read only appended bytes and parse+merge.
- * - Always trims to last $maxTail entries (keeps UI fast).
- */
-function load_cached_entries(string $file, int $maxTailLines, int $ttl): array
+function load_cached_entries(string $file, int $maxTail, int $ttl): array
 {
     $ck = cache_key($file);
 
     $stFile = @stat($file);
-    $fileSize = (is_array(
-        $stFile,
-      ) && isset($stFile['size'])) ? (int)$stFile['size'] : 0;
-    $fileMtime = (is_array(
-        $stFile,
-      ) && isset($stFile['mtime'])) ? (int)$stFile['mtime'] : 0;
-
-    $cached = null;
+    $fileSize = (is_array($stFile) && isset($stFile['size'])) ? (int)$stFile['size'] : 0;
+    $fileMtime = (is_array($stFile) && isset($stFile['mtime'])) ? (int)$stFile['mtime'] : 0;
 
     if (is_file($ck)) {
-        $raw = @file_get_contents($ck);
-        if ($raw !== false) {
-            $j = json_decode($raw, true);
-            if (is_array($j) && isset($j['entries'], $j['meta']) && is_array(
-                $j['entries'],
-              )) {
-                $cached = $j;
-            }
-        }
-    }
+        $st = @stat($ck);
+        if ($st && (time() - (int)$st['mtime']) <= $ttl) {
+            $raw = @file_get_contents($ck);
+            if ($raw !== false) {
+                $j = json_decode($raw, true);
+                if (is_array($j) && isset($j['entries'], $j['meta'])) {
+                    $cm = $j['meta'] ?? [];
+                    $cSize = (int)($cm['size'] ?? -1);
+                    $cMtime = (int)($cm['mtime'] ?? -1);
+                    $cTotal = (int)($cm['total'] ?? 0);
 
-    // Fast return if cache is fresh and matches file state
-    if ($cached) {
-        $cm = $cached['meta'] ?? [];
-        $cSize = (int)($cm['size'] ?? -1);
-        $cMtime = (int)($cm['mtime'] ?? -1);
-        $cGen = (int)($cm['generated_at'] ?? 0);
-        $cTotal = (int)($cm['total'] ?? 0);
+                    $cacheMatches = ($cSize === $fileSize && $cMtime === $fileMtime);
+                    $cacheNotBadEmpty = !($fileSize > 0 && $cTotal === 0);
 
-        $fresh = (time() - $cGen) <= $ttl;
-        $matches = ($cSize === $fileSize && $cMtime === $fileMtime);
-        $notBadEmpty = !($fileSize > 0 && $cTotal === 0);
-
-        if ($fresh && $matches && $notBadEmpty) {
-            return $cached;
-        }
-
-        // Incremental update only for plain files that grew
-        if (!is_gz(
-            $file,
-          ) && $fileSize >= 0 && $cSize >= 0 && $fileSize > $cSize) {
-            $delta = $fileSize - $cSize;
-
-            // Only do incremental if growth is "small enough" (8MB cap)
-            if ($delta <= 8 * 1024 * 1024) {
-                $fp = @fopen($file, 'rb');
-                if ($fp) {
-                    if (@fseek($fp, $cSize, SEEK_SET) === 0) {
-                        $append = '';
-                        while (!feof($fp)) {
-                            $chunk = fread($fp, 8192);
-                            if ($chunk === false || $chunk === '') {
-                                break;
-                            }
-                            $append .= $chunk;
-                            if (strlen($append) > (10 * 1024 * 1024)) {
-                                break;
-                            }
-                        }
-                        fclose($fp);
-
-                        if ($append !== '') {
-                            $newEntries = parse_entries($append);
-                            $merged = array_merge(
-                              $cached['entries'],
-                              $newEntries,
-                            );
-
-                            // Keep last N entries (based on tail lines)
-                            if (count($merged) > $maxTailLines) {
-                                $merged = array_slice($merged, -$maxTailLines);
-                            }
-
-                            $payload = [
-                              'meta' => [
-                                'file' => $file,
-                                'gz' => false,
-                                'generated_at' => time(),
-                                'counts' => lv_counts($merged),
-                                'total' => count($merged),
-                                'size' => $fileSize,
-                                'mtime' => $fileMtime,
-                              ],
-                              'entries' => $merged,
-                            ];
-
-                            @file_put_contents(
-                              $ck,
-                              json_encode(
-                                $payload,
-                                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-                              ),
-                              LOCK_EX,
-                            );
-
-                            return $payload;
-                        }
-                    } else {
-                        fclose($fp);
+                    if ($cacheMatches && $cacheNotBadEmpty) {
+                        return $j;
                     }
                 }
             }
         }
     }
 
-    // Full rebuild (tail + parse)
-    [$code, $out, $err] = tail_text($file, $maxTailLines);
+    [$code, $out, $err] = tail_text($file, $maxTail);
     if ($code !== 0) {
         json_out(['ok' => false, 'error' => trim($err) ?: 'read failed'], 500);
     }
 
     $entries = parse_entries($out);
 
+    $counts = ['debug' => 0, 'info' => 0, 'warn' => 0, 'error' => 0];
+    foreach ($entries as $e) {
+        $l = $e['level'] ?? 'info';
+        if ($l === 'warning') $l = 'warn';
+        if (!isset($counts[$l])) $l = 'info';
+        $counts[$l]++;
+    }
+
     $payload = [
       'meta' => [
-        'file' => $file,
-        'gz' => is_gz($file),
+        'file'         => $file,
+        'gz'           => is_gz($file),
         'generated_at' => time(),
-        'counts' => lv_counts($entries),
-        'total' => count($entries),
-        'size' => $fileSize,
-        'mtime' => $fileMtime,
+        'counts'       => $counts,
+        'total'        => count($entries),
+        'size'         => $fileSize,
+        'mtime'        => $fileMtime,
       ],
       'entries' => $entries,
     ];
@@ -774,7 +595,7 @@ function load_cached_entries(string $file, int $maxTailLines, int $ttl): array
     @file_put_contents(
       $ck,
       json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-      LOCK_EX,
+      LOCK_EX
     );
 
     return $payload;
@@ -789,13 +610,9 @@ function nginx_domains_list(string $dir): array
 
     $out = [];
     foreach (new DirectoryIterator($d) as $f) {
-        if (!$f->isFile()) {
-            continue;
-        }
+        if (!$f->isFile()) continue;
         $name = $f->getFilename();
-        if (!preg_match('~\.conf$~i', $name)) {
-            continue;
-        }
+        if (!preg_match('~\.conf$~i', $name)) continue;
         $out[] = preg_replace('~\.conf$~i', '', $name);
     }
 
@@ -803,23 +620,50 @@ function nginx_domains_list(string $dir): array
     return $out;
 }
 
+function dashboard_log_stats(array $roots, int $ttl, int $maxFiles = 20): array
+{
+    $files = list_files($roots);
+    $files = array_slice($files, 0, max(1, $maxFiles));
+
+    $sum = ['debug' => 0, 'info' => 0, 'warn' => 0, 'error' => 0];
+    $sampled = 0;
+    $last = 0;
+
+    $dashTail = max(2000, (int)(getenv('LOGVIEW_DASH_TAIL') ?: 5000));
+
+    foreach ($files as $f) {
+        $payload = load_cached_entries($f['path'], $dashTail, $ttl);
+        $c = $payload['meta']['counts'] ?? [];
+        foreach ($sum as $k => $_) {
+            $sum[$k] += (int)($c[$k] ?? 0);
+        }
+        $last = max($last, (int)($payload['meta']['generated_at'] ?? 0));
+        $sampled++;
+    }
+
+    return [
+      'sampled_files'     => $sampled,
+      'counts'            => $sum,
+      'last_generated_at' => $last,
+      'total_files'       => count(list_files($roots)),
+    ];
+}
+
 function log_file_counts_by_dirname(array $roots): array
 {
     $files = list_files($roots);
-    $by = [];
 
+    $by = [];
     foreach ($files as $f) {
         $dir = trim((string)($f['service'] ?? 'logs'));
-        if ($dir === '') {
-            $dir = 'logs';
-        }
+        if ($dir === '') $dir = 'logs';
         $by[$dir] = ($by[$dir] ?? 0) + 1;
     }
 
     ksort($by, SORT_NATURAL | SORT_FLAG_CASE);
 
     return [
-      'total' => count($files),
+      'total'  => count($files),
       'by_dir' => $by,
     ];
 }

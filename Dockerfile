@@ -160,7 +160,7 @@ RUN apk add --no-cache \
       /etc/share/sops/global \
       /etc/share/sops/keys \
       /etc/share/sops/config \
-      /app/logviewer \
+      /etc/share/logviewer \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*
 
@@ -181,7 +181,7 @@ COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/http-templates/ /etc/http-templates/
 COPY scripts/docker-templates/ /etc/docker-templates/
 COPY scripts/fpm-templates/ /etc/fpm-templates/
-COPY scripts/logviewer/ /app/logviewer/
+COPY scripts/logviewer/ /etc/share/logviewer
 
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner

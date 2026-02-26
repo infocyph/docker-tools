@@ -12,9 +12,9 @@ if [[ "${LOGVIEW_AUTOSTART:-0}" == "1" ]]; then
   : "${LOGVIEW_PORT:=9911}"
 
   # Avoid spawning twice (in case of restart scripts)
-  if ! pgrep -f "php -S ${LOGVIEW_BIND}:${LOGVIEW_PORT} .*app/logviewer/app/index.php" >/dev/null 2>&1; then
+  if ! pgrep -f "php -S ${LOGVIEW_BIND}:${LOGVIEW_PORT} .*etc/share/logviewer/app/index.php" >/dev/null 2>&1; then
     echo "[entrypoint] Starting Log Viewer on ${LOGVIEW_BIND}:${LOGVIEW_PORT}" >&2
-    php -S "${LOGVIEW_BIND}:${LOGVIEW_PORT}" /app/logviewer/app/index.php >/dev/null 2>&1 &
+    php -S "${LOGVIEW_BIND}:${LOGVIEW_PORT}" /etc/share/logviewer/app/index.php >/dev/null 2>&1 &
   fi
 fi
 

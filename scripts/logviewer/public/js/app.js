@@ -494,7 +494,7 @@
   document.querySelectorAll('#levelPills [data-level]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const lvl = btn.getAttribute('data-level');
-      activeLevel = activeLevel === lvl ? "" : lvl;
+      activeLevel = activeLevel === lvl ? '' : lvl;
       page = 1;
       stopLive();
       loadEntries();
@@ -502,8 +502,8 @@
   });
 
   // Quick dev shortcut: press "L" to toggle live mode
-  document.addEventListener("keydown", (e) => {
-    if (e.key.toLowerCase() === "l" && activeFile) {
+  document.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'l' && activeFile) {
       liveOn ? (stopLive(), loadEntries()) : startLive();
     }
   });

@@ -408,7 +408,8 @@ function list_files(array $roots): array
       static fn(
         $a,
         $b,
-      ) => ($b['mtime'] <=> $a['mtime']) ?: ($b['size'] <=> $a['size']),
+      )
+          => ($b['mtime'] <=> $a['mtime']) ?: ($b['size'] <=> $a['size']),
     );
 
     return $out;

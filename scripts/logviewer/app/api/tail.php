@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 require_once __DIR__ . '/../bootstrap.php';
 
@@ -18,13 +19,19 @@ header('X-Content-Type-Options: nosniff');
 $lastHash = '';
 
 while (true) {
-    if (connection_aborted()) break;
+    if (connection_aborted()) {
+        break;
+    }
 
     [$code, $out, $err] = tail_text($file, $lines);
     if ($code !== 0) {
         echo "event: error\n";
-        echo "data: " . json_encode(['ok'=>false,'error'=>trim($err) ?: 'read failed'], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) . "\n\n";
-        @ob_flush(); @flush();
+        echo "data: " . json_encode(
+            ['ok' => false, 'error' => trim($err) ?: 'read failed'],
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+          ) . "\n\n";
+        @ob_flush();
+        @flush();
         usleep($intervalMs * 1000);
         continue;
     }
@@ -33,8 +40,12 @@ while (true) {
     if ($h !== $lastHash) {
         $lastHash = $h;
         echo "event: tail\n";
-        echo "data: " . json_encode(['ok'=>true,'text'=>$out,'hash'=>$h,'ts'=>time()], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) . "\n\n";
-        @ob_flush(); @flush();
+        echo "data: " . json_encode(
+            ['ok' => true, 'text' => $out, 'hash' => $h, 'ts' => time()],
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+          ) . "\n\n";
+        @ob_flush();
+        @flush();
     }
 
     usleep($intervalMs * 1000);

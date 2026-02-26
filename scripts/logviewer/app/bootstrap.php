@@ -144,6 +144,9 @@ function is_gz(string $file): bool
     return str_ends_with(strtolower($file), '.gz');
 }
 
+/**
+ * PHP-native tail for plain files (reliable inside any minimal container).
+ */
 function tail_plain_php(string $file, int $lines): array
 {
     $lines = max(10, $lines);
@@ -153,11 +156,6 @@ function tail_plain_php(string $file, int $lines): array
         return [1, '', 'fopen failed'];
     }
 
-    $buf = '';
-    $chunk = 8192;
-    $pos = 0;
-
-    // seek to end
     if (fseek($fp, 0, SEEK_END) !== 0) {
         fclose($fp);
         return [1, '', 'fseek failed'];
@@ -169,8 +167,10 @@ function tail_plain_php(string $file, int $lines): array
         return [1, '', 'ftell failed'];
     }
 
-    $need = $lines + 1; // newline count target
-    while ($pos > 0 && $need > 0) {
+    $buf = '';
+    $chunk = 8192;
+
+    while ($pos > 0 && substr_count($buf, "\n") < ($lines + 1)) {
         $read = ($pos >= $chunk) ? $chunk : $pos;
         $pos -= $read;
 
@@ -185,8 +185,6 @@ function tail_plain_php(string $file, int $lines): array
 
         $buf = $data . $buf;
 
-        // count newlines quickly
-        $need = ($lines + 1) - substr_count($buf, "\n");
         if (strlen($buf) > 8_000_000) { // safety cap
             break;
         }
@@ -202,8 +200,8 @@ function tail_plain_php(string $file, int $lines): array
 
 /**
  * Tail last N lines.
- * - .gz: gzopen read + slice
- * - plain: try system tail, but if empty while filesize>0 -> PHP tail fallback
+ * - .gz: gzopen read + slice (reliable even for tiny gz)
+ * - plain: PHP native tail (no external tail dependency)
  */
 function tail_text(string $file, int $lines): array
 {
@@ -230,18 +228,7 @@ function tail_text(string $file, int $lines): array
         return [0, implode("\n", $slice), ''];
     }
 
-    // Try system tail first (fast)
-    [$code, $out, $err] = sh(['tail', '-n', (string)$lines, $file], 8);
-
-    // If tail says OK but returns empty while file has bytes, fallback to PHP tail
-    if ($code === 0 && trim((string)$out) === '') {
-        $sz = @filesize($file);
-        if (is_int($sz) && $sz > 0) {
-            return tail_plain_php($file, $lines);
-        }
-    }
-
-    return [$code, $out, $err];
+    return tail_plain_php($file, $lines);
 }
 
 /**
@@ -314,7 +301,7 @@ function list_files(array $roots): array
 
     usort(
       $out,
-      static fn ($a, $b) => ($b['mtime'] <=> $a['mtime']) ?: ($b['size'] <=> $a['size']),
+      static fn($a, $b) => ($b['mtime'] <=> $a['mtime']) ?: ($b['size'] <=> $a['size']),
     );
 
     return $out;
@@ -325,6 +312,13 @@ function cache_key(string $file): string
     return '/tmp/logviewer_' . hash('sha256', $file) . '.json';
 }
 
+/**
+ * Parse into entries:
+ * - Access logs: one line = one entry (level inferred from status)
+ * - Laravel/PHP: multi-line grouped
+ * - Generic: best-effort grouping
+ * - Fallback: each line is an entry
+ */
 function parse_entries(string $text): array
 {
     $lines = preg_split("/\r\n|\n|\r/", $text) ?: [];
@@ -345,13 +339,7 @@ function parse_entries(string $text): array
             continue;
         }
 
-        /**
-         * Access log (single-line) detectors — keep default compatible:
-         *  1) Strict: "... "METHOD PATH" 200 ..."
-         *  2) Generic: any 1xx-5xx status, but only if line looks HTTP-ish (method or HTTP/)
-         *
-         * For these, we always treat ONE line = ONE entry (no multi-line grouping).
-         */
+        // Access log (single-line) detectors (default-compatible)
         if (preg_match('~"\s*[A-Z]+\s+[^"]+"\s+(\d{3})\b~', $line, $m)) {
             $code = (int)$m[1];
             $lvl = ($code >= 500) ? 'error' : (($code >= 400) ? 'warn' : 'info');
@@ -412,6 +400,9 @@ function parse_entries(string $text): array
             $isNew = true;
             $ts = $m[1];
             $lvl = strtolower($m[2]);
+            if ($lvl === 'warning') {
+                $lvl = 'warn';
+            }
         } elseif (preg_match('~^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}).*\b(ERROR|WARN|WARNING|INFO|DEBUG)\b~i', $line, $m)) {
             $isNew = true;
             $ts = $m[1];
@@ -451,7 +442,7 @@ function parse_entries(string $text): array
 
     $flush();
 
-    // Fallback: never return empty when file has text (e.g., plain access logs)
+    // Fallback: never return empty when file has text
     if (!$entries) {
         foreach ($lines as $line) {
             if ($line === '') {
@@ -473,6 +464,10 @@ function load_cached_entries(string $file, int $maxTail, int $ttl): array
 {
     $ck = cache_key($file);
 
+    $stFile = @stat($file);
+    $fileSize = (is_array($stFile) && isset($stFile['size'])) ? (int)$stFile['size'] : 0;
+    $fileMtime = (is_array($stFile) && isset($stFile['mtime'])) ? (int)$stFile['mtime'] : 0;
+
     if (is_file($ck)) {
         $st = @stat($ck);
         if ($st && (time() - (int)$st['mtime']) <= $ttl) {
@@ -480,7 +475,17 @@ function load_cached_entries(string $file, int $maxTail, int $ttl): array
             if ($raw !== false) {
                 $j = json_decode($raw, true);
                 if (is_array($j) && isset($j['entries'], $j['meta'])) {
-                    return $j;
+                    $cm = $j['meta'] ?? [];
+                    $cSize = (int)($cm['size'] ?? -1);
+                    $cMtime = (int)($cm['mtime'] ?? -1);
+                    $cTotal = (int)($cm['total'] ?? 0);
+
+                    $cacheMatches = ($cSize === $fileSize && $cMtime === $fileMtime);
+                    $cacheNotBadEmpty = !($fileSize > 0 && $cTotal === 0);
+
+                    if ($cacheMatches && $cacheNotBadEmpty) {
+                        return $j;
+                    }
                 }
             }
         }
@@ -496,6 +501,9 @@ function load_cached_entries(string $file, int $maxTail, int $ttl): array
     $counts = ['debug' => 0, 'info' => 0, 'warn' => 0, 'error' => 0];
     foreach ($entries as $e) {
         $l = $e['level'] ?? 'info';
+        if ($l === 'warning') {
+            $l = 'warn';
+        }
         if (!isset($counts[$l])) {
             $l = 'info';
         }
@@ -509,6 +517,8 @@ function load_cached_entries(string $file, int $maxTail, int $ttl): array
         'generated_at' => time(),
         'counts'       => $counts,
         'total'        => count($entries),
+        'size'         => $fileSize,
+        'mtime'        => $fileMtime,
       ],
       'entries' => $entries,
     ];
@@ -547,7 +557,6 @@ function nginx_domains_list(string $dir): array
 
 function dashboard_log_stats(array $roots, int $ttl, int $maxFiles = 20): array
 {
-    // Lightweight: only sample most-recent files (maxFiles)
     $files = list_files($roots);
     $files = array_slice($files, 0, max(1, $maxFiles));
 

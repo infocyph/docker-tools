@@ -134,13 +134,18 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     SOPS_BASE_DIR=/etc/share/sops \
     SOPS_KEYS_DIR=/etc/share/sops/keys \
     SOPS_CFG_DIR=/etc/share/sops/config \
-    SOPS_REPO_DIR=/etc/share/vhosts/sops
+    SOPS_REPO_DIR=/etc/share/vhosts/sops \
+    LOGVIEW_PORT=9911 \
+    LOGVIEW_BIND=0.0.0.0 \
+    LOGVIEW_ROOTS=/global/log \
+    LOGVIEW_MAX_TAIL_LINES=25000 \
+    LOGVIEW_CACHE_TTL=2
 
 RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
-      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep tmux \
+      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep tmux gzip \
       lnav multitail less php \
   && update-ca-certificates \
   && mkdir -p \
@@ -154,6 +159,7 @@ RUN apk add --no-cache \
       /etc/share/sops/global \
       /etc/share/sops/keys \
       /etc/share/sops/config \
+      /app/logviewer \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*
 
@@ -171,9 +177,11 @@ COPY scripts/shells/notifierd.sh /usr/local/bin/notifierd
 COPY scripts/shells/notify.sh /usr/local/bin/notify
 COPY scripts/shells/senv.sh /usr/local/bin/senv
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
+COPY scripts/shells/logview.sh /usr/local/bin/logview
 COPY scripts/http-templates/ /etc/http-templates/
 COPY scripts/docker-templates/ /etc/docker-templates/
 COPY scripts/fpm-templates/ /etc/fpm-templates/
+COPY scripts/logviewer/ /app/logviewer/
 
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner
@@ -197,6 +205,7 @@ RUN chmod +x \
       /usr/local/bin/lazydocker \
       /usr/local/bin/es-policy \
       /usr/local/bin/senv \
+      /usr/local/bin/logview \
   && touch /etc/environment \
   && chmod -R 755 /etc/share/vhosts \
   && chmod 644 /etc/environment \

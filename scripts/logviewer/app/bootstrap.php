@@ -257,6 +257,44 @@ function parse_entries(string $text): array
             continue;
         }
 
+        /**
+         * Access log (single-line) detectors — keep default compatible:
+         *  1) Strict: "... "METHOD PATH" 200 ..."
+         *  2) Generic: any 1xx-5xx status, but only if line looks HTTP-ish (method or HTTP/)
+         *
+         * For these, we always treat ONE line = ONE entry (no multi-line grouping).
+         */
+        if (preg_match('~"\s*[A-Z]+\s+[^"]+"\s+(\d{3})\b~', $line, $m)) {
+            $code = (int)$m[1];
+            $lvl = ($code >= 500) ? 'error' : (($code >= 400) ? 'warn' : 'info');
+
+            $flush();
+            $entries[] = [
+              'ts'      => '',
+              'level'   => $lvl,
+              'summary' => mb_substr($line, 0, 220),
+              'body'    => $line,
+            ];
+            continue;
+        }
+
+        if (
+          preg_match('~\b(1\d{2}|2\d{2}|3\d{2}|4\d{2}|5\d{2})\b~', $line, $m)
+          && (preg_match('~\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b~', $line) || str_contains($line, 'HTTP/'))
+        ) {
+            $code = (int)$m[1];
+            $lvl = ($code >= 500) ? 'error' : (($code >= 400) ? 'warn' : 'info');
+
+            $flush();
+            $entries[] = [
+              'ts'      => '',
+              'level'   => $lvl,
+              'summary' => mb_substr($line, 0, 220),
+              'body'    => $line,
+            ];
+            continue;
+        }
+
         // Laravel: [YYYY-MM-DD HH:MM:SS] env.LEVEL: message...
         if (preg_match(
           '~^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\]\s+([^.]+)\.([A-Z]+):\s*(.*)$~',
@@ -265,6 +303,9 @@ function parse_entries(string $text): array
         )) {
             $flush();
             $lvl = strtolower($m[4]);
+            if ($lvl === 'warning') {
+                $lvl = 'warn';
+            }
             $cur = [
               'ts'      => $m[1] . ' ' . $m[2],
               'level'   => $lvl,
@@ -274,7 +315,7 @@ function parse_entries(string $text): array
             continue;
         }
 
-        // Generic heuristics
+        // Generic heuristics (multi-line grouping)
         $isNew = false;
         $lvl = 'info';
         $ts = '';
@@ -289,16 +330,6 @@ function parse_entries(string $text): array
             $lvl = strtolower($m[2]);
             if ($lvl === 'warning') {
                 $lvl = 'warn';
-            }
-        } elseif (preg_match('~\s(\d{3})\s~', $line, $m)) {
-            $code = (int)$m[1];
-            $isNew = true;
-            if ($code >= 500) {
-                $lvl = 'error';
-            } elseif ($code >= 400) {
-                $lvl = 'warn';
-            } else {
-                $lvl = 'info';
             }
         } elseif (preg_match('~\b(FATAL|CRITICAL)\b~i', $line)) {
             $isNew = true;

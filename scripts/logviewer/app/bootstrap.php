@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
-
+$LOGVIEW_DEBUG = (bool)(getenv('LOGVIEW_DEBUG') ?: false);
 $LOGVIEW_ROOTS = array_values(
   array_filter(
     array_map('trim', explode(':', getenv('LOGVIEW_ROOTS') ?: '/global/log')),

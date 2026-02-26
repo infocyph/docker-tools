@@ -4,16 +4,20 @@ declare(strict_types=1);
 
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
+
 $LOGVIEW_DEBUG = (bool)(getenv('LOGVIEW_DEBUG') ?: false);
+
 $LOGVIEW_ROOTS = array_values(
   array_filter(
     array_map('trim', explode(':', getenv('LOGVIEW_ROOTS') ?: '/global/log')),
   ),
 );
+
 $LOGVIEW_MAX_TAIL_LINES = max(
   2000,
   (int)(getenv('LOGVIEW_MAX_TAIL_LINES') ?: 25000),
 );
+
 $LOGVIEW_CACHE_TTL = max(1, (int)(getenv('LOGVIEW_CACHE_TTL') ?: 2));
 $NGINX_VHOST_DIR = getenv('NGINX_VHOST_DIR') ?: '/etc/share/vhosts/nginx';
 
@@ -30,24 +34,28 @@ function serve_asset(string $relPath): never
 {
     $base = realpath(__DIR__ . '/../public');
     $full = realpath(__DIR__ . '/../public/' . ltrim($relPath, '/'));
-    if ($base === false || $full === false || !str_starts_with(
-        $full,
-        $base,
-      ) || !is_file($full)) {
+
+    if (
+      $base === false
+      || $full === false
+      || !str_starts_with($full, $base)
+      || !is_file($full)
+    ) {
         http_response_code(404);
         exit;
     }
 
     $ext = strtolower(pathinfo($full, PATHINFO_EXTENSION));
     $map = [
-      'css' => 'text/css; charset=utf-8',
-      'js' => 'application/javascript; charset=utf-8',
-      'png' => 'image/png',
-      'jpg' => 'image/jpeg',
+      'css'  => 'text/css; charset=utf-8',
+      'js'   => 'application/javascript; charset=utf-8',
+      'png'  => 'image/png',
+      'jpg'  => 'image/jpeg',
       'jpeg' => 'image/jpeg',
-      'svg' => 'image/svg+xml',
-      'ico' => 'image/x-icon',
+      'svg'  => 'image/svg+xml',
+      'ico'  => 'image/x-icon',
     ];
+
     header('Content-Type: ' . ($map[$ext] ?? 'application/octet-stream'));
     header('Cache-Control: public, max-age=3600');
     readfile($full);
@@ -96,6 +104,7 @@ function sh(array $cmd, int $timeout = 8): array
 {
     $des = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
     $p = @proc_open($cmd, $des, $pipes, null, null);
+
     if (!is_resource($p)) {
         return [1, '', 'proc_open failed'];
     }
@@ -120,6 +129,7 @@ function sh(array $cmd, int $timeout = 8): array
     $err = stream_get_contents($pipes[2]) ?: '';
     fclose($pipes[1]);
     fclose($pipes[2]);
+
     $code = proc_close($p);
     return [$code, $out, $err];
 }
@@ -139,10 +149,7 @@ function tail_text(string $file, int $lines): array
     $lines = max(10, $lines);
 
     if (is_gz($file)) {
-        // gzip -dc -- file.gz | tail -n N
-        $cmd = 'gzip -dc -- ' . escapeshellarg(
-            $file,
-          ) . ' | tail -n ' . (int)$lines;
+        $cmd = 'gzip -dc -- ' . escapeshellarg($file) . ' | tail -n ' . (int)$lines;
         return sh_pipe($cmd, 12);
     }
 
@@ -159,11 +166,9 @@ function grep_text(string $file, string $q, int $limit = 500): array
     if ($q === '') {
         return [0, '', 'missing q'];
     }
-    $limit = max(50, min(5000, $limit));
 
-    $rg = 'rg --no-heading --line-number --max-count ' . (int)$limit . ' -S -- ' . escapeshellarg(
-        $q,
-      );
+    $limit = max(50, min(5000, $limit));
+    $rg = 'rg --no-heading --line-number --max-count ' . (int)$limit . ' -S -- ' . escapeshellarg($q);
 
     if (is_gz($file)) {
         $cmd = 'gzip -dc -- ' . escapeshellarg($file) . ' | ' . $rg;
@@ -176,6 +181,7 @@ function grep_text(string $file, string $q, int $limit = 500): array
 function list_files(array $roots): array
 {
     $out = [];
+
     foreach ($roots as $root) {
         $rr = realpath($root);
         if ($rr === false || !is_dir($rr)) {
@@ -195,7 +201,6 @@ function list_files(array $roots): array
             $name = $f->getFilename();
             $path = $f->getPathname();
 
-            // include .gz too
             $isLogLike =
               preg_match('~\.(log|out|err|txt)(\.gz)?$~i', $name) ||
               preg_match('~\.(access|error)(\.log)?(\.gz)?$~i', $name) ||
@@ -210,19 +215,20 @@ function list_files(array $roots): array
 
             $out[] = [
               'service' => $service,
-              'name' => $name,
-              'path' => $path,
-              'size' => $f->getSize(),
-              'mtime' => $f->getMTime(),
-              'gz' => is_gz($path),
+              'name'    => $name,
+              'path'    => $path,
+              'size'    => $f->getSize(),
+              'mtime'   => $f->getMTime(),
+              'gz'      => is_gz($path),
             ];
         }
     }
 
     usort(
       $out,
-      fn($a, $b) => ($b['mtime'] <=> $a['mtime']) ?: ($b['size'] <=> $a['size']),
+      static fn ($a, $b) => ($b['mtime'] <=> $a['mtime']) ?: ($b['size'] <=> $a['size']),
     );
+
     return $out;
 }
 
@@ -237,7 +243,7 @@ function parse_entries(string $text): array
     $entries = [];
     $cur = null;
 
-    $flush = function () use (&$entries, &$cur) {
+    $flush = function () use (&$entries, &$cur): void {
         if (!$cur) {
             return;
         }
@@ -260,10 +266,10 @@ function parse_entries(string $text): array
             $flush();
             $lvl = strtolower($m[4]);
             $cur = [
-              'ts' => $m[1] . ' ' . $m[2],
-              'level' => $lvl,
+              'ts'      => $m[1] . ' ' . $m[2],
+              'level'   => $lvl,
               'summary' => $m[5] !== '' ? $m[5] : '(no message)',
-              'body' => $line . "\n",
+              'body'    => $line . "\n",
             ];
             continue;
         }
@@ -273,19 +279,11 @@ function parse_entries(string $text): array
         $lvl = 'info';
         $ts = '';
 
-        if (preg_match(
-          '~^\[(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2})\]\s+([A-Z]+)\b~',
-          $line,
-          $m,
-        )) {
+        if (preg_match('~^\[(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2})\]\s+([A-Z]+)\b~', $line, $m)) {
             $isNew = true;
             $ts = $m[1];
             $lvl = strtolower($m[2]);
-        } elseif (preg_match(
-          '~^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}).*\b(ERROR|WARN|WARNING|INFO|DEBUG)\b~i',
-          $line,
-          $m,
-        )) {
+        } elseif (preg_match('~^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}).*\b(ERROR|WARN|WARNING|INFO|DEBUG)\b~i', $line, $m)) {
             $isNew = true;
             $ts = $m[1];
             $lvl = strtolower($m[2]);
@@ -313,18 +311,18 @@ function parse_entries(string $text): array
         if ($isNew) {
             $flush();
             $cur = [
-              'ts' => $ts,
-              'level' => $lvl,
+              'ts'      => $ts,
+              'level'   => $lvl,
               'summary' => mb_substr($line, 0, 220),
-              'body' => $line . "\n",
+              'body'    => $line . "\n",
             ];
         } else {
             if (!$cur) {
                 $cur = [
-                  'ts' => '',
-                  'level' => 'info',
+                  'ts'      => '',
+                  'level'   => 'info',
                   'summary' => mb_substr($line, 0, 220),
-                  'body' => $line . "\n",
+                  'body'    => $line . "\n",
                 ];
             } else {
                 $cur['body'] .= $line . "\n";
@@ -333,6 +331,22 @@ function parse_entries(string $text): array
     }
 
     $flush();
+
+    // Fallback: never return empty when file has text (e.g., plain access logs)
+    if (!$entries) {
+        foreach ($lines as $line) {
+            if ($line === '') {
+                continue;
+            }
+            $entries[] = [
+              'ts'      => '',
+              'level'   => 'info',
+              'summary' => mb_substr($line, 0, 220),
+              'body'    => $line,
+            ];
+        }
+    }
+
     return $entries;
 }
 
@@ -371,11 +385,11 @@ function load_cached_entries(string $file, int $maxTail, int $ttl): array
 
     $payload = [
       'meta' => [
-        'file' => $file,
-        'gz' => is_gz($file),
+        'file'         => $file,
+        'gz'           => is_gz($file),
         'generated_at' => time(),
-        'counts' => $counts,
-        'total' => count($entries),
+        'counts'       => $counts,
+        'total'        => count($entries),
       ],
       'entries' => $entries,
     ];
@@ -385,6 +399,7 @@ function load_cached_entries(string $file, int $maxTail, int $ttl): array
       json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
       LOCK_EX,
     );
+
     return $payload;
 }
 
@@ -394,6 +409,7 @@ function nginx_domains_list(string $dir): array
     if ($d === false || !is_dir($d)) {
         return [];
     }
+
     $out = [];
     foreach (new DirectoryIterator($d) as $f) {
         if (!$f->isFile()) {
@@ -405,6 +421,7 @@ function nginx_domains_list(string $dir): array
         }
         $out[] = preg_replace('~\.conf$~i', '', $name);
     }
+
     sort($out, SORT_NATURAL | SORT_FLAG_CASE);
     return $out;
 }
@@ -432,27 +449,30 @@ function dashboard_log_stats(array $roots, int $ttl, int $maxFiles = 20): array
     }
 
     return [
-      'sampled_files' => $sampled,
-      'counts' => $sum,
+      'sampled_files'     => $sampled,
+      'counts'            => $sum,
       'last_generated_at' => $last,
-      'total_files' => count(list_files($roots)),
+      'total_files'       => count(list_files($roots)),
     ];
 }
-function log_file_counts_by_dirname(array $roots): array {
+
+function log_file_counts_by_dirname(array $roots): array
+{
     $files = list_files($roots);
 
     $by = [];
     foreach ($files as $f) {
-        // Prefer the existing "service" derived from first directory under root
         $dir = trim((string)($f['service'] ?? 'logs'));
-        if ($dir === '') $dir = 'logs';
+        if ($dir === '') {
+            $dir = 'logs';
+        }
         $by[$dir] = ($by[$dir] ?? 0) + 1;
     }
 
     ksort($by, SORT_NATURAL | SORT_FLAG_CASE);
 
     return [
-      'total' => count($files),
+      'total'  => count($files),
       'by_dir' => $by,
     ];
 }

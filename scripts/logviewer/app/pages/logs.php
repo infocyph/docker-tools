@@ -41,16 +41,19 @@ require_once __DIR__ . '/_layout_top.php';
 
         <div class="card-header lv-card-header d-flex flex-wrap align-items-center gap-2">
 
-          <div>
+          <div class="me-2">
             <div class="lv-muted small">Active</div>
-            <div class="small" id="activeFile">—</div>
+            <div class="small text-truncate" style="max-width:520px" id="activeFile">—</div>
+          </div>
+
+          <!-- ✅ Capsules -->
+          <div class="d-flex flex-wrap gap-2 align-items-center" id="fileCaps">
+            <!-- populated by JS -->
           </div>
 
           <div class="ms-auto d-flex align-items-center gap-2">
 
-            <button class="btn btn-sm lv-btn" id="btnLive">
-              Live
-            </button>
+            <button class="btn btn-sm lv-btn" id="btnLive">Live</button>
 
             <select class="form-select form-select-sm lv-select"
                     id="perPage"
@@ -78,7 +81,7 @@ require_once __DIR__ . '/_layout_top.php';
 
         <div class="card-footer lv-card-footer d-flex align-items-center">
           <div class="lv-muted small" id="stats">—</div>
-          <div class="ms-auto d-flex gap-2">
+          <div class="ms-auto d-flex gap-2 align-items-center">
             <button class="btn btn-sm lv-btn" id="prevPage">‹</button>
             <div class="small" id="pageInfo">1 / 1</div>
             <button class="btn btn-sm lv-btn" id="nextPage">›</button>
@@ -93,7 +96,7 @@ require_once __DIR__ . '/_layout_top.php';
   <script>
     window.LV_BOOT = {
       page: 'logs',
-      domain: <?= json_encode((string)($_GET['domain'] ?? '')) ?>
+      domain: <?= json_encode((string)($_GET['domain'] ?? ''), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
     };
   </script>
 

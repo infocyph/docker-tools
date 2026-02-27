@@ -29,7 +29,6 @@ $NGINX_VHOST_DIR = getenv('NGINX_VHOST_DIR') ?: '/etc/share/vhosts/nginx';
  */
 function lv_detect_mem_mb(): int
 {
-    // Best-effort; this is a dev tool.
     $meminfo = @file_get_contents('/proc/meminfo');
     if ($meminfo === false) {
         return 0;
@@ -45,14 +44,12 @@ function lv_default_tail_lines(): int
 {
     $mb = lv_detect_mem_mb();
 
-    // Conservative, but scales up on beefier machines.
-    // (Logs can be huge; we only tail. Parsing can still be expensive.)
     if ($mb >= 64000) return 60000; // 64GB+
     if ($mb >= 32000) return 45000; // 32GB+
     if ($mb >= 16000) return 35000; // 16GB+
     if ($mb >=  8000) return 25000; // 8GB+
     if ($mb >=  4000) return 18000; // 4GB+
-    return 12000;                   // fallback
+    return 12000;
 }
 
 $LOGVIEW_MAX_TAIL_LINES = max(
@@ -62,9 +59,6 @@ $LOGVIEW_MAX_TAIL_LINES = max(
 
 $LOGVIEW_CACHE_TTL = max(1, (int)(getenv('LOGVIEW_CACHE_TTL') ?: 2));
 
-/**
- * Security-ish headers (still dev tool).
- */
 function lv_common_headers(bool $isAsset = false): void
 {
     header('X-Content-Type-Options: nosniff');
@@ -86,7 +80,6 @@ function json_out(array $data, int $code = 200): never
 
     $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     if ($json === false) {
-        // Fallback (should be rare)
         $json = '{"ok":false,"error":"json_encode failed"}';
         http_response_code(500);
     }
@@ -125,7 +118,6 @@ function serve_asset(string $relPath): never
     $mtime = (int)($st['mtime'] ?? 0);
     $size  = (int)($st['size'] ?? 0);
 
-    // Strong enough for dev caching, avoids re-downloads.
     $etag = '"' . hash('sha256', $full . '|' . $mtime . '|' . $size) . '"';
     header('ETag: ' . $etag);
 
@@ -146,13 +138,9 @@ function is_under_roots(string $real, array $roots): bool
 {
     foreach ($roots as $r) {
         $rr = realpath($r);
-        if ($rr === false) {
-            continue;
-        }
+        if ($rr === false) continue;
         $rr = rtrim($rr, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
-        if (str_starts_with($real, $rr)) {
-            return true;
-        }
+        if (str_starts_with($real, $rr)) return true;
     }
     return false;
 }
@@ -184,10 +172,7 @@ function sh(array $cmd, int $timeout = 8): array
 {
     $des = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
     $p = @proc_open($cmd, $des, $pipes, null, null);
-
-    if (!is_resource($p)) {
-        return [1, '', 'proc_open failed'];
-    }
+    if (!is_resource($p)) return [1, '', 'proc_open failed'];
 
     stream_set_blocking($pipes[1], true);
     stream_set_blocking($pipes[2], true);
@@ -195,9 +180,7 @@ function sh(array $cmd, int $timeout = 8): array
     $start = time();
     while (true) {
         $st = proc_get_status($p);
-        if (!$st['running']) {
-            break;
-        }
+        if (!$st['running']) break;
         if ((time() - $start) > $timeout) {
             @proc_terminate($p);
             break;
@@ -224,28 +207,17 @@ function is_gz(string $file): bool
     return str_ends_with(strtolower($file), '.gz');
 }
 
-/**
- * PHP-native tail for plain files (reliable inside any minimal container).
- */
 function tail_plain_php(string $file, int $lines): array
 {
     $lines = max(10, $lines);
 
     $fp = @fopen($file, 'rb');
-    if (!$fp) {
-        return [1, '', 'fopen failed'];
-    }
+    if (!$fp) return [1, '', 'fopen failed'];
 
-    if (fseek($fp, 0, SEEK_END) !== 0) {
-        fclose($fp);
-        return [1, '', 'fseek failed'];
-    }
+    if (fseek($fp, 0, SEEK_END) !== 0) { fclose($fp); return [1, '', 'fseek failed']; }
 
     $pos = ftell($fp);
-    if ($pos === false) {
-        fclose($fp);
-        return [1, '', 'ftell failed'];
-    }
+    if ($pos === false) { fclose($fp); return [1, '', 'ftell failed']; }
 
     $buf = '';
     $chunk = 8192;
@@ -254,20 +226,14 @@ function tail_plain_php(string $file, int $lines): array
         $read = ($pos >= $chunk) ? $chunk : $pos;
         $pos -= $read;
 
-        if (fseek($fp, $pos, SEEK_SET) !== 0) {
-            break;
-        }
+        if (fseek($fp, $pos, SEEK_SET) !== 0) break;
 
         $data = fread($fp, $read);
-        if ($data === false || $data === '') {
-            break;
-        }
+        if ($data === false || $data === '') break;
 
         $buf = $data . $buf;
 
-        if (strlen($buf) > 8_000_000) { // safety cap
-            break;
-        }
+        if (strlen($buf) > 8_000_000) break;
     }
 
     fclose($fp);
@@ -278,27 +244,18 @@ function tail_plain_php(string $file, int $lines): array
     return [0, implode("\n", $slice), ''];
 }
 
-/**
- * Tail last N lines.
- * - .gz: gzopen read + slice (reliable even for tiny gz)
- * - plain: PHP native tail (no external tail dependency)
- */
 function tail_text(string $file, int $lines): array
 {
     $lines = max(10, $lines);
 
     if (is_gz($file)) {
         $h = @gzopen($file, 'rb');
-        if (!$h) {
-            return [1, '', 'gzopen failed'];
-        }
+        if (!$h) return [1, '', 'gzopen failed'];
 
         $content = '';
         while (!gzeof($h)) {
             $content .= gzread($h, 8192);
-            if (strlen($content) > 32_000_000) { // safety cap
-                break;
-            }
+            if (strlen($content) > 32_000_000) break;
         }
         gzclose($h);
 
@@ -311,16 +268,10 @@ function tail_text(string $file, int $lines): array
     return tail_plain_php($file, $lines);
 }
 
-/**
- * Deep search across full file (works for .gz too).
- * Uses rg for consistent output. Exit code 1 = no matches.
- */
 function grep_text(string $file, string $q, int $limit = 500): array
 {
     $q = trim($q);
-    if ($q === '') {
-        return [0, '', 'missing q'];
-    }
+    if ($q === '') return [0, '', 'missing q'];
 
     $limit = max(50, min(5000, $limit));
     $rg = 'rg --no-heading --line-number --max-count ' . (int)$limit . ' -S -- ' . escapeshellarg($q);
@@ -333,15 +284,20 @@ function grep_text(string $file, string $q, int $limit = 500): array
     return sh_pipe($rg . ' ' . escapeshellarg($file), 12);
 }
 
+/**
+ * ✅ FIX: service detection
+ * - If LOGVIEW_ROOTS points to a service directory itself (e.g. /global/log/nginx),
+ *   then rel path has no folder → service must fallback to basename(root) ("nginx")
+ */
 function list_files(array $roots): array
 {
     $out = [];
 
     foreach ($roots as $root) {
         $rr = realpath($root);
-        if ($rr === false || !is_dir($rr)) {
-            continue;
-        }
+        if ($rr === false || !is_dir($rr)) continue;
+
+        $rootService = basename($rr) ?: 'logs';
 
         $it = new RecursiveIteratorIterator(
           new RecursiveDirectoryIterator($rr, FilesystemIterator::SKIP_DOTS),
@@ -349,9 +305,7 @@ function list_files(array $roots): array
         );
 
         foreach ($it as $f) {
-            if (!$f->isFile()) {
-                continue;
-            }
+            if (!$f->isFile()) continue;
 
             $name = $f->getFilename();
             $path = $f->getPathname();
@@ -361,12 +315,15 @@ function list_files(array $roots): array
               preg_match('~\.(access|error)(\.log)?(\.gz)?$~i', $name) ||
               (str_contains($name, 'access') || str_contains($name, 'error'));
 
-            if (!$isLogLike) {
-                continue;
-            }
+            if (!$isLogLike) continue;
 
             $rel = ltrim(str_replace($rr, '', $path), DIRECTORY_SEPARATOR);
-            $service = explode(DIRECTORY_SEPARATOR, $rel)[0] ?? 'logs';
+
+            // If file is directly under root, service is basename(root) not filename
+            $service = $rootService;
+            if (str_contains($rel, DIRECTORY_SEPARATOR)) {
+                $service = explode(DIRECTORY_SEPARATOR, $rel)[0] ?: $rootService;
+            }
 
             $out[] = [
               'service' => $service,

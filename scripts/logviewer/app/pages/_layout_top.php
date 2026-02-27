@@ -56,6 +56,13 @@ declare(strict_types=1);
             <div class="lv-search input-group input-group-sm">
               <span class="input-group-text lv-ig-icon">⌕</span>
               <input id="q" class="form-control lv-ig" placeholder="Search logs...">
+
+              <!-- ✅ Search mode: tail vs file -->
+              <select id="searchMode" class="form-select form-select-sm lv-select" style="max-width: 135px;">
+                <option value="tail">Tail</option>
+                <option value="file">File</option>
+              </select>
+
               <button class="btn btn-sm lv-btn" id="btnSearch">Search</button>
             </div>
           <?php endif; ?>

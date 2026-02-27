@@ -158,6 +158,7 @@ body {
   border-bottom: 1px solid var(--lv-card-border);
   cursor: pointer;
   transition: background .15s ease;
+  position: relative;
 }
 
 .lv-file:hover { background: var(--lv-entry-hover); }
@@ -169,6 +170,27 @@ body {
 
 .lv-file .name{ font-weight: 600; }
 .lv-file .meta{ font-size: 12px; color: var(--lv-muted); }
+
+.lv-pin {
+  border: 1px solid var(--lv-card-border);
+  background: transparent;
+  color: var(--lv-muted);
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.lv-pin:hover { background: var(--lv-soft); color: var(--lv-text); }
+.lv-pin.on { color: #f59e0b; }
+
+/* Sections inside file list */
+.lv-file-section {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--lv-muted);
+  border-bottom: 1px solid var(--lv-card-border);
+  background: rgba(0,0,0,.02);
+}
+[data-bs-theme="dark"] .lv-file-section { background: rgba(255,255,255,.02); }
 
 /* Entries */
 .lv-entries {
@@ -204,35 +226,4 @@ body {
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-/* ========= DASHBOARD LIST HARDENING ========= */
-/* Even if anchors render without class, force vertical rows */
-.lv-domain-list {
-  display: flex;
-  flex-direction: column;
-}
-
-/* Preferred row item */
-.lv-domain-item {
-  display: block;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--lv-card-border);
-  text-decoration: none;
-  color: var(--lv-text);
-}
-
-/* Fallback: any links inside domain list */
-.lv-domain-list a {
-  display: block;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--lv-card-border);
-  text-decoration: none;
-  color: var(--lv-text);
-}
-
-.lv-domain-item:hover,
-.lv-domain-list a:hover {
-  background: var(--lv-entry-hover);
-  color: var(--lv-text);
 }

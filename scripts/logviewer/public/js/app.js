@@ -18,6 +18,9 @@
   let activeDomain = (BOOT.domain || "").trim();
 
   const THEME_KEY = "lv_theme_mode"; // "auto" | "light" | "dark"
+  const SEARCH_MODE_KEY = "lv_search_mode"; // "tail" | "file"
+  const PIN_KEY = "lv_pins";
+  const RECENT_KEY = "lv_recent";
 
   function prefersDark() {
     return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -29,14 +32,8 @@
     document.documentElement.setAttribute("data-bs-theme", actual);
   }
 
-  function getMode() {
-    return localStorage.getItem(THEME_KEY) || "auto";
-  }
-
-  function setMode(mode) {
-    localStorage.setItem(THEME_KEY, mode);
-    syncThemeUI();
-  }
+  function getMode() { return localStorage.getItem(THEME_KEY) || "auto"; }
+  function setMode(mode) { localStorage.setItem(THEME_KEY, mode); syncThemeUI(); }
 
   function syncThemeUI() {
     const mode = getMode();
@@ -72,6 +69,21 @@
   });
 
   $("themeLabel")?.addEventListener("dblclick", () => setMode("auto"));
+
+  function getSearchMode() {
+    return localStorage.getItem(SEARCH_MODE_KEY) || "tail";
+  }
+  function setSearchMode(mode) {
+    localStorage.setItem(SEARCH_MODE_KEY, mode === "file" ? "file" : "tail");
+    const sm = $("searchMode");
+    if (sm) sm.value = getSearchMode();
+  }
+
+  const smEl = $("searchMode");
+  if (smEl) {
+    smEl.value = getSearchMode();
+    smEl.addEventListener("change", () => setSearchMode(smEl.value));
+  }
 
   if (Q_INIT) {
     const qi = $("q");
@@ -132,14 +144,12 @@
 
   function extractDomainFromName(name) {
     let s = String(name || "");
-
     s = s.replace(/\.gz$/i, "");
     s = s.replace(/(\.access|\.error)\.log$/i, "");
     s = s.replace(/\.log$/i, "");
     s = s.replace(/([.-])\d{8}$/i, "");
     s = s.replace(/([.-])\d+$/i, "");
     s = s.trim();
-
     const low = s.toLowerCase();
     if (!s || low === "error" || low === "access") return "";
     if (looksLikeTemplateToken(s)) return "";
@@ -184,6 +194,19 @@
     if (!btn) return;
     btn.textContent = liveOn ? "Stop Live" : "Live";
     btn.classList.toggle("btn-danger", liveOn);
+
+    // ✅ lock heavy controls while live
+    const lockIds = ["btnSearch", "perPage", "prevPage", "nextPage", "btnRaw", "serviceFilter", "domainFilter"];
+    for (const id of lockIds) {
+      const el = $(id);
+      if (!el) continue;
+      if (id === "btnRaw") {
+        el.classList.toggle("disabled", liveOn);
+        el.setAttribute("aria-disabled", liveOn ? "true" : "false");
+      } else {
+        el.disabled = !!liveOn;
+      }
+    }
   }
 
   function stopLive() {
@@ -203,8 +226,35 @@
 
     const u = new URL("/api/tail", location.origin);
     u.searchParams.set("file", activeFile);
-    u.searchParams.set("lines", "400");
-    u.searchParams.set("intervalMs", "900");
+    u.searchParams.set("lines", "220");
+    u.searchParams.set("intervalMs", "800");
+
+    const box = $("entries");
+    if (!box) return;
+
+    box.innerHTML = `
+      <div class="lv-entry">
+        <div class="d-flex align-items-center gap-2">
+          <span class="lv-badge info">LIVE</span>
+          <div class="lv-muted small" id="liveTs">—</div>
+          <div class="ms-auto lv-muted small">ESC to stop · auto-stops on tab hide</div>
+        </div>
+        <pre class="lv-pre" id="livePre"></pre>
+      </div>
+    `;
+
+    const livePre = document.getElementById("livePre");
+    const liveTs  = document.getElementById("liveTs");
+
+    let pendingText = "";
+    let pendingTs = 0;
+    let rafScheduled = false;
+    const flush = () => {
+      rafScheduled = false;
+      if (!livePre) return;
+      livePre.textContent = pendingText;
+      if (liveTs) liveTs.textContent = new Date(pendingTs * 1000).toLocaleTimeString();
+    };
 
     liveES = new EventSource(u.toString());
 
@@ -212,25 +262,27 @@
       const j = JSON.parse(ev.data || "{}");
       if (!j.ok) return;
       if (j.hash && j.hash === liveHash) return;
+
       liveHash = j.hash || "";
+      pendingText = j.text || "";
+      pendingTs = j.ts || 0;
 
-      const box = $("entries");
-      if (!box) return;
-      box.innerHTML =
-        `<div class="lv-entry">
-          <div class="d-flex align-items-center gap-2">
-            <span class="lv-badge info">LIVE</span>
-            <div class="lv-muted small">${new Date((j.ts || 0) * 1000).toLocaleTimeString()}</div>
-            <div class="ms-auto lv-muted small">auto-updating</div>
-          </div>
-          <pre class="lv-pre">${escapeHtml(j.text || "")}</pre>
-        </div>`;
+      if (!rafScheduled) {
+        rafScheduled = true;
+        requestAnimationFrame(flush);
+      }
     });
 
-    liveES.addEventListener("error", () => {
-      stopLive();
-    });
+    liveES.addEventListener("error", () => stopLive());
   }
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && liveOn) stopLive();
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && liveOn) stopLive();
+  });
 
   $("btnLive")?.addEventListener("click", () => {
     liveOn ? stopLive() : startLive();
@@ -259,10 +311,51 @@
   function setPaginationUI() {
     const prev = $("prevPage");
     const next = $("nextPage");
-    if (prev) prev.disabled = page <= 1;
-    if (next) next.disabled = page >= lastPages;
+    if (prev) prev.disabled = page <= 1 || liveOn;
+    if (next) next.disabled = page >= lastPages || liveOn;
     const pi = $("pageInfo");
     if (pi) pi.textContent = `${page} / ${lastPages}`;
+  }
+
+  function getPins() {
+    try { return JSON.parse(localStorage.getItem(PIN_KEY) || "[]") || []; } catch { return []; }
+  }
+  function setPins(arr) {
+    localStorage.setItem(PIN_KEY, JSON.stringify(arr.slice(0, 50)));
+  }
+  function isPinned(path) {
+    return getPins().includes(String(path));
+  }
+  function togglePin(path) {
+    const p = String(path);
+    const pins = getPins();
+    const i = pins.indexOf(p);
+    if (i >= 0) pins.splice(i, 1); else pins.unshift(p);
+    setPins(pins);
+    renderFiles($("serviceFilter")?.value || "");
+  }
+
+  function getRecent() {
+    try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]") || []; } catch { return []; }
+  }
+  function bumpRecent(path) {
+    const p = String(path);
+    let r = getRecent().filter(x => String(x) !== p);
+    r.unshift(p);
+    r = r.slice(0, 15);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(r));
+  }
+
+  function openFile(path) {
+    stopLive();
+    activeFile = String(path);
+    page = 1;
+    lastPages = 1;
+    $("activeFile").textContent = activeFile;
+    $("btnRaw").href = "/api/raw?file=" + encodeURIComponent(activeFile);
+    bumpRecent(activeFile);
+    renderFiles($("serviceFilter")?.value || "");
+    loadEntries();
   }
 
   function renderFiles(serviceFilter = "") {
@@ -272,7 +365,6 @@
 
     const shown = files.filter((f) => {
       if (serviceFilter && f.service !== serviceFilter) return false;
-
       if (activeDomain) {
         const hay = (String(f.name) + " " + String(f.path)).toLowerCase();
         if (!hay.includes(activeDomain.toLowerCase())) return false;
@@ -280,29 +372,188 @@
       return true;
     });
 
+    const pins = new Set(getPins());
+    const pinned = [];
+    const normal = [];
     for (const f of shown) {
+      if (pins.has(String(f.path))) pinned.push(f);
+      else normal.push(f);
+    }
+
+    const recentSet = new Set(getRecent());
+
+    const renderSection = (title) => {
+      const sec = document.createElement("div");
+      sec.className = "lv-file-section";
+      sec.textContent = title;
+      list.appendChild(sec);
+    };
+
+    const renderFile = (f) => {
       const div = document.createElement("div");
-      div.className = "lv-file" + (f.path === activeFile ? " active" : "");
+      div.className = "lv-file" + (String(f.path) === String(activeFile) ? " active" : "");
+
+      const pinOn = isPinned(f.path);
+      const isRecent = recentSet.has(String(f.path));
+
       div.innerHTML = `
-        <div class="d-flex align-items-center justify-content-between">
-          <div class="name">${escapeHtml(f.name)}</div>
-          <div class="meta">${fmtBytes(f.size)}</div>
+        <div class="d-flex align-items-center justify-content-between gap-2">
+          <div class="name text-truncate" style="max-width: 70%">${escapeHtml(f.name)}</div>
+          <div class="d-flex align-items-center gap-2">
+            ${isRecent ? `<span class="badge text-bg-secondary">recent</span>` : ``}
+            <button class="lv-pin ${pinOn ? "on" : ""}" data-act="pin" title="Pin">★</button>
+            <div class="meta">${fmtBytes(f.size)}</div>
+          </div>
         </div>
         <div class="meta text-truncate">${escapeHtml(f.path)}</div>
         <div class="meta">mtime: ${escapeHtml(fmtTime(f.mtime))}</div>
       `;
-      div.addEventListener("click", () => {
-        stopLive();
-        activeFile = f.path;
-        page = 1;
-        lastPages = 1;
-        $("activeFile").textContent = f.path;
-        $("btnRaw").href = "/api/raw?file=" + encodeURIComponent(activeFile);
-        renderFiles($("serviceFilter").value);
-        loadEntries();
+
+      div.addEventListener("click", () => openFile(f.path));
+      div.querySelector('[data-act="pin"]').addEventListener("click", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        togglePin(f.path);
       });
+
       list.appendChild(div);
+    };
+
+    if (pinned.length) {
+      renderSection("Pinned");
+      pinned.forEach(renderFile);
+      renderSection("All files");
     }
+    normal.forEach(renderFile);
+  }
+
+  function badge(level) {
+    const lvl = String(level || "info");
+    return `<span class="lv-badge ${lvl}">${escapeHtml(lvl.toUpperCase())}</span>`;
+  }
+
+  function renderEntries(items) {
+    const box = $("entries");
+    if (!box) return;
+    box.innerHTML = "";
+
+    for (const it of (items || [])) {
+      const lvl = it.level || "info";
+      const ts = it.ts || "";
+      const summary = it.summary || "";
+      const body = it.body || "";
+
+      const row = document.createElement("div");
+      row.className = "lv-entry";
+      row.innerHTML = `
+        <div class="d-flex align-items-center gap-2">
+          ${badge(lvl)}
+          <div class="lv-muted small">${escapeHtml(ts || "—")}</div>
+          <div class="flex-grow-1">${escapeHtml(summary)}</div>
+          <button class="btn btn-sm lv-btn ms-auto" data-act="toggle">Details</button>
+        </div>
+        <div class="d-none" data-act="panel">
+          <pre class="lv-pre">${escapeHtml(body)}</pre>
+        </div>
+      `;
+
+      row.querySelector('[data-act="toggle"]').addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const p = row.querySelector('[data-act="panel"]');
+        p.classList.toggle("d-none");
+      });
+
+      box.appendChild(row);
+    }
+  }
+
+  function renderGrep(text) {
+    const box = $("entries");
+    if (!box) return;
+    box.innerHTML = "";
+
+    const lines = String(text || "").split("\n").filter(Boolean);
+    if (!lines.length) {
+      box.innerHTML = `<div class="lv-entry"><div class="lv-muted">No matches.</div></div>`;
+      return;
+    }
+
+    for (const ln of lines) {
+      // rg: "123:the line..."
+      const m = ln.match(/^(\d+):(.*)$/);
+      const num = m ? m[1] : "";
+      const body = m ? m[2] : ln;
+
+      const row = document.createElement("div");
+      row.className = "lv-entry";
+      row.innerHTML = `
+        <div class="d-flex align-items-center gap-2">
+          ${badge("info")}
+          <div class="lv-muted small">line ${escapeHtml(num || "—")}</div>
+          <div class="flex-grow-1 text-truncate">${escapeHtml(body)}</div>
+          <button class="btn btn-sm lv-btn ms-auto" data-act="toggle">Details</button>
+        </div>
+        <div class="d-none" data-act="panel">
+          <pre class="lv-pre">${escapeHtml(body)}</pre>
+        </div>
+      `;
+      row.querySelector('[data-act="toggle"]').addEventListener("click", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        row.querySelector('[data-act="panel"]').classList.toggle("d-none");
+      });
+      box.appendChild(row);
+    }
+  }
+
+  async function loadEntries() {
+    stopLive();
+    if (!activeFile) return;
+
+    const per = $("perPage")?.value || "25";
+    const q = ($("q")?.value || "").trim();
+    const mode = getSearchMode();
+
+    if (q && mode === "file") {
+      const j = await api("/api/grep", {
+        file: activeFile,
+        q,
+        limit: "800",
+      });
+
+      if (!j.ok) {
+        $("entries").innerHTML = `<div class="lv-entry"><div class="lv-muted">${escapeHtml(j.error || "Search failed")}</div></div>`;
+        return;
+      }
+
+      $("stats").textContent = `File search: "${q}"`;
+      renderFileCaps({ size: 0, mtime: 0, total: 0, counts: {error:0,warn:0,info:0,debug:0} });
+      renderGrep(j.text || "");
+      lastPages = 1;
+      page = 1;
+      setPaginationUI();
+      return;
+    }
+
+    const j = await api("/api/entries", {
+      file: activeFile,
+      page: String(page),
+      per,
+      level: activeLevel,
+      q,
+    });
+
+    if (!j.ok) return;
+
+    lastPages = Number(j.pages || 1);
+    page = Number(j.page || 1);
+
+    renderFileCaps(j.meta);
+    renderEntries(j.items || []);
+
+    $("stats").textContent =
+      `Total: ${j.total} · Cached: ${new Date((j.meta?.generated_at || 0) * 1000).toLocaleTimeString()}`;
+
+    setPaginationUI();
   }
 
   async function loadFiles() {
@@ -353,82 +604,11 @@
     }
   }
 
-  function badge(level) {
-    const lvl = String(level || "info");
-    return `<span class="lv-badge ${lvl}">${escapeHtml(lvl.toUpperCase())}</span>`;
-  }
-
-  function renderEntries(items) {
-    const box = $("entries");
-    if (!box) return;
-    box.innerHTML = "";
-
-    for (const it of (items || [])) {
-      const lvl = it.level || "info";
-      const ts = it.ts || "";
-      const summary = it.summary || "";
-      const body = it.body || "";
-
-      const row = document.createElement("div");
-      row.className = "lv-entry";
-      row.innerHTML = `
-        <div class="d-flex align-items-center gap-2">
-          ${badge(lvl)}
-          <div class="lv-muted small">${escapeHtml(ts || "—")}</div>
-          <div class="flex-grow-1">${escapeHtml(summary)}</div>
-          <button class="btn btn-sm lv-btn ms-auto" data-act="toggle">Details</button>
-        </div>
-        <div class="d-none" data-act="panel">
-          <pre class="lv-pre">${escapeHtml(body)}</pre>
-        </div>
-      `;
-
-      row.querySelector('[data-act="toggle"]').addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const p = row.querySelector('[data-act="panel"]');
-        p.classList.toggle("d-none");
-      });
-
-      box.appendChild(row);
-    }
-  }
-
-  async function loadEntries() {
-    stopLive();
-    if (!activeFile) return;
-
-    const per = $("perPage")?.value || "25";
-    const q = ($("q")?.value || "").trim();
-
-    const j = await api("/api/entries", {
-      file: activeFile,
-      page: String(page),
-      per,
-      level: activeLevel,
-      q,
-    });
-
-    if (!j.ok) return;
-
-    lastPages = Number(j.pages || 1);
-    page = Number(j.page || 1);
-
-    renderFileCaps(j.meta);
-    renderEntries(j.items || []);
-
-    $("stats").textContent =
-      `Total: ${j.total} · Cached: ${new Date((j.meta?.generated_at || 0) * 1000).toLocaleTimeString()}`;
-
-    setPaginationUI();
-  }
-
   $("btnRefreshFiles")?.addEventListener("click", loadFiles);
 
   $("serviceFilter")?.addEventListener("change", () => {
     stopLive();
-    page = 1;
-    lastPages = 1;
+    page = 1; lastPages = 1;
 
     const svc = $("serviceFilter").value;
 
@@ -451,8 +631,7 @@
 
   $("domainFilter")?.addEventListener("change", () => {
     stopLive();
-    page = 1;
-    lastPages = 1;
+    page = 1; lastPages = 1;
     activeDomain = $("domainFilter").value || "";
     renderFiles($("serviceFilter").value);
     setPaginationUI();
@@ -466,11 +645,11 @@
   });
 
   $("prevPage")?.addEventListener("click", () => {
-    if (page > 1) { page--; loadEntries(); }
+    if (page > 1 && !liveOn) { page--; loadEntries(); }
   });
 
   $("nextPage")?.addEventListener("click", () => {
-    if (page < lastPages) { page++; loadEntries(); }
+    if (page < lastPages && !liveOn) { page++; loadEntries(); }
   });
 
   loadFiles();

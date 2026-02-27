@@ -363,31 +363,21 @@ function parse_entries(string $text): array
     $cur = null;
 
     $flush = function () use (&$entries, &$cur): void {
-        if (!$cur) {
-            return;
-        }
+        if (!$cur) return;
         $cur['body'] = rtrim($cur['body']);
         $entries[] = $cur;
         $cur = null;
     };
 
     foreach ($lines as $line) {
-        if ($line === '') {
-            continue;
-        }
+        if ($line === '') continue;
 
-        // Access log detectors
+        // Access log detectors (keep)
         if (preg_match('~"\s*[A-Z]+\s+[^"]+"\s+(\d{3})\b~', $line, $m)) {
             $code = (int)$m[1];
             $lvl = ($code >= 500) ? 'error' : (($code >= 400) ? 'warn' : 'info');
-
             $flush();
-            $entries[] = [
-              'ts'      => '',
-              'level'   => $lvl,
-              'summary' => mb_substr($line, 0, 220),
-              'body'    => $line,
-            ];
+            $entries[] = ['ts'=>'','level'=>$lvl,'summary'=>mb_substr($line,0,220),'body'=>$line];
             continue;
         }
 
@@ -397,28 +387,16 @@ function parse_entries(string $text): array
         ) {
             $code = (int)$m[1];
             $lvl = ($code >= 500) ? 'error' : (($code >= 400) ? 'warn' : 'info');
-
             $flush();
-            $entries[] = [
-              'ts'      => '',
-              'level'   => $lvl,
-              'summary' => mb_substr($line, 0, 220),
-              'body'    => $line,
-            ];
+            $entries[] = ['ts'=>'','level'=>$lvl,'summary'=>mb_substr($line,0,220),'body'=>$line];
             continue;
         }
 
-        // Laravel: [YYYY-MM-DD HH:MM:SS] env.LEVEL: message...
-        if (preg_match(
-          '~^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\]\s+([^.]+)\.([A-Z]+):\s*(.*)$~',
-          $line,
-          $m
-        )) {
+        // Laravel detector (keep)
+        if (preg_match('~^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\]\s+([^.]+)\.([A-Z]+):\s*(.*)$~', $line, $m)) {
             $flush();
             $lvl = strtolower($m[4]);
-            if ($lvl === 'warning') {
-                $lvl = 'warn';
-            }
+            if ($lvl === 'warning') $lvl = 'warn';
             $cur = [
               'ts'      => $m[1] . ' ' . $m[2],
               'level'   => $lvl,
@@ -428,27 +406,37 @@ function parse_entries(string $text): array
             continue;
         }
 
-        // Generic heuristics
+        // ✅ Extra detectors: supervisor / mysql-ish / php-fpm slowlog-ish
         $isNew = false;
         $lvl = 'info';
         $ts = '';
 
-        if (preg_match('~^\[(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2})\]\s+([A-Z]+)\b~', $line, $m)) {
+        // supervisor: 2026-02-28 09:12:33,123 INFO ...
+        if (preg_match('~^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:[.,]\d+)?\s+(DEBUG|INFO|WARN|WARNING|ERROR|CRITICAL|FATAL)\b~i', $line, $m)) {
+            $isNew = true;
+            $ts = $m[1] . ' ' . $m[2];
+            $lvl = strtolower($m[3]);
+            if ($lvl === 'warning') $lvl = 'warn';
+            if ($lvl === 'fatal' || $lvl === 'critical') $lvl = 'error';
+        }
+        // mysql-ish: 2026-02-28T09:12:33.123456Z [ERROR] ...
+        elseif (preg_match('~^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?Z?\s*(?:\[[A-Z]+\]\s*)?(ERROR|WARN|WARNING|INFO|DEBUG)\b~i', $line, $m)) {
+            $isNew = true;
+            $ts = $m[1] . ' ' . $m[2];
+            $lvl = strtolower($m[3]);
+            if ($lvl === 'warning') $lvl = 'warn';
+        }
+        // php-fpm slowlog blocks often start with bracketed timestamps
+        elseif (preg_match('~^\[(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2})\]\s+~', $line, $m)) {
             $isNew = true;
             $ts = $m[1];
-            $lvl = strtolower($m[2]);
-            if ($lvl === 'warning') $lvl = 'warn';
-        } elseif (preg_match('~^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}).*\b(ERROR|WARN|WARNING|INFO|DEBUG)\b~i', $line, $m)) {
-            $isNew = true;
-            $ts = $m[1];
-            $lvl = strtolower($m[2]);
-            if ($lvl === 'warning') $lvl = 'warn';
-        } elseif (preg_match('~\b(FATAL|CRITICAL)\b~i', $line)) {
-            $isNew = true;
-            $lvl = 'error';
-        } elseif (preg_match('~\b(WARN|WARNING)\b~i', $line)) {
-            $isNew = true;
             $lvl = 'warn';
+        }
+        // keep your existing generic heuristics
+        elseif (preg_match('~\b(FATAL|CRITICAL)\b~i', $line)) {
+            $isNew = true; $lvl = 'error';
+        } elseif (preg_match('~\b(WARN|WARNING)\b~i', $line)) {
+            $isNew = true; $lvl = 'warn';
         }
 
         if ($isNew) {
@@ -478,12 +466,7 @@ function parse_entries(string $text): array
     if (!$entries) {
         foreach ($lines as $line) {
             if ($line === '') continue;
-            $entries[] = [
-              'ts'      => '',
-              'level'   => 'info',
-              'summary' => mb_substr($line, 0, 220),
-              'body'    => $line,
-            ];
+            $entries[] = ['ts'=>'','level'=>'info','summary'=>mb_substr($line,0,220),'body'=>$line];
         }
     }
 

@@ -1,28 +1,7 @@
 <?php
 
 declare(strict_types=1);
-
-require_once __DIR__ . '/../bootstrap.php';
-
-$activePage = 'dashboard';
-$pageTitle  = 'Dashboard';
-
-$domains      = nginx_domains_list($NGINX_VHOST_DIR);
-$domainCount  = count($domains);
-
-$logCounts    = log_file_counts_by_dirname($LOGVIEW_ROOTS);
-$logFileTotal = (int)($logCounts['total'] ?? 0);
-$serviceCount = count((array)($logCounts['by_dir'] ?? []));
-
-$systemDomains = [
-  'WebMail' => 'webmail.localhost',
-  'DB Client (RDBMS)' => 'db.localhost',
-  'Redis Insight' => 'ri.localhost',
-  'Mongo Express' => 'me.localhost',
-  'Kibana' => 'kibana.localhost',
-];
-
-require_once __DIR__ . '/_layout_top.php';
+require __DIR__ . '/_layout_top.php';
 ?>
 
   <div class="row g-3">
@@ -128,4 +107,4 @@ require_once __DIR__ . '/_layout_top.php';
   </div>
 
   <script src="/assets/js/dashboard.js"></script>
-<?php require_once __DIR__ . '/_layout_bottom.php'; ?>
+<?php require __DIR__ . '/_layout_bottom.php'; ?>

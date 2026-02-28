@@ -1,12 +1,9 @@
 <?php
 declare(strict_types=1);
-
-require_once __DIR__ . '/../bootstrap.php';
-
 $activePage = 'logs';
 $pageTitle  = 'Log Viewer';
 
-require_once __DIR__ . '/_layout_top.php';
+require __DIR__ . '/_layout_top.php';
 ?>
 
   <div class="row g-3">
@@ -102,5 +99,6 @@ require_once __DIR__ . '/_layout_top.php';
 
   <script src="/assets/js/app.js"></script>
 
-<?php require_once __DIR__ . '/_layout_bottom.php'; ?>
+<?php require __DIR__ . '/_layout_bottom.php'; ?>
+
 

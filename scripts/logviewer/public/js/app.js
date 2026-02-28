@@ -144,13 +144,20 @@
 
   function extractDomainFromName(name) {
     let s = String(name || "");
+
+    // normalize gzip + rotations
     s = s.replace(/\.gz$/i, "");
+    // common access/error endings
     s = s.replace(/(\.access|\.error)\.log$/i, "");
+    s = s.replace(/(\.access|\.error)$/i, "");
     s = s.replace(/\.log$/i, "");
-    s = s.replace(/([.-])\d{8}$/i, "");
+    // strip rotation suffixes: -20260228, .20260228, -123, etc.
+    s = s.replace(/([.-])\d{8,14}$/i, "");
     s = s.replace(/([.-])\d+$/i, "");
+
     s = s.trim();
     const low = s.toLowerCase();
+
     if (!s || low === "error" || low === "access") return "";
     if (looksLikeTemplateToken(s)) return "";
     return s;
@@ -194,19 +201,6 @@
     if (!btn) return;
     btn.textContent = liveOn ? "Stop Live" : "Live";
     btn.classList.toggle("btn-danger", liveOn);
-
-    // ✅ lock heavy controls while live
-    const lockIds = ["btnSearch", "perPage", "prevPage", "nextPage", "btnRaw", "serviceFilter", "domainFilter"];
-    for (const id of lockIds) {
-      const el = $(id);
-      if (!el) continue;
-      if (id === "btnRaw") {
-        el.classList.toggle("disabled", liveOn);
-        el.setAttribute("aria-disabled", liveOn ? "true" : "false");
-      } else {
-        el.disabled = !!liveOn;
-      }
-    }
   }
 
   function stopLive() {
@@ -216,6 +210,11 @@
     }
     liveHash = "";
     setLiveState(false);
+  }
+
+  // Any interaction should stop live first (so UI never feels “frozen”)
+  function ensureNotLive() {
+    if (liveOn) stopLive();
   }
 
   function startLive() {
@@ -246,21 +245,34 @@
     const livePre = document.getElementById("livePre");
     const liveTs  = document.getElementById("liveTs");
 
+    // throttle DOM updates hard (prevents “freeze”)
     let pendingText = "";
     let pendingTs = 0;
     let rafScheduled = false;
     const flush = () => {
       rafScheduled = false;
       if (!livePre) return;
-      livePre.textContent = pendingText;
-      if (liveTs) liveTs.textContent = new Date(pendingTs * 1000).toLocaleTimeString();
+
+      // cap very large payloads (browser safety)
+      const cap = 500_000; // 500KB visible
+      let out = pendingText || "";
+      if (out.length > cap) out = out.slice(-cap);
+
+      livePre.textContent = out;
+      if (liveTs) liveTs.textContent = pendingTs ? new Date(pendingTs * 1000).toLocaleTimeString() : "—";
     };
 
     liveES = new EventSource(u.toString());
 
     liveES.addEventListener("tail", (ev) => {
-      const j = JSON.parse(ev.data || "{}");
-      if (!j.ok) return;
+      let j;
+      try {
+        j = JSON.parse(ev.data || "{}");
+      } catch {
+        return; // bad event, ignore
+      }
+
+      if (!j || !j.ok) return;
       if (j.hash && j.hash === liveHash) return;
 
       liveHash = j.hash || "";
@@ -311,8 +323,8 @@
   function setPaginationUI() {
     const prev = $("prevPage");
     const next = $("nextPage");
-    if (prev) prev.disabled = page <= 1 || liveOn;
-    if (next) next.disabled = page >= lastPages || liveOn;
+    if (prev) prev.disabled = page <= 1;
+    if (next) next.disabled = page >= lastPages;
     const pi = $("pageInfo");
     if (pi) pi.textContent = `${page} / ${lastPages}`;
   }
@@ -347,7 +359,7 @@
   }
 
   function openFile(path) {
-    stopLive();
+    ensureNotLive();
     activeFile = String(path);
     page = 1;
     lastPages = 1;
@@ -479,7 +491,6 @@
     }
 
     for (const ln of lines) {
-      // rg: "123:the line..."
       const m = ln.match(/^(\d+):(.*)$/);
       const num = m ? m[1] : "";
       const body = m ? m[2] : ln;
@@ -506,7 +517,7 @@
   }
 
   async function loadEntries() {
-    stopLive();
+    ensureNotLive();
     if (!activeFile) return;
 
     const per = $("perPage")?.value || "25";
@@ -514,11 +525,7 @@
     const mode = getSearchMode();
 
     if (q && mode === "file") {
-      const j = await api("/api/grep", {
-        file: activeFile,
-        q,
-        limit: "800",
-      });
+      const j = await api("/api/grep", { file: activeFile, q, limit: "800" });
 
       if (!j.ok) {
         $("entries").innerHTML = `<div class="lv-entry"><div class="lv-muted">${escapeHtml(j.error || "Search failed")}</div></div>`;
@@ -557,7 +564,7 @@
   }
 
   async function loadFiles() {
-    stopLive();
+    ensureNotLive();
 
     const j = await api("/api/files");
     files = j.files || [];
@@ -607,7 +614,7 @@
   $("btnRefreshFiles")?.addEventListener("click", loadFiles);
 
   $("serviceFilter")?.addEventListener("change", () => {
-    stopLive();
+    ensureNotLive();
     page = 1; lastPages = 1;
 
     const svc = $("serviceFilter").value;
@@ -630,26 +637,26 @@
   });
 
   $("domainFilter")?.addEventListener("change", () => {
-    stopLive();
+    ensureNotLive();
     page = 1; lastPages = 1;
     activeDomain = $("domainFilter").value || "";
     renderFiles($("serviceFilter").value);
     setPaginationUI();
   });
 
-  $("perPage")?.addEventListener("change", () => { page = 1; loadEntries(); });
-  $("btnSearch")?.addEventListener("click", () => { page = 1; loadEntries(); });
+  $("perPage")?.addEventListener("change", () => { ensureNotLive(); page = 1; loadEntries(); });
+  $("btnSearch")?.addEventListener("click", () => { ensureNotLive(); page = 1; loadEntries(); });
 
   $("q")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { page = 1; loadEntries(); }
+    if (e.key === "Enter") { ensureNotLive(); page = 1; loadEntries(); }
   });
 
   $("prevPage")?.addEventListener("click", () => {
-    if (page > 1 && !liveOn) { page--; loadEntries(); }
+    if (page > 1) { ensureNotLive(); page--; loadEntries(); }
   });
 
   $("nextPage")?.addEventListener("click", () => {
-    if (page < lastPages && !liveOn) { page++; loadEntries(); }
+    if (page < lastPages) { ensureNotLive(); page++; loadEntries(); }
   });
 
   loadFiles();

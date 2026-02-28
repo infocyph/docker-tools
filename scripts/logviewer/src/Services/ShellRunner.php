@@ -41,3 +41,4 @@ final class ShellRunner
         return $this->run(['/bin/sh', '-lc', $cmd], $timeout);
     }
 }
+

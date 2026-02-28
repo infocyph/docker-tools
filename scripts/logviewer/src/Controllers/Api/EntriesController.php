@@ -26,8 +26,11 @@ final class EntriesController
 
         $level = strtolower(trim($r->get('level')));
         $q = trim($r->get('q'));
+        $sinceMin = $r->int('since_minutes', 0, 0, 60*24*30);
+        $sinceTs = $r->int('since_ts', 0, 0, 2147483647);
 
         $data = $this->entries->loadCached($file, $this->cfg->cacheTtl);
+        $tFilter0 = hrtime(true);
         $entries = array_reverse((array)($data['entries'] ?? []));
 
         if ($level !== '' && in_array($level, ['debug','info','warn','error'], true)) {
@@ -44,6 +47,27 @@ final class EntriesController
                 return str_contains(mb_strtolower((string)($e['summary'] ?? '')), $qq)
                     || str_contains(mb_strtolower((string)($e['body'] ?? '')), $qq);
             }));
+        }
+
+        
+        // since filter (best-effort parse; entries without ts are kept)
+        $cut = 0;
+        if ($sinceTs > 0) $cut = $sinceTs;
+        elseif ($sinceMin > 0) $cut = time() - ($sinceMin * 60);
+
+        if ($cut > 0) {
+            $entries = array_values(array_filter($entries, static function ($e) use ($cut) {
+                $ts = (string)($e['ts'] ?? '');
+                if ($ts === '') return true;
+                $t = strtotime($ts);
+                if ($t === false) return true;
+                return $t >= $cut;
+            }));
+        }
+
+$filterMs = (int)((hrtime(true)-$tFilter0)/1_000_000);
+        if (isset($data['meta']) && is_array($data['meta'])) {
+            $data['meta']['timing']['filter_ms'] = $filterMs;
         }
 
         $total = count($entries);
@@ -63,3 +87,4 @@ final class EntriesController
         ]);
     }
 }
+

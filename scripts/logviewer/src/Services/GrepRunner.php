@@ -27,3 +27,4 @@ final class GrepRunner
         return $this->sh->sh($rg . ' ' . escapeshellarg($file), 12);
     }
 }
+

@@ -71,3 +71,4 @@ final class TailReader
         return [0, implode("\n", $slice), ''];
     }
 }
+

@@ -21,3 +21,4 @@ final class View
         return (string)ob_get_clean();
     }
 }
+

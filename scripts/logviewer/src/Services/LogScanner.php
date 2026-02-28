@@ -137,6 +137,18 @@ final class LogScanner
     /** @return list<array{service:string,name:string,path:string,size:int,mtime:int,gz:bool}> */
     public function listFiles(): array
     {
+        // Tiny cache to avoid running `find` on every refresh.
+        $cacheFile = '/tmp/logviewer_filelist_cache.json';
+        $ttl = 2;
+        $stc = @stat($cacheFile);
+        if (is_array($stc) && isset($stc['mtime']) && (time() - (int)$stc['mtime']) <= $ttl) {
+            $raw = @file_get_contents($cacheFile);
+            $j = is_string($raw) ? json_decode($raw, true) : null;
+            if (is_array($j) && isset($j['files']) && is_array($j['files'])) {
+                return $j['files'];
+            }
+        }
+
         // Use `find` for file discovery: it behaves consistently across bind mounts.
         // Our layout is shallow, so depth limits keep it fast.
         $out = [];
@@ -183,6 +195,9 @@ final class LogScanner
         }
 
         usort($out, static fn($a, $b) => ($b['mtime'] <=> $a['mtime']) ?: ($b['size'] <=> $a['size']));
+
+        @file_put_contents($cacheFile, json_encode(['generated_at'=>time(),'files'=>$out], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE), LOCK_EX);
         return $out;
     }
 }
+

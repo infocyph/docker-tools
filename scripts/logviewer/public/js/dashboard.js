@@ -69,3 +69,4 @@
     if (e.key === "Enter") $("btnSearch")?.click();
   });
 })();
+

@@ -48,3 +48,4 @@ final class AssetServer
         exit;
     }
 }
+

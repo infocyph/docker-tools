@@ -6,6 +6,11 @@ namespace LogViewer\Core;
 use LogViewer\Controllers\Api\EntriesController;
 use LogViewer\Controllers\Api\FilesController;
 use LogViewer\Controllers\Api\GrepController;
+use LogViewer\Controllers\Api\HealthController;
+use LogViewer\Controllers\Api\DownloadController;
+use LogViewer\Controllers\Api\ExecController;
+use LogViewer\Controllers\Api\ExportController;
+use LogViewer\Controllers\Api\StreamController;
 use LogViewer\Controllers\Api\RawController;
 use LogViewer\Controllers\Api\TailController;
 use LogViewer\Controllers\Page\DashboardController;
@@ -19,6 +24,7 @@ use LogViewer\Services\NginxVhosts;
 use LogViewer\Services\RateLimiter;
 use LogViewer\Services\ShellRunner;
 use LogViewer\Services\StatsService;
+use LogViewer\Services\StreamService;
 use LogViewer\Services\TailReader;
 
 final class App
@@ -38,6 +44,7 @@ final class App
     private readonly GrepRunner $grep;
     private readonly NginxVhosts $nginx;
     private readonly StatsService $stats;
+    private readonly StreamService $stream;
 
     public function __construct(private readonly string $baseDir)
     {
@@ -59,6 +66,7 @@ final class App
 
         $this->nginx = new NginxVhosts($this->cfg->nginxVhostDir);
         $this->stats = new StatsService($this->scanner, $this->cache, $this->tail, $this->parser, $this->cfg->dashTail);
+        $this->stream = new StreamService($this->scanner, $this->entriesSvc);
     }
 
     public static function bootstrap(string $baseDir): self
@@ -71,6 +79,8 @@ final class App
     {
         $req = Request::fromGlobals();
         $path = $req->path;
+
+        $this->requireAuth();
 
         if (str_starts_with($path, '/assets/')) {
             $this->assets->serve(substr($path, strlen('/assets/')));
@@ -86,6 +96,11 @@ final class App
                 'files'   => (new FilesController($this->scanner))->handle($req),
                 'entries' => (new EntriesController($this->scanner, $this->entriesSvc, $this->cfg))->handle($req),
                 'grep'    => (new GrepController($this->scanner, $this->grep, $this->rl))->handle($req),
+                'health'  => (new HealthController())->handle($req),
+                'download'=> (new DownloadController($this->scanner, $this->tail))->handle($req),
+                'stream'  => (new StreamController($this->stream))->handle($req),
+                'export'  => (new ExportController($this->scanner, $this->entriesSvc, $this->stream))->handle($req),
+                'exec'    => (new ExecController($this->cfg, $this->sh))->handle($req),
                 'raw'     => (new RawController($this->scanner, $this->tail, $this->cfg))->handle($req),
                 'tail'    => (new TailController($this->scanner, $this->tail))->handle($req), // never returns
                 default   => new JsonResponse(['ok' => false, 'error' => 'not found'], 404),
@@ -105,6 +120,41 @@ final class App
         $res->send();
     }
 
+
+    private function requireAuth(): void
+    {
+        $auth = trim((string)$this->cfg->basicAuth);
+        if ($auth === '') return;
+
+        $user = $_SERVER['PHP_AUTH_USER'] ?? '';
+        $pass = $_SERVER['PHP_AUTH_PW'] ?? '';
+
+        // Some fastcgi setups provide the header instead
+        if ($user === '' && isset($_SERVER['HTTP_AUTHORIZATION'])) {
+            $h = (string)$_SERVER['HTTP_AUTHORIZATION'];
+            if (stripos($h, 'basic ') === 0) {
+                $raw = base64_decode(trim(substr($h, 6)), true);
+                if (is_string($raw) && str_contains($raw, ':')) {
+                    [$user, $pass] = explode(':', $raw, 2);
+                }
+            }
+        }
+
+        $expected = $auth; // "user:pass"
+        $got = (string)$user . ':' . (string)$pass;
+
+        // constant-time compare
+        $ok = hash_equals(hash('sha256', $expected), hash('sha256', $got));
+        if ($ok) return;
+
+        http_response_code(401);
+        header('WWW-Authenticate: Basic realm="LogViewer"');
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "Unauthorized";
+        exit;
+    }
+
+
     private static function autoload(string $srcDir): void
     {
         spl_autoload_register(static function (string $class) use ($srcDir): void {
@@ -115,3 +165,4 @@ final class App
         });
     }
 }
+

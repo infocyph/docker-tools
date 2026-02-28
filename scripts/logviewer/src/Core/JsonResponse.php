@@ -24,3 +24,4 @@ final class JsonResponse extends Response
         exit;
     }
 }
+

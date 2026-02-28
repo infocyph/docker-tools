@@ -129,3 +129,4 @@ final class LogParser
         return $counts;
     }
 }
+

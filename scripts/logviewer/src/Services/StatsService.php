@@ -104,3 +104,4 @@ final class StatsService
         return $payload;
     }
 }
+

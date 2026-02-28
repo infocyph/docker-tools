@@ -32,3 +32,4 @@ final class RateLimiter
         return $rl['n'] <= $max;
     }
 }
+

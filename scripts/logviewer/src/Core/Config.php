@@ -14,6 +14,10 @@ final class Config
     public readonly int $cacheTtl;
     public readonly int $dashTail;
     public readonly int $rawDefaultMaxBytes;
+    public readonly string $basicAuth;
+    public readonly bool $allowExec;
+    /** @var array<string,string> */
+    public readonly array $containerMap;
 
     public function __construct()
     {
@@ -29,6 +33,25 @@ final class Config
         $this->maxTailLines = max(2000, (int)(getenv('LOGVIEW_MAX_TAIL_LINES') ?: self::defaultTailLines()));
         $this->dashTail = max(2000, (int)(getenv('LOGVIEW_DASH_TAIL') ?: 5000));
         $this->rawDefaultMaxBytes = max(1024 * 1024, (int)(getenv('LOGVIEW_RAW_MAX_BYTES') ?: (32 * 1024 * 1024)));
+
+        $this->basicAuth = trim((string)(getenv('LOGVIEW_AUTH') ?: ''));
+
+        $this->allowExec = filter_var(getenv('LOGVIEW_ALLOW_EXEC') ?: '0', FILTER_VALIDATE_BOOL);
+
+        // Container name map for shortcuts: "nginx=NGINX,apache=APACHE,php-fpm=PHP_8.4"
+        $mapRaw = trim((string)(getenv('LOGVIEW_CONTAINER_MAP') ?: ''));
+        $map = [];
+        if ($mapRaw !== '') {
+            foreach (explode(',', $mapRaw) as $pair) {
+                $pair = trim($pair);
+                if ($pair === '' || !str_contains($pair, '=')) continue;
+                [$k, $v] = explode('=', $pair, 2);
+                $k = strtolower(trim($k));
+                $v = trim($v);
+                if ($k !== '' && $v !== '') $map[$k] = $v;
+            }
+        }
+        $this->containerMap = $map;
     }
 
     private static function detectMemMb(): int
@@ -56,3 +79,4 @@ final class Config
         };
     }
 }
+

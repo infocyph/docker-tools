@@ -17,3 +17,4 @@ final class LogsController
         return new Response(200, $html, 'text/html; charset=utf-8');
     }
 }
+

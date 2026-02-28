@@ -1,100 +1,77 @@
 <?php
+
 declare(strict_types=1);
-
-require_once __DIR__ . '/../bootstrap.php';
-
-$activePage = 'dashboard';
-$pageTitle  = 'Dashboard';
-
-$domains      = nginx_domains_list($NGINX_VHOST_DIR);
-$domainCount  = count($domains);
-
-$logCounts    = log_file_counts_by_dirname($LOGVIEW_ROOTS);
-$totalLogs    = (int)($logCounts['total'] ?? 0);
-$serviceCount = count($logCounts['by_dir'] ?? []);
-
-require_once __DIR__ . '/_layout_top.php';
+require __DIR__ . '/_layout_top.php';
 ?>
 
   <div class="row g-3">
 
-    <!-- Status Capsules -->
+    <!-- Top status -->
     <div class="col-12">
       <div class="card lv-card">
         <div class="card-body">
           <div class="d-flex flex-wrap gap-3">
-
             <div class="lv-stat">
-              <div class="lv-stat-label">Domains</div>
-              <div class="lv-stat-value"><?= $domainCount ?></div>
+              <div class="lv-muted small">Domains</div>
+              <div class="lv-stat-value"><?= (int)$domainCount ?></div>
             </div>
-
             <div class="lv-stat">
-              <div class="lv-stat-label">Log Files</div>
-              <div class="lv-stat-value"><?= $totalLogs ?></div>
+              <div class="lv-muted small">Log Files</div>
+              <div class="lv-stat-value"><?= (int)$logFileTotal ?></div>
             </div>
-
             <div class="lv-stat">
-              <div class="lv-stat-label">Services</div>
-              <div class="lv-stat-value"><?= $serviceCount ?></div>
+              <div class="lv-muted small">Services</div>
+              <div class="lv-stat-value"><?= (int)$serviceCount ?></div>
             </div>
-
           </div>
         </div>
       </div>
     </div>
-
-    <!-- 3 Column Layout -->
 
     <!-- Project Domains -->
     <div class="col-12 col-lg-4">
       <div class="card lv-card h-100">
-        <div class="card-header lv-card-header fw-semibold">
-          Project Domains
+        <div class="card-header lv-card-header d-flex align-items-center justify-content-between">
+          <div class="fw-semibold">Project Domains</div>
+          <span class="badge text-bg-secondary"><?= (int)$domainCount ?></span>
         </div>
-        <div class="card-body p-0">
-          <div class="lv-domain-list">
-            <?php if (!$domains): ?>
-              <div class="p-3 lv-muted">No domains found.</div>
-            <?php else: ?>
-              <?php foreach ($domains as $d): ?>
-                <a class="lv-domain-item"
-                   href="http://<?= htmlspecialchars($d) ?>"
-                   target="_blank" rel="noopener">
-                  <?= htmlspecialchars($d) ?>
-                </a>
-              <?php endforeach; ?>
-            <?php endif; ?>
-          </div>
-        </div>
-      </div>
-    </div>
 
-    <!-- System Domains -->
-    <div class="col-12 col-lg-4">
-      <div class="card lv-card h-100">
-        <div class="card-header lv-card-header fw-semibold">
-          System Containers
-        </div>
-        <div class="card-body p-0">
-          <div class="lv-domain-list">
-            <?php
-            $systemDomains = [
-              'admin.localhost',
-              'webmail.localhost',
-              'db.localhost',
-              'ri.localhost',
-              'me.localhost',
-              'kibana.localhost',
-            ];
-            foreach ($systemDomains as $sd): ?>
-              <a class="lv-domain-item"
-                 href="http://<?= $sd ?>"
-                 target="_blank" rel="noopener">
-                <?= $sd ?>
+        <?php if ($domainCount === 0): ?>
+          <div class="card-body lv-muted">No domains found.</div>
+        <?php else: ?>
+          <div class="list-group list-group-flush">
+            <?php foreach ($domains as $d): ?>
+              <a class="list-group-item list-group-item-action"
+                 href="http://<?= htmlspecialchars($d, ENT_QUOTES, 'UTF-8') ?>"
+                 target="_blank"
+                 rel="noopener"
+                 style="background: transparent; color: inherit;">
+                <?= htmlspecialchars($d, ENT_QUOTES, 'UTF-8') ?>
               </a>
             <?php endforeach; ?>
           </div>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <!-- System Containers -->
+    <div class="col-12 col-lg-4">
+      <div class="card lv-card h-100">
+        <div class="card-header lv-card-header d-flex align-items-center justify-content-between">
+          <div class="fw-semibold">System Containers</div>
+          <span class="badge text-bg-secondary"><?= (int)count($systemDomains) ?></span>
+        </div>
+
+        <div class="list-group list-group-flush">
+          <?php foreach ($systemDomains as $name => $d): ?>
+            <a class="list-group-item list-group-item-action"
+               href="http://<?= htmlspecialchars($d, ENT_QUOTES, 'UTF-8') ?>"
+               target="_blank"
+               rel="noopener"
+               style="background: transparent; color: inherit;">
+              <?= htmlspecialchars($name, ENT_QUOTES, 'UTF-8') ?>
+            </a>
+          <?php endforeach; ?>
         </div>
       </div>
     </div>
@@ -102,30 +79,27 @@ require_once __DIR__ . '/_layout_top.php';
     <!-- Log Services -->
     <div class="col-12 col-lg-4">
       <div class="card lv-card h-100">
-        <div class="card-header lv-card-header fw-semibold">
-          Log Services
+        <div class="card-header lv-card-header d-flex align-items-center justify-content-between">
+          <div class="fw-semibold">Log Services</div>
+          <span class="badge text-bg-secondary"><?= (int)$serviceCount ?></span>
         </div>
-        <div class="card-body">
 
-          <?php if (!$serviceCount): ?>
-            <div class="lv-muted">No logs detected.</div>
-          <?php else: ?>
-            <div class="d-flex flex-column gap-2">
-              <?php foreach ($logCounts['by_dir'] as $dir => $cnt): ?>
-                <div class="d-flex justify-content-between align-items-center lv-service-row">
-                  <div><?= htmlspecialchars($dir) ?></div>
-                  <span class="badge bg-secondary"><?= $cnt ?></span>
-                </div>
-              <?php endforeach; ?>
-            </div>
-          <?php endif; ?>
-
-          <div class="mt-3">
-            <a class="btn btn-sm lv-btn w-100" href="/?p=logs">
-              Open Log Viewer
-            </a>
+        <?php if ($serviceCount === 0): ?>
+          <div class="card-body lv-muted">No log services found.</div>
+        <?php else: ?>
+          <div class="list-group list-group-flush">
+            <?php foreach (($logCounts['by_dir'] ?? []) as $dir => $cnt): ?>
+              <div class="list-group-item d-flex align-items-center justify-content-between"
+                   style="background: transparent; color: inherit;">
+                <div><?= htmlspecialchars((string)$dir, ENT_QUOTES, 'UTF-8') ?></div>
+                <span class="badge text-bg-secondary"><?= (int)$cnt ?></span>
+              </div>
+            <?php endforeach; ?>
           </div>
+        <?php endif; ?>
 
+        <div class="card-footer lv-card-footer">
+          <a class="btn btn-sm lv-btn w-100" href="/?p=logs">Open Log Viewer</a>
         </div>
       </div>
     </div>

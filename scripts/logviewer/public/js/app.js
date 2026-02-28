@@ -7,11 +7,10 @@
   let page = 1;
   let lastPages = 1;
 
-  let liveOn = false;
-  let liveES = null;
-  let liveHash = "";
-
   const BOOT = (window.LV_BOOT || { page: "logs", domain: "" });
+
+  // Live mode removed; keep legacy hook as a no-op to avoid runtime errors.
+  const ensureNotLive = () => {};
   const urlParams = new URLSearchParams(window.location.search || "");
   const Q_INIT = (urlParams.get("q") || "").trim();
 
@@ -195,113 +194,6 @@
     else domSel.value = "";
   }
 
-  function setLiveState(on) {
-    liveOn = !!on;
-    const btn = $("btnLive");
-    if (!btn) return;
-    btn.textContent = liveOn ? "Stop Live" : "Live";
-    btn.classList.toggle("btn-danger", liveOn);
-  }
-
-  function stopLive() {
-    if (liveES) {
-      try { liveES.close(); } catch (e) {}
-      liveES = null;
-    }
-    liveHash = "";
-    setLiveState(false);
-  }
-
-  // Any interaction should stop live first (so UI never feels “frozen”)
-  function ensureNotLive() {
-    if (liveOn) stopLive();
-  }
-
-  function startLive() {
-    if (!activeFile) return;
-
-    stopLive();
-    setLiveState(true);
-
-    const u = new URL("/api/tail", location.origin);
-    u.searchParams.set("file", activeFile);
-    u.searchParams.set("lines", "220");
-    u.searchParams.set("intervalMs", "800");
-
-    const box = $("entries");
-    if (!box) return;
-
-    box.innerHTML = `
-      <div class="lv-entry">
-        <div class="d-flex align-items-center gap-2">
-          <span class="lv-badge info">LIVE</span>
-          <div class="lv-muted small" id="liveTs">—</div>
-          <div class="ms-auto lv-muted small">ESC to stop · auto-stops on tab hide</div>
-        </div>
-        <pre class="lv-pre" id="livePre"></pre>
-      </div>
-    `;
-
-    const livePre = document.getElementById("livePre");
-    const liveTs  = document.getElementById("liveTs");
-
-    // throttle DOM updates hard (prevents “freeze”)
-    let pendingText = "";
-    let pendingTs = 0;
-    let rafScheduled = false;
-    const flush = () => {
-      rafScheduled = false;
-      if (!livePre) return;
-
-      // cap very large payloads (browser safety)
-      const cap = 500_000; // 500KB visible
-      let out = pendingText || "";
-      if (out.length > cap) out = out.slice(-cap);
-
-      livePre.textContent = out;
-      if (liveTs) liveTs.textContent = pendingTs ? new Date(pendingTs * 1000).toLocaleTimeString() : "—";
-    };
-
-    liveES = new EventSource(u.toString());
-
-    liveES.addEventListener("tail", (ev) => {
-      let j;
-      try {
-        j = JSON.parse(ev.data || "{}");
-      } catch {
-        return; // bad event, ignore
-      }
-
-      if (!j || !j.ok) return;
-      if (j.hash && j.hash === liveHash) return;
-
-      liveHash = j.hash || "";
-      pendingText = j.text || "";
-      pendingTs = j.ts || 0;
-
-      if (!rafScheduled) {
-        rafScheduled = true;
-        requestAnimationFrame(flush);
-      }
-    });
-
-    liveES.addEventListener("error", () => stopLive());
-  }
-
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && liveOn) stopLive();
-  });
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden" && liveOn) stopLive();
-  });
-
-  $("btnLive")?.addEventListener("click", () => {
-    liveOn ? stopLive() : startLive();
-  });
-
-  window.addEventListener("beforeunload", stopLive);
-
   function renderFileCaps(meta) {
     const caps = $("fileCaps");
     if (!caps) return;
@@ -378,7 +270,7 @@
     const shown = files.filter((f) => {
       if (serviceFilter && f.service !== serviceFilter) return false;
       if (activeDomain) {
-        const hay = (String(f.name) + " " + String(f.path)).toLowerCase();
+        const hay = (String(f.name) + " " + String(f.display_path || f.path)).toLowerCase();
         if (!hay.includes(activeDomain.toLowerCase())) return false;
       }
       return true;
@@ -417,7 +309,7 @@
             <div class="meta">${fmtBytes(f.size)}</div>
           </div>
         </div>
-        <div class="meta text-truncate">${escapeHtml(f.path)}</div>
+        <div class="meta text-truncate">${escapeHtml(f.display_path || f.path)}</div>
         <div class="meta">mtime: ${escapeHtml(fmtTime(f.mtime))}</div>
       `;
 
@@ -657,6 +549,13 @@
 
   $("nextPage")?.addEventListener("click", () => {
     if (page < lastPages) { ensureNotLive(); page++; loadEntries(); }
+  });
+
+
+  $("btnLive")?.addEventListener("click", () => {
+    if (!activeFile) return;
+    // Manual refresh of entries list only
+    loadEntries();
   });
 
   loadFiles();

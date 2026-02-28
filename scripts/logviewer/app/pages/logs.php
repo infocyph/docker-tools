@@ -3,6 +3,9 @@ declare(strict_types=1);
 $activePage = 'logs';
 $pageTitle  = 'Log Viewer';
 
+$assetVer = (int)@filemtime(__DIR__ . '/../../public/js/app.js');
+if ($assetVer <= 0) { $assetVer = time(); }
+
 require __DIR__ . '/_layout_top.php';
 ?>
 
@@ -50,7 +53,8 @@ require __DIR__ . '/_layout_top.php';
 
           <div class="ms-auto d-flex align-items-center gap-2">
 
-            <button class="btn btn-sm lv-btn" id="btnLive">Live</button>
+            <span class="lv-muted small me-1">Entries:</span>
+            <button class="btn btn-sm lv-btn" id="btnLive">Refresh</button>
 
             <select class="form-select form-select-sm lv-select"
                     id="perPage"
@@ -97,7 +101,7 @@ require __DIR__ . '/_layout_top.php';
     };
   </script>
 
-  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/app.js?v=<?= $assetVer ?>"></script>
 
 <?php require __DIR__ . '/_layout_bottom.php'; ?>
 

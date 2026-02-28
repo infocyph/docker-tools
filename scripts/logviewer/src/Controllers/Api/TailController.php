@@ -61,8 +61,8 @@ final class TailController
                 }
 
                 $hash = hash('sha256', $out);
-                echo "event: update\n";
-                echo "data: " . json_encode(['ok'=>true,'hash'=>$hash,'text'=>$out], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) . "\n\n";
+                echo "event: tail\n";
+                echo "data: " . json_encode(['ok'=>true,'hash'=>$hash,'text'=>$out,'ts'=>$mtime], JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) . "\n\n";
                 @ob_flush(); @flush();
             }
 

@@ -37,6 +37,14 @@ final class FilesController
             }));
         }
 
+
+        // Add a UI-friendly path (strip LOGVIEW_ROOTS prefix)
+        foreach ($files as &$f) {
+            $p = (string)($f['path'] ?? '');
+            $f['display_path'] = $p !== '' ? $this->scanner->displayPath($p) : '';
+        }
+        unset($f);
+
         $services = [];
         foreach ($this->scanner->listServices() as $svc) {
             if ($svc !== '') $services[$svc] = true;

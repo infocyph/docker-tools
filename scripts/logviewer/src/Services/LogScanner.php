@@ -17,6 +17,24 @@ final class LogScanner
     /** @return list<string> */
     public function roots(): array { return $this->roots; }
 
+
+    public function displayPath(string $absPath): string
+    {
+        $absPath = str_replace('\\', '/', $absPath);
+        foreach ($this->roots as $root) {
+            $rr = realpath($root);
+            if ($rr === false) continue;
+            $rr = str_replace('\\', '/', $rr);
+            $rr = rtrim($rr, '/') . '/';
+            if (str_starts_with($absPath, $rr)) {
+                $rel = '/' . ltrim(substr($absPath, strlen($rr)), '/');
+                return $rel === '/' ? '/' : $rel;
+            }
+        }
+        return $absPath;
+    }
+
+
     public function resolve(string $input): string
     {
         $input = trim($input);

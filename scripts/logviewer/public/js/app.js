@@ -503,6 +503,28 @@
     }
   }
 
+
+  async function refreshAll() {
+    // Refresh file list + counts, then refresh current entries (if a file is selected).
+    const prevFile = activeFile;
+    const prevPage = page;
+
+    await loadFiles();
+
+    // If the previously selected file still exists, keep it selected and refresh entries.
+    if (prevFile && files.some(f => String(f.path) === String(prevFile))) {
+      activeFile = prevFile;
+      page = prevPage || 1;
+      await loadEntries();
+      return;
+    }
+
+    // If a file is currently active (not cleared by loadFiles), refresh it.
+    if (activeFile) {
+      await loadEntries();
+    }
+  }
+
   $("btnRefreshFiles")?.addEventListener("click", loadFiles);
 
   $("serviceFilter")?.addEventListener("change", () => {
@@ -553,9 +575,8 @@
 
 
   $("btnLive")?.addEventListener("click", () => {
-    if (!activeFile) return;
-    // Manual refresh of entries list only
-    loadEntries();
+    // Refresh everything: files + counts + (if selected) entries
+    refreshAll();
   });
 
   loadFiles();

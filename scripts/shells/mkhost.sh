@@ -20,7 +20,7 @@ readonly VHOST_NGINX_DIR="${VHOST_NGINX_DIR:-/etc/share/vhosts/nginx}"
 readonly VHOST_APACHE_DIR="${VHOST_APACHE_DIR:-/etc/share/vhosts/apache}"
 readonly VHOST_FPM_DIR="${VHOST_FPM_DIR:-/etc/share/vhosts/fpm}"
 readonly FPM_TEMPLATE_DIR="${FPM_TEMPLATE_DIR:-/etc/fpm-templates}"
-readonly PHP_FPM_SOCK_DIR="${PHP_FPM_SOCK_DIR:-/home/\${USERNAME\}/.run/php-fpm}"
+readonly PHP_FPM_SOCK_DIR="${PHP_FPM_SOCK_DIR:-/home/${USERNAME}/.run/php-fpm}"
 readonly VHOST_NODE_DIR="${VHOST_NODE_DIR:-/etc/share/vhosts/node}"
 
 readonly ENV_STORE="${ENV_STORE:-/etc/environment}"

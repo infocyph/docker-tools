@@ -390,9 +390,13 @@ sed_escape_repl() { echo "${1:-}" | sed -e 's/[\/&|\\]/\\&/g'; }
 
 render_template() {
   local tpl="$1" outFile="$2"
-  [[ -r "$tpl" ]] || { err "Template not readable: $(basename "$tpl")"; exit 1; }
+  [[ -r "$tpl" ]] || {
+    err "Template not readable: $(basename "$tpl")"
+    exit 1
+  }
 
-  local tmp; tmp="$(mktemp)"
+  local tmp
+  tmp="$(mktemp)"
 
   # Defaults (avoid set -u surprises)
   : "${DOMAIN_NAME:=}"
@@ -429,47 +433,53 @@ render_template() {
   : "${PROXY_SUBFILTER_INCLUDE:=}"
   : "${PROXY_CSP_INCLUDE:=}"
 
-# Bash-native templating (supports multiline replacements safely).
-# We keep a deterministic replacement order via a pair-list.
-local -a _tpl_tokens=(
-  '{{SERVER_NAME}}' '{{DOC_ROOT}}' '{{CLIENT_MAX_BODY_SIZE}}' '{{CLIENT_MAX_BODY_SIZE_APACHE}}'
-  '{{PROXY_STREAMING_INCLUDE}}' '{{FASTCGI_STREAMING_INCLUDE}}' '{{APACHE_STREAMING_INCLUDE}}'
-  '{{PHP_APACHE_CONTAINER}}' '{{APACHE_CONTAINER}}' '{{PHP_CONTAINER}}'
-  '{{CLIENT_VERIFICATION}}'
-  '{{NODE_CONTAINER}}' '{{NODE_PORT}}'
-  '{{PROXY_IP}}' '{{PROXY_HOST}}' '{{PROXY_HTTP_PORT}}' '{{PROXY_HTTPS_PORT}}'
-  '{{PROXY_COOKIE_EXACT_INCLUDE}}' '{{PROXY_COOKIE_PARENT_INCLUDE}}' '{{PROXY_REDIRECT_INCLUDE}}'
-  '{{PROXY_WS_INCLUDE}}' '{{PROXY_SUBFILTER_INCLUDE}}' '{{PROXY_CSP_INCLUDE}}'
-  '{{COMPOSE_PROJECT_NAME}}' '{{NODE_SERVICE}}' '{{NODE_CONTAINER_NAME}}' '{{NODE_HOSTNAME}}'
-  '{{PHP_FCGI_PASS}}' '{{APACHE_PHP_HANDLER}}'
-  '{{POOL_NAME}}' '{{SOCK_PATH}}' '{{ERROR_LOG}}' '{{ACCESS_LOG}}' '{{FPM_USER}}' '{{FPM_GROUP}}'
-  '{{NODE_PROFILE}}' '{{NODE_VERSION}}' '{{NODE_KEY}}' '{{NODE_CMD_LINE}}'
-)
-local -a _tpl_values=(
-  "$DOMAIN_NAME" "$DOC_ROOT" "$CLIENT_MAX_BODY_SIZE" "$CLIENT_MAX_BODY_SIZE_APACHE"
-  "$PROXY_STREAMING_INCLUDE" "$FASTCGI_STREAMING_INCLUDE" "$APACHE_STREAMING_INCLUDE"
-  "$PHP_APACHE_CONTAINER" "$APACHE_CONTAINER" "$PHP_CONTAINER"
-  "$ENABLE_CLIENT_VERIFICATION"
-  "$NODE_CONTAINER" "$NODE_PORT"
-  "$PROXY_IP" "$PROXY_HOST" "$PROXY_HTTP_PORT" "$PROXY_HTTPS_PORT"
-  "$PROXY_COOKIE_EXACT_INCLUDE" "$PROXY_COOKIE_PARENT_INCLUDE" "$PROXY_REDIRECT_INCLUDE"
-  "$PROXY_WS_INCLUDE" "$PROXY_SUBFILTER_INCLUDE" "$PROXY_CSP_INCLUDE"
-  "$PHP_FCGI_PASS" "$APACHE_PHP_HANDLER"
-  "$FPM_POOL_NAME" "$FPM_SOCK_PATH" "$FPM_ERROR_LOG" "$FPM_ACCESS_LOG" "$FPM_USER" "$FPM_GROUP"
-  "${COMPOSE_PROJECT_NAME:-}" "${NODE_SERVICE:-}" "${NODE_CONTAINER_NAME:-}" "${NODE_HOSTNAME:-}"
-  "${NODE_PROFILE:-}" "${NODE_VERSION:-}" "${NODE_KEY:-}" "${NODE_CMD_LINE:-}"
-)
+  # Bash-native templating (supports multiline replacements safely).
+  # IMPORTANT: token/value arrays MUST be aligned 1:1 in the same order.
+  local -a _tpl_tokens=(
+    '{{SERVER_NAME}}' '{{DOC_ROOT}}' '{{CLIENT_MAX_BODY_SIZE}}' '{{CLIENT_MAX_BODY_SIZE_APACHE}}'
+    '{{PROXY_STREAMING_INCLUDE}}' '{{FASTCGI_STREAMING_INCLUDE}}' '{{APACHE_STREAMING_INCLUDE}}'
+    '{{PHP_APACHE_CONTAINER}}' '{{APACHE_CONTAINER}}' '{{PHP_CONTAINER}}'
+    '{{CLIENT_VERIFICATION}}'
+    '{{NODE_CONTAINER}}' '{{NODE_PORT}}'
+    '{{PROXY_IP}}' '{{PROXY_HOST}}' '{{PROXY_HTTP_PORT}}' '{{PROXY_HTTPS_PORT}}'
+    '{{PROXY_COOKIE_EXACT_INCLUDE}}' '{{PROXY_COOKIE_PARENT_INCLUDE}}' '{{PROXY_REDIRECT_INCLUDE}}'
+    '{{PROXY_WS_INCLUDE}}' '{{PROXY_SUBFILTER_INCLUDE}}' '{{PROXY_CSP_INCLUDE}}'
+    '{{COMPOSE_PROJECT_NAME}}' '{{NODE_SERVICE}}' '{{NODE_CONTAINER_NAME}}' '{{NODE_HOSTNAME}}'
+    '{{PHP_FCGI_PASS}}' '{{APACHE_PHP_HANDLER}}'
+    '{{POOL_NAME}}' '{{SOCK_PATH}}' '{{ERROR_LOG}}' '{{ACCESS_LOG}}' '{{FPM_USER}}' '{{FPM_GROUP}}'
+    '{{NODE_PROFILE}}' '{{NODE_VERSION}}' '{{NODE_KEY}}' '{{NODE_CMD_LINE}}'
+  )
 
-local line i tok val
-while IFS= read -r line || [[ -n "$line" ]]; do
-  for ((i=0; i<${#_tpl_tokens[@]}; i++)); do
-    tok="${_tpl_tokens[$i]}"
-    val="${_tpl_values[$i]}"
-    line="${line//$tok/$val}"
-  done
-  printf '%s
-' "$line"
-done <"$tpl" >"$tmp"
+  local -a _tpl_values=(
+    "$DOMAIN_NAME" "$DOC_ROOT" "$CLIENT_MAX_BODY_SIZE" "$CLIENT_MAX_BODY_SIZE_APACHE"
+    "$PROXY_STREAMING_INCLUDE" "$FASTCGI_STREAMING_INCLUDE" "$APACHE_STREAMING_INCLUDE"
+    "$PHP_APACHE_CONTAINER" "$APACHE_CONTAINER" "$PHP_CONTAINER"
+    "$ENABLE_CLIENT_VERIFICATION"
+    "$NODE_CONTAINER" "$NODE_PORT"
+    "$PROXY_IP" "$PROXY_HOST" "$PROXY_HTTP_PORT" "$PROXY_HTTPS_PORT"
+    "$PROXY_COOKIE_EXACT_INCLUDE" "$PROXY_COOKIE_PARENT_INCLUDE" "$PROXY_REDIRECT_INCLUDE"
+    "$PROXY_WS_INCLUDE" "$PROXY_SUBFILTER_INCLUDE" "$PROXY_CSP_INCLUDE"
+    "${COMPOSE_PROJECT_NAME:-}" "${NODE_SERVICE:-}" "${NODE_CONTAINER_NAME:-}" "${NODE_HOSTNAME:-}"
+    "$PHP_FCGI_PASS" "$APACHE_PHP_HANDLER"
+    "$FPM_POOL_NAME" "$FPM_SOCK_PATH" "$FPM_ERROR_LOG" "$FPM_ACCESS_LOG" "$FPM_USER" "$FPM_GROUP"
+    "${NODE_PROFILE:-}" "${NODE_VERSION:-}" "${NODE_KEY:-}" "${NODE_CMD_LINE:-}"
+  )
+
+  # Sanity check: prevent silent template corruption
+  if ((${#_tpl_tokens[@]} != ${#_tpl_values[@]})); then
+    err "Template token/value mismatch: tokens=${#_tpl_tokens[@]} values=${#_tpl_values[@]}"
+    exit 1
+  fi
+
+  local line i tok val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    for ((i = 0; i < ${#_tpl_tokens[@]}; i++)); do
+      tok="${_tpl_tokens[$i]}"
+      val="${_tpl_values[$i]}"
+      line="${line//$tok/$val}"
+    done
+    printf '%s\n' "$line"
+  done <"$tpl" >"$tmp"
 
   install -m 0644 "$tmp" "$outFile"
   rm -f "$tmp"

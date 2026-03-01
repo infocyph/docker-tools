@@ -21,6 +21,7 @@ readonly VHOST_NGINX_DIR="${VHOST_NGINX_DIR:-/etc/share/vhosts/nginx}"
 readonly VHOST_APACHE_DIR="${VHOST_APACHE_DIR:-/etc/share/vhosts/apache}"
 readonly VHOST_FPM_DIR="${VHOST_FPM_DIR:-/etc/share/vhosts/fpm}"
 readonly FPM_TEMPLATE_DIR="${FPM_TEMPLATE_DIR:-/etc/fpm-templates}"
+readonly PHP_FPM_SOCK_DIR="${PHP_FPM_SOCK_DIR:-/home/${USERNAME}/.run/php-fpm}"
 readonly VHOST_NODE_DIR="${VHOST_NODE_DIR:-/etc/share/vhosts/node}"
 
 readonly ENV_STORE="${ENV_STORE:-/etc/environment}"
@@ -390,13 +391,9 @@ sed_escape_repl() { echo "${1:-}" | sed -e 's/[\/&|\\]/\\&/g'; }
 
 render_template() {
   local tpl="$1" outFile="$2"
-  [[ -r "$tpl" ]] || {
-    err "Template not readable: $(basename "$tpl")"
-    exit 1
-  }
+  [[ -r "$tpl" ]] || { err "Template not readable: $(basename "$tpl")"; exit 1; }
 
-  local tmp
-  tmp="$(mktemp)"
+  local tmp; tmp="$(mktemp)"
 
   # Defaults (avoid set -u surprises)
   : "${DOMAIN_NAME:=}"
@@ -558,7 +555,7 @@ create_configuration() {
   # Compute PHP upstream placeholders for templates
   if [[ "${APP_TYPE:-}" == "php" ]]; then
     if [[ "${PHP_UPSTREAM_MODE:-tcp}" == "socket" ]]; then
-      local sock="/run/php-fpm/${DOMAIN_NAME}.sock"
+      local sock="${PHP_FPM_SOCK_DIR}/${DOMAIN_NAME}.sock"
       PHP_FCGI_PASS="unix:${sock}"
       APACHE_PHP_HANDLER="SetHandler \"proxy:unix:${sock}|fcgi://localhost/\""
 

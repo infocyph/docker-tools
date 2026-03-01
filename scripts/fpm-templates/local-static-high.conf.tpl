@@ -3,8 +3,8 @@ user = {{FPM_USER}}
 group = {{FPM_GROUP}}
 
 listen = {{SOCK_PATH}}
-listen.owner = {{FPM_USER}}
-listen.group = {{FPM_GROUP}}
+; listen.owner = {{FPM_USER}}
+; listen.group = {{FPM_GROUP}}
 listen.mode = 0660
 
 pm = static

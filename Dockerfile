@@ -161,6 +161,7 @@ RUN apk add --no-cache \
       /etc/share/sops/keys \
       /etc/share/sops/config \
       /etc/share/logviewer \
+      /etc/share/certs \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*
 

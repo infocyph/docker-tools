@@ -480,6 +480,65 @@ render_template() {
 }
 
 ###############################################################################
+# 8b) LDS metadata headers (written into generated configs)
+###############################################################################
+_meta_kv() { # _meta_kv <k> <v>
+  local k="$1" v="${2:-}"
+  [[ -n "$v" ]] && printf '# LDS-META: %s=%s\n' "$k" "$v"
+}
+
+meta_header_nginx() {
+  # Emits comment header for nginx vhost config (single-domain context)
+  local domain="$DOMAIN_NAME"
+  _meta_kv "domain" "$domain"
+  _meta_kv "app" "${APP_TYPE:-}"
+  _meta_kv "server" "nginx"
+  _meta_kv "docroot" "${DOC_ROOT:-}"
+  if [[ "${APP_TYPE:-}" == "php" ]]; then
+    _meta_kv "php_version" "${PHP_VERSION:-}"
+    _meta_kv "php_profile" "${PHP_CONTAINER_PROFILE:-}"
+    _meta_kv "php_container" "${PHP_CONTAINER:-}"
+    _meta_kv "fpm_mode" "${PHP_UPSTREAM_MODE:-tcp}"
+    if [[ "${PHP_UPSTREAM_MODE:-tcp}" == "socket" ]]; then
+      _meta_kv "fpm_template" "$(basename "${PHP_FPM_TEMPLATE:-}")"
+      _meta_kv "sock_web" "${WEB_FPM_SOCK_DIR}/${domain}.sock"
+      _meta_kv "sock_fpm" "${PHP_FPM_SOCK_DIR}/${domain}.sock"
+    else
+      _meta_kv "fcgi" "${PHP_CONTAINER:-}:9000"
+    fi
+  elif [[ "${APP_TYPE:-}" == "node" ]]; then
+    _meta_kv "node_version" "${NODE_VERSION:-}"
+    _meta_kv "node_profile" "${NODE_PROFILE:-}"
+    _meta_kv "node_service" "${NODE_SERVICE:-}"
+    _meta_kv "node_container" "${NODE_CONTAINER_NAME:-}"
+    _meta_kv "node_port" "${NODE_PORT:-}"
+  elif [[ "${APP_TYPE:-}" == "proxyip" ]]; then
+    _meta_kv "proxy_host" "${PROXY_HOST:-}"
+    _meta_kv "proxy_ip" "${PROXY_IP:-}"
+    _meta_kv "proxy_http_port" "${PROXY_HTTP_PORT:-80}"
+    _meta_kv "proxy_https_port" "${PROXY_HTTPS_PORT:-443}"
+  fi
+}
+
+
+prepend_header_if_missing() {
+  # prepend_header_if_missing <header_fn> <file>
+  local header_fn="$1" f="$2"
+  [[ -f "$f" ]] || return 0
+  if head -n 5 "$f" | grep -q '^# LDS-META:'; then
+    return 0
+  fi
+  local tmp; tmp="$(mktemp)"
+  "$header_fn" >"$tmp"
+  printf '# LDS-META: generated_at=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >>"$tmp"
+  printf '# LDS-META: project=%s\n' "${COMPOSE_PROJECT_NAME:-}" >>"$tmp"
+  printf '\n' >>"$tmp"
+  cat "$f" >>"$tmp"
+  install -m 0644 "$tmp" "$f"
+  rm -f "$tmp"
+}
+
+###############################################################################
 # 9) Node compose generator
 ###############################################################################
 
@@ -661,6 +720,10 @@ create_configuration() {
     env_set "ACTIVE_PHP_PROFILE" ""
     env_set "ACTIVE_NODE_PROFILE" ""
   fi
+
+
+  # Add LDS metadata header (helps tools resolve container/profile/docroot without parsing)
+  prepend_header_if_missing meta_header_nginx "$nginx_conf"
 
   GENERATED_NGINX_CONF_BASENAME="$(basename "$nginx_conf")"
   GENERATED_APACHE_CONF_BASENAME="$(basename "$apache_conf")"

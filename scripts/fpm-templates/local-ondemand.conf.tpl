@@ -5,7 +5,7 @@ group = {{FPM_GROUP}}
 listen = {{SOCK_PATH}}
 ; listen.owner = {{FPM_USER}}
 ; listen.group = {{FPM_GROUP}}
-listen.mode = 0660
+listen.mode = 0666
 
 ; Local multi-domain: keep idle cost near-zero
 pm = ondemand

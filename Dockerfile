@@ -178,6 +178,7 @@ COPY scripts/shells/es-policy.sh /usr/local/bin/es-policy
 COPY scripts/shells/notifierd.sh /usr/local/bin/notifierd
 COPY scripts/shells/notify.sh /usr/local/bin/notify
 COPY scripts/shells/senv.sh /usr/local/bin/senv
+COPY scripts/shells/domain-which.sh /usr/local/bin/domain-which
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/http-templates/ /etc/http-templates/
 COPY scripts/docker-templates/ /etc/docker-templates/
@@ -206,6 +207,7 @@ RUN chmod +x \
       /usr/local/bin/lazydocker \
       /usr/local/bin/es-policy \
       /usr/local/bin/senv \
+      /usr/local/bin/domain-which \
   && touch /etc/environment \
   && chmod -R 755 /etc/share/vhosts \
   && chmod 644 /etc/environment \

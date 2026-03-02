@@ -4,6 +4,12 @@ set -euo pipefail
 CERT_DIR="/etc/mkcert"
 VHOST_DIR="/etc/share/vhosts"
 
+# User-facing export (only safe artifacts: root CA public cert + chosen P12)
+EXPORT_DIR="${EXPORT_DIR:-/etc/share/certs}"
+EXPORT_P12="${EXPORT_P12:-nginx-client.p12}"          # source (inside CERT_DIR)
+EXPORT_P12_NAME="${EXPORT_P12_NAME:-mTLS-user.p12}"   # destination filename (inside EXPORT_DIR)
+EXPORT_ROOTCA_NAME="${EXPORT_ROOTCA_NAME:-rootCA.pem}"
+
 ###############################################################################
 # UI (mkhost/rmhost-compatible, TTY-aware)
 ###############################################################################
@@ -202,6 +208,51 @@ update_container_trust() {
   fi
 }
 
+# Atomic copy helper (avoids half-written files during sync)
+atomic_install() {
+  local mode="$1" src="$2" dst="$3"
+  local dir tmp
+  dir="$(dirname "$dst")"
+  tmp="$dir/.tmp.$(basename "$dst").$$.$RANDOM"
+  install -m "$mode" "$src" "$tmp"
+  mv -f "$tmp" "$dst"
+}
+
+export_user_artifacts() {
+  echo
+  line
+  info "[*] Exporting user-facing certificate artifacts..."
+
+  mkdir -p "$EXPORT_DIR"
+  chmod 755 "$EXPORT_DIR" 2>/dev/null || true
+
+  # 1) mkcert root CA public cert (NEVER export the private rootCA-key.pem)
+  local caroot root_ca
+  caroot="$(mkcert -CAROOT 2>/dev/null || true)"
+  root_ca=""
+  [[ -n "$caroot" ]] && root_ca="$caroot/rootCA.pem"
+
+  if [[ -f "$root_ca" ]]; then
+    atomic_install 0644 "$root_ca" "$EXPORT_DIR/$EXPORT_ROOTCA_NAME"
+    ok " - [OK] ${EXPORT_ROOTCA_NAME} -> $EXPORT_DIR/$EXPORT_ROOTCA_NAME"
+  else
+    warn " - WARN: rootCA.pem not found (mkcert -CAROOT returned: ${caroot:-<empty>})"
+  fi
+
+  # 2) Export P12 (renamed)
+  local p12_src="$CERT_DIR/$EXPORT_P12"
+  local p12_dst="$EXPORT_DIR/$EXPORT_P12_NAME"
+  if [[ -f "$p12_src" ]]; then
+    atomic_install 0640 "$p12_src" "$p12_dst"
+    ok " - [OK] ${EXPORT_P12} -> $p12_dst"
+  else
+    warn " - WARN: P12 not found: $p12_src"
+  fi
+
+  say " - ${DIM}Available in:${NC} $EXPORT_DIR"
+  (ls -la "$EXPORT_DIR" 2>/dev/null || true) | sed 's/^/   /' || true
+}
+
 generate_certificates() {
   declare -A CERT_FILES=(
     ["Local Common (Server)"]="local.pem local-key.pem"
@@ -315,6 +366,9 @@ main() {
   generate_certificates
 
   update_container_trust
+
+  # Export only user-required artifacts:
+  export_user_artifacts
 
   echo
   say "${MAGENTA}${BOLD}==============================================================${NC}"

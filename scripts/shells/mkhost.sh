@@ -21,14 +21,12 @@ readonly VHOST_APACHE_DIR="${VHOST_APACHE_DIR:-/etc/share/vhosts/apache}"
 readonly VHOST_FPM_DIR="${VHOST_FPM_DIR:-/etc/share/vhosts/fpm}"
 readonly FPM_TEMPLATE_DIR="${FPM_TEMPLATE_DIR:-/etc/fpm-templates}"
 readonly PHP_FPM_SOCK_DIR="${PHP_FPM_SOCK_DIR:-/home/${USERNAME}/.run/php-fpm}"
+readonly WEB_FPM_SOCK_DIR="${WEB_FPM_SOCK_DIR:-/run/php-fpm}"
 readonly VHOST_NODE_DIR="${VHOST_NODE_DIR:-/etc/share/vhosts/node}"
-
 readonly ENV_STORE="${ENV_STORE:-/etc/environment}"
-
 readonly NODE_PORT="${NODE_PORT:-3000}"
 readonly COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-LocalDevStack}"
-
-readonly APP_SCAN_DIR="${APP_SCAN_DIR:-/app}"   # for doc-root suggestions
+readonly APP_SCAN_DIR="${APP_SCAN_DIR:-/app}"
 
 ###############################################################################
 # 1) Colors + UI (higher contrast)
@@ -554,14 +552,15 @@ create_configuration() {
   # Compute PHP upstream placeholders for templates
   if [[ "${APP_TYPE:-}" == "php" ]]; then
     if [[ "${PHP_UPSTREAM_MODE:-tcp}" == "socket" ]]; then
-      local sock="${PHP_FPM_SOCK_DIR}/${DOMAIN_NAME}.sock"
-      PHP_FCGI_PASS="unix:${sock}"
-      APACHE_PHP_HANDLER="SetHandler \"proxy:unix:${sock}|fcgi://localhost/\""
+      local sock_fpm="${PHP_FPM_SOCK_DIR}/${DOMAIN_NAME}.sock"
+      local sock_web="${WEB_FPM_SOCK_DIR}/${DOMAIN_NAME}.sock"
+      PHP_FCGI_PASS="unix:${sock_web}"
+      APACHE_PHP_HANDLER="SetHandler \"proxy:unix:${sock_web}|fcgi://localhost/\""
 
       # Render per-domain FPM pool config (used by php-fpm include dir mounting)
       if [[ -n "${PHP_FPM_TEMPLATE:-}" ]]; then
         FPM_POOL_NAME="$DOMAIN_NAME"
-        FPM_SOCK_PATH="$sock"
+        FPM_SOCK_PATH="$sock_fpm"
         FPM_ERROR_LOG="/var/log/php-fpm/${DOMAIN_NAME}.error.log"
         FPM_ACCESS_LOG="/var/log/php-fpm/${DOMAIN_NAME}.access.log"
         render_template "$PHP_FPM_TEMPLATE" "$fpm_conf"

@@ -608,6 +608,14 @@ create_configuration() {
   local apache_conf="${VHOST_APACHE_DIR}/${DOMAIN_NAME}.conf"
   local fpm_conf="${VHOST_FPM_DIR}/${DOMAIN_NAME}.conf"
 
+  # Per-version FPM pool config path (isolate pools per PHP profile)
+  local fpm_dir=""
+  if [[ "${APP_TYPE:-}" == "php" ]]; then
+    fpm_dir="${VHOST_FPM_DIR}/${PHP_CONTAINER_PROFILE}"
+    mkdir -p "$fpm_dir"
+    fpm_conf="${fpm_dir}/${DOMAIN_NAME}.conf"
+  fi
+
   # Compute PHP upstream placeholders for templates
   if [[ "${APP_TYPE:-}" == "php" ]]; then
     if [[ "${PHP_UPSTREAM_MODE:-tcp}" == "socket" ]]; then

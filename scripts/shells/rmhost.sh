@@ -216,7 +216,19 @@ build_plan_for_domain() {
   local nginx_conf="${NGINX_DIR}/${domain}.conf"
   local apache_conf="${APACHE_DIR}/${domain}.conf"
   local node_yaml="${NODE_DIR}/${token}.yaml"
-  local fpm_conf="${FPM_DIR}/${domain}.conf"
+  local -a fpm_confs=()
+  local f
+  shopt -s nullglob
+  for f in "${FPM_DIR}"/php*/"${domain}.conf"; do
+    [[ -e "$f" ]] && fpm_confs+=("$f")
+  done
+  shopt -u nullglob
+  local fpm_conf=""
+  if ((${#fpm_confs[@]})); then
+    # Comma-separated for plan transport
+    fpm_conf="$(IFS=,; echo "${fpm_confs[*]}")"
+  fi
+
 
   local del_nginx="n" del_apache="n" del_node="n" del_fpm="n"
   [[ -e "$nginx_conf"  ]] && del_nginx="y"
@@ -245,7 +257,12 @@ print_plan() {
     [[ "$del_nginx"  == "y" ]] && say "   ${DIM}- ${nginx_conf}${NC}"
     [[ "$del_apache" == "y" ]] && say "   ${DIM}- ${apache_conf}${NC}"
     [[ "$del_node"   == "y" ]] && say "   ${DIM}- ${node_yaml}${NC}"
-    [[ "$del_fpm"    == "y" ]] && say "   ${DIM}- ${fpm_conf}${NC}"
+        if [[ "$del_fpm" == "y" ]]; then
+      IFS=',' read -r -a _fpm_list <<<"$fpm_conf"
+      for _f in "${_fpm_list[@]}"; do
+        [[ -n "$_f" ]] && say "   ${DIM}- ${_f}${NC}"
+      done
+    fi
   done <"$plan"
   echo
 }

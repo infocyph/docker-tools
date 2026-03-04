@@ -498,6 +498,7 @@ meta_header_nginx() {
     _meta_kv "php_version" "${PHP_VERSION:-}"
     _meta_kv "php_profile" "${PHP_CONTAINER_PROFILE:-}"
     _meta_kv "php_container" "${PHP_CONTAINER:-}"
+    _meta_kv "fpm_pool" "${VHOST_FPM_DIR}/${PHP_CONTAINER_PROFILE}/${domain}.conf"
     _meta_kv "fpm_mode" "${PHP_UPSTREAM_MODE:-tcp}"
     if [[ "${PHP_UPSTREAM_MODE:-tcp}" == "socket" ]]; then
       _meta_kv "fpm_template" "$(basename "${PHP_FPM_TEMPLATE:-}")"

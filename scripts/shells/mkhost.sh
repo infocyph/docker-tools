@@ -498,6 +498,7 @@ meta_header_nginx() {
     _meta_kv "php_version" "${PHP_VERSION:-}"
     _meta_kv "php_profile" "${PHP_CONTAINER_PROFILE:-}"
     _meta_kv "php_container" "${PHP_CONTAINER:-}"
+    _meta_kv "fpm_pool" "${VHOST_FPM_DIR}/${PHP_CONTAINER_PROFILE}/${domain}.conf"
     _meta_kv "fpm_mode" "${PHP_UPSTREAM_MODE:-tcp}"
     if [[ "${PHP_UPSTREAM_MODE:-tcp}" == "socket" ]]; then
       _meta_kv "fpm_template" "$(basename "${PHP_FPM_TEMPLATE:-}")"
@@ -612,7 +613,8 @@ create_configuration() {
   local fpm_dir=""
   if [[ "${APP_TYPE:-}" == "php" ]]; then
     fpm_dir="${VHOST_FPM_DIR}/${PHP_CONTAINER_PROFILE}"
-    mkdir -p "$fpm_dir"
+    ( umask 022; mkdir -p "$fpm_dir" )
+    chmod 0755 "$VHOST_FPM_DIR" "$fpm_dir" || true
     fpm_conf="${fpm_dir}/${DOMAIN_NAME}.conf"
   fi
 

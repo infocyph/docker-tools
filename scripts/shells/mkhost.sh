@@ -613,7 +613,8 @@ create_configuration() {
   local fpm_dir=""
   if [[ "${APP_TYPE:-}" == "php" ]]; then
     fpm_dir="${VHOST_FPM_DIR}/${PHP_CONTAINER_PROFILE}"
-    mkdir -p "$fpm_dir"
+    ( umask 022; mkdir -p "$fpm_dir" )
+    chmod 0755 "$VHOST_FPM_DIR" "$fpm_dir" || true
     fpm_conf="${fpm_dir}/${DOMAIN_NAME}.conf"
   fi
 

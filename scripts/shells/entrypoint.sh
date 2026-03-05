@@ -5,6 +5,9 @@ if ! certify >/dev/null 2>&1; then
   echo "[entrypoint] Certification failed" >&2
 fi
 
+# Ensure per-version FPM pool dirs exist on the mounted host path
+init-fpm-pool-dirs || echo "[entrypoint] init-fpm-pool-dirs failed" >&2
+
 if [[ "${LOGVIEW_AUTOSTART:-0}" == "1" ]]; then
   : "${LOGVIEW_BIND:=0.0.0.0}"
   : "${LOGVIEW_PORT:=9911}"

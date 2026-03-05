@@ -52,8 +52,10 @@ main() {
       | sed 's/[[:space:]]//g' \
       | sort -u \
       | while IFS= read -r v; do
-      # accept only Major.Minor
-      if [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]]; then
+      [[ "$v" =~ ^([0-9]+)\.([0-9]+)$ ]] || continue
+      major="${BASH_REMATCH[1]}"
+      minor="${BASH_REMATCH[2]}"
+      if (( major > 5 || (major == 5 && minor >= 5) )); then
         to_profile "$v"
       fi
     done \

@@ -97,10 +97,15 @@ confirm_default_n() {
 ###############################################################################
 # Domain selection (MULTI, LIST from nginx)
 ###############################################################################
+validate_domain() {
+  local d="$1"
+  local re='^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+(localhost|local|test|loc|[a-zA-Z]{2,})$'
+  [[ "$d" =~ $re ]]
+}
+
 list_nginx_domains() {
   [[ -d "$NGINX_DIR" ]] || return 0
 
-  # BusyBox-safe find (no -printf)
   find "$NGINX_DIR" -maxdepth 1 -type f -name '*.conf' 2>/dev/null \
     -exec sh -c 'for f; do b="${f##*/}"; echo "${b%.conf}"; done' sh {} + \
     | LC_ALL=C sort -u
@@ -110,7 +115,9 @@ load_domain_list() {
   DOM_LIST=()
   local line
   while IFS= read -r line; do
-    [[ -n "$line" ]] && DOM_LIST+=("$line")
+    [[ -n "$line" ]] || continue
+    validate_domain "$line" || continue
+    DOM_LIST+=("$line")
   done < <(list_nginx_domains || true)
 }
 
@@ -322,7 +329,6 @@ case "${1:-}" in
   env_set "APACHE_DELETE" ""
   env_set "DELETE_PHP_PROFILE" ""
   env_set "DELETE_NODE_PROFILE" ""
-  ok "Reset done."
   ;;
 --DELETE_PHP_PROFILE)  env_get "DELETE_PHP_PROFILE" ;;
 --DELETE_NODE_PROFILE) env_get "DELETE_NODE_PROFILE" ;;

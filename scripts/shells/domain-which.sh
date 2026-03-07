@@ -5,7 +5,7 @@ VHOST_NGINX_DIR="${VHOST_NGINX_DIR:-/etc/share/vhosts/nginx}"
 MAX_HEADER_LINES="${MAX_HEADER_LINES:-120}"
 
 ###############################################################################
-# Colors + UI (match mkhost.sh style)
+# Colors + UI (mkhost-style, safe under set -u)
 ###############################################################################
 BOLD=$'\033[1m'
 DIM=$'\033[2m'
@@ -26,10 +26,16 @@ die() {
   exit 1
 }
 
+is_tty() { [[ -t 1 ]]; }
+
+###############################################################################
+# Helpers
+###############################################################################
+
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  domain-which [--json] [--sock] [--pick] [--meta] [--app|--container|--profile|--docroot] [--quiet] [domain|docroot]
+  domain-which [--json] [--sock] [--pick] [--app|--container|--profile|--docroot] [--quiet] [domain|docroot]
   domain-which --list
   domain-which --list-domains
   domain-which --list-directories
@@ -130,6 +136,24 @@ validate_domain() {
   [[ "$d" =~ $re ]]
 }
 
+print_numbered_list() {
+  local title="${1:-}"
+  shift || true
+  local -a items=("$@")
+  local i
+
+  # Keep machine-friendly output when piped/redirected
+  if ! is_tty; then
+    printf "%s\n" "${items[@]}"
+    return 0
+  fi
+
+  [[ -n "$title" ]] && say "${BOLD}${title}${NC}"
+  for ((i = 0; i < ${#items[@]}; i++)); do
+    printf "  %b%2d)%b %s\n" "${CYAN}" $((i + 1)) "${NC}" "${items[$i]}"
+  done
+}
+
 is_pathish() {
   local s="${1:-}"
   [[ "$s" == /* ]] && return 0
@@ -166,13 +190,13 @@ list_vhost_domains() {
 
 pick_default_domain_if_single() {
   local -a ds=()
-  mapfile -t ds < <(list_vhost_domains | LC_ALL=C sort)
+  mapfile -t ds < <(list_vhost_domains)
   if ((${#ds[@]} == 1)); then
     echo "${ds[0]}"
     return 0
   fi
   if ((${#ds[@]} == 0)); then
-    die "No valid nginx vhosts found in: $VHOST_NGINX_DIR"
+    die "No nginx vhosts found in: $VHOST_NGINX_DIR"
   fi
   die "Domain required (found ${#ds[@]} domains). Use --list-domains."
 }
@@ -186,8 +210,9 @@ read_meta_from_conf() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     i=$((i + 1))
     ((i <= MAX_HEADER_LINES)) || break
-    [[ "$line" == \#* ]] || break
-    if [[ "$line" =~ ^\#\ LDS-META:\ ([a-zA-Z0-9_]+)=(.*)$ ]]; then
+    [[ -z "$line" ]] && continue
+    [[ "$line" =~ ^[[:space:]]*# ]] || break
+    if [[ "$line" =~ ^[[:space:]]*#[[:space:]]*LDS-META:[[:space:]]*([a-zA-Z0-9_]+)=(.*)$ ]]; then
       printf '%s=%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
     fi
   done <"$conf"
@@ -195,33 +220,10 @@ read_meta_from_conf() {
 
 kv_get() { awk -F= -v k="$1" '$1==k{ sub(/^([^=]*=)/,""); print; exit }'; }
 
-emit_meta_block_from_domain() {
-  local domain="$1"
-  local conf="${VHOST_NGINX_DIR}/${domain}.conf"
-  [[ -r "$conf" ]] || die "Nginx vhost not found/readable: $conf"
-
-  local line i=0 seen=0
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    i=$((i + 1))
-    ((i <= MAX_HEADER_LINES)) || break
-    [[ "$line" == \#* ]] || break
-
-    if [[ "$line" =~ ^\#\ LDS-META:\  ]]; then
-      seen=1
-      printf '%s\n' "$line"
-    elif ((seen)); then
-      break
-    fi
-  done <"$conf"
-
-  ((seen)) || die "Missing LDS-META header in: $conf"
-}
-
 emit_single_from_domain() {
   local domain="$1"
-  validate_domain "$domain" || die "Invalid domain: $domain"
-
   local meta app docroot container profile sock_web sock_fpm
+
   meta="$(read_meta_from_conf "$domain" || true)"
   [[ -n "$meta" ]] || die "Missing or unreadable LDS-META header for: $domain"
 
@@ -285,6 +287,29 @@ emit_single_from_domain() {
   printf "%s\t%s\t%s\t%s\n" "$app" "${container:-}" "${profile:-}" "${docroot:-}"
 }
 
+emit_meta_block_from_domain() {
+  local domain="$1"
+  local conf="${VHOST_NGINX_DIR}/${domain}.conf"
+  [[ -r "$conf" ]] || die "Nginx vhost not found/readable: $conf"
+
+  local line i=0 seen=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    i=$((i + 1))
+    ((i <= MAX_HEADER_LINES)) || break
+
+    [[ "$line" == \#* ]] || break
+
+    if [[ "$line" =~ ^\#\ LDS-META:\  ]]; then
+      seen=1
+      printf '%s\n' "$line"
+    elif ((seen)); then
+      break
+    fi
+  done <"$conf"
+
+  ((seen)) || die "Missing LDS-META header in: $conf"
+}
+
 domains_matching_docroot() {
   local want
   want="$(normalize_docroot "$1")"
@@ -303,7 +328,7 @@ pick_one_domain() {
   shift
   local -a arr=("$@")
   local i
-  say "${YELLOW}Multiple matches:${NC}"
+  echo "Multiple matches:"
   for ((i = 0; i < ${#arr[@]}; i++)); do
     printf "  %d) %s\n" $((i + 1)) "${arr[$i]}"
   done
@@ -312,11 +337,11 @@ pick_one_domain() {
     read -e -r -p "${prompt} (1-${#arr[@]}): " ans
     ans="$(trim "$ans")"
     [[ "$ans" =~ ^[0-9]+$ ]] || {
-      err "Enter a number."
+      echo "Enter a number." >&2
       continue
     }
     ((ans >= 1 && ans <= ${#arr[@]})) || {
-      err "Out of range."
+      echo "Out of range." >&2
       continue
     }
     echo "${arr[$((ans - 1))]}"
@@ -324,9 +349,20 @@ pick_one_domain() {
   done
 }
 
-emit_list_domains() { list_vhost_domains | LC_ALL=C sort; }
+emit_list_domains() {
+  local -a ds=()
+  mapfile -t ds < <(list_vhost_domains | LC_ALL=C sort)
+
+  if ((${#ds[@]} == 0)); then
+    is_tty && warn "No valid domains found." || true
+    return 0
+  fi
+
+  print_numbered_list "Domains:" "${ds[@]}"
+}
 
 emit_list_directories() {
+  local -a dirs=()
   local d meta dir seen="|"
   while IFS= read -r d; do
     meta="$(read_meta_from_conf "$d" 2>/dev/null || true)"
@@ -335,12 +371,21 @@ emit_list_directories() {
     [[ -n "$dir" ]] || continue
     if [[ "$seen" != *"|$dir|"* ]]; then
       seen="${seen}${dir}|"
-      printf '%s\n' "$dir"
+      dirs+=("$dir")
     fi
-  done < <(emit_list_domains) | LC_ALL=C sort
+  done < <(list_vhost_domains)
+
+  if ((${#dirs[@]} == 0)); then
+    is_tty && warn "No directories found." || true
+    return 0
+  fi
+
+  mapfile -t dirs < <(printf "%s\n" "${dirs[@]}" | LC_ALL=C sort)
+  print_numbered_list "Directories:" "${dirs[@]}"
 }
 
 emit_list_table() {
+  # domain<TAB>app<TAB>container<TAB>profile<TAB>docroot<TAB>fpm_mode
   local d meta app container profile docroot fpm_mode
   while IFS= read -r d; do
     meta="$(read_meta_from_conf "$d" 2>/dev/null || true)"
@@ -384,8 +429,24 @@ emit_list_unique_field() {
   done < <(emit_list_domains) | LC_ALL=C sort
 }
 
-emit_list_containers() { emit_list_unique_field php_container node_container; }
-emit_list_profiles() { emit_list_unique_field php_profile node_profile; }
+emit_list_containers() {
+  local -a xs=()
+  mapfile -t xs < <(emit_list_unique_field php_container node_container | LC_ALL=C sort)
+  ((${#xs[@]})) || {
+    is_tty && warn "No containers found." || true
+    return 0
+  }
+  print_numbered_list "Containers:" "${xs[@]}"
+}
+emit_list_profiles() {
+  local -a xs=()
+  mapfile -t xs < <(emit_list_unique_field php_profile node_profile | LC_ALL=C sort)
+  ((${#xs[@]})) || {
+    is_tty && warn "No profiles found." || true
+    return 0
+  }
+  print_numbered_list "Profiles:" "${xs[@]}"
+}
 
 # ----- Main -----
 case "$mode" in
@@ -397,8 +458,16 @@ list) emit_list_table ;;
 single)
   arg="${1:-}"
   if [[ -z "$arg" ]]; then
-    emit_single_from_domain "$(pick_default_domain_if_single)"
-    exit 0
+    ds=()
+    mapfile -t ds < <(list_vhost_domains | LC_ALL=C sort)
+    if ((${#ds[@]} == 1)); then
+      emit_single_from_domain "${ds[0]}"
+      exit 0
+    fi
+    if ((${#ds[@]} == 0)); then
+      die "No valid nginx vhosts found in: $VHOST_NGINX_DIR"
+    fi
+    die "Domain required (found ${#ds[@]} domains). Use --list-domains."
   fi
 
   if is_pathish "$arg"; then
@@ -418,6 +487,11 @@ single)
       exit 0
     fi
 
+    # default: print a table for matches
+    for d in "${matches[@]}"; do
+      emit_single_from_domain "$d" | sed "s/^/${d}\t/" >/dev/null 2>&1 || true
+    done
+    # Better: show a simple list unless user requested list/table elsewhere
     printf "%s\n" "${matches[@]}"
     exit 0
   fi

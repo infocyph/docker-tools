@@ -10,10 +10,7 @@ RUN apk add --no-cache curl bash ca-certificates jq \
 
 ENV DIR=/usr/local/bin
 
-RUN apk add --no-cache curl bash ca-certificates \
-  && update-ca-certificates \
-  && mkdir -p /out \
-  && curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" \
+RUN curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" \
   && chmod +x /out/mkcert \
   && curl -fsSL "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash \
   && cp /usr/local/bin/lazydocker /out/lazydocker \

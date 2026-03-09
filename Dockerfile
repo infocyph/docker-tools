@@ -4,17 +4,19 @@
 FROM alpine:latest AS fetch
 SHELL ["/bin/sh", "-euo", "pipefail", "-c"]
 
-RUN apk add --no-cache curl bash ca-certificates jq \
-  && update-ca-certificates \
-  && mkdir -p /out
-
 ENV DIR=/usr/local/bin
 
-RUN curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" \
+COPY scripts/shells/composer-setup.sh /tmp/composer-setup
+RUN apk add --no-cache curl bash ca-certificates jq php php-phar php-common php-openssl php-mbstring \
+  && update-ca-certificates \
+  && mkdir -p /out \
+  && curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" \
   && chmod +x /out/mkcert \
   && curl -fsSL "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash \
   && cp /usr/local/bin/lazydocker /out/lazydocker \
-  && chmod +x /out/lazydocker
+  && chmod +x /out/lazydocker \
+  && chmod +x /tmp/composer-setup \
+  && COMPOSER_INSTALL_DIR=/out COMPOSER_FILENAME=composer /tmp/composer-setup
 
 RUN <<'SH'
 set -euo pipefail
@@ -145,7 +147,7 @@ RUN apk add --no-cache \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
       bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep tmux gzip \
-      lnav multitail less php php-mbstring php-curl php-zip \
+      lnav multitail less php php-mbstring php-curl php-zip php-phar php-openssl php-common \
   && update-ca-certificates \
   && mkdir -p \
       /etc/mkcert \
@@ -167,6 +169,7 @@ SHELL ["/bin/bash", "-c"]
 
 COPY --from=fetch /out/mkcert /usr/local/bin/mkcert
 COPY --from=fetch /out/lazydocker /usr/local/bin/lazydocker
+COPY --from=fetch /out/composer /usr/local/bin/composer
 COPY --from=fetch /out/runtime-versions.json /etc/share/runtime-versions.json
 
 COPY scripts/shells/certify.sh /usr/local/bin/certify
@@ -208,6 +211,7 @@ RUN chmod +x \
       /usr/local/bin/senv \
       /usr/local/bin/domain-which \
       /usr/local/bin/init-fpm-pool-dirs \
+      /usr/local/bin/composer \
   && init-fpm-pool-dirs \
   && touch /etc/environment \
   && chmod -R 755 /etc/share/vhosts \

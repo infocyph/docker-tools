@@ -232,18 +232,18 @@ RUN chmod +x \
     } > /etc/nanorc \
   && { \
       echo '#!/bin/sh'; \
-      echo 'if [ -n "$PS1" ] && [ -z "${BANNER_SHOWN-}" ]; then'; \
+      echo 'if [ "${BANNER_SHOWN:-0}" = "0" ] && [ -n "$PS1" ]; then'; \
       echo '  export BANNER_SHOWN=1'; \
       echo '  show-banner "Tools"'; \
       echo 'fi'; \
     } > /etc/profile.d/banner-hook.sh \
   && chmod +x /etc/profile.d/banner-hook.sh \
   && { \
-      echo 'if [ -n "$PS1" ] && [ -z "${BANNER_SHOWN-}" ]; then'; \
+      echo 'if [ "${BANNER_SHOWN:-0}" = "0" ] && [ -n "$PS1" ]; then'; \
       echo '  export BANNER_SHOWN=1'; \
       echo '  show-banner "Tools"'; \
       echo 'fi'; \
-    } >> /root/.bashrc
+  } >> /root/.bashrc
 
 WORKDIR /app
 ENTRYPOINT ["/usr/local/bin/entrypoint"]

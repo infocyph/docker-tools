@@ -96,10 +96,14 @@ A lightweight, multi-tool Docker image for:
 | `lazydocker` | Docker TUI (requires docker socket) |
 | `notify` | Send notification to `notifierd` |
 | `notifierd` | TCP → stdout bridge (for host watchers) |
+| `status` | Docker compose project status and diagnostics (`--json` supported) |
+| `domain-which` | Resolve app/container/profile/docroot for a domain (supports `--json`) |
+| `es-policy` | Bootstrap/update Elasticsearch ILM + templates + Kibana data views |
 | `gitx` | Git helper CLI |
 | `chromacat` | Colorized output |
 | `sqlitex` | SQLite helper CLI |
 | `netx` | Networking helper wrapper |
+| `composer` | PHP dependency manager |
 
 ---
 
@@ -119,7 +123,10 @@ This repo is designed so you can keep **all generated + persistent artifacts** i
 ├─ configuration/
 │  ├─ apache/               # Generated/managed Apache vhosts (*.conf)
 │  ├─ nginx/                # Generated/managed Nginx vhosts (*.conf)
+│  ├─ node/                 # Node vhost/profile metadata (*.yaml)
+│  ├─ fpm/                  # FPM pool config dirs/files (phpXX/*)
 │  ├─ ssl/                  # Generated certificates (.pem, .p12, keys)
+│  ├─ certs/                # Exported cert copies from `certify`
 │  ├─ rootCA/               # mkcert CA store (persist across rebuilds)
 │  └─ sops/                 # Global SOPS (Model B; persisted)
 │     ├─ global/            # Global fallback key + config (preferred)
@@ -138,6 +145,8 @@ This repo is designed so you can keep **all generated + persistent artifacts** i
 │  └─ projectB/
 │     └─ prod/.env.enc
 │
+├─ logs/                    # Optional host logs for status/logviewer (/global/log)
+│
 └─ docker-compose.yml
 
 ````
@@ -150,10 +159,14 @@ This repo is designed so you can keep **all generated + persistent artifacts** i
 |---|---|---|
 | `./configuration/apache` | `/etc/share/vhosts/apache` | `mkhost`, `certify` |
 | `./configuration/nginx` | `/etc/share/vhosts/nginx` |`mkhost`, `certify` |
+| `./configuration/node` | `/etc/share/vhosts/node` | `mkhost`, `rmhost`, `status` checks |
+| `./configuration/fpm` | `/etc/share/vhosts/fpm` | `mkhost`, `init-fpm-pool-dirs`, `status` checks |
 | `./configuration/ssl` | `/etc/mkcert` |  `certify`, `mkcert` |
+| `./configuration/certs` | `/etc/share/certs` | `certify` export dir, `status` checks |
 | `./configuration/rootCA` | `/etc/share/rootCA` |  `mkcert` (CA store) |
 | `./configuration/sops` | `/etc/share/sops` | `senv init`, `senv keygen`, `senv enc/dec/edit` |
 | `./secrets-repo` | `/etc/share/vhosts/sops` |  `senv dec --in=...` (alias input source) |
+| `./logs` | `/global/log` | `status` checks, LogViewer |
 | `/var/run/docker.sock` | `/var/run/docker.sock` |  `docker`, `lazydocker` |
 
 ---
@@ -168,12 +181,16 @@ services:
     volumes:
       - ./configuration/apache:/etc/share/vhosts/apache
       - ./configuration/nginx:/etc/share/vhosts/nginx
+      - ./configuration/node:/etc/share/vhosts/node
+      - ./configuration/fpm:/etc/share/vhosts/fpm
 
       - ./configuration/ssl:/etc/mkcert
+      - ./configuration/certs:/etc/share/certs
       - ./configuration/rootCA:/etc/share/rootCA
 
       - ./configuration/sops:/etc/share/sops
       - ./secrets-repo:/etc/share/vhosts/sops:ro
+      - ./logs:/global/log:ro
 
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -196,9 +213,13 @@ Use as:
 docker run --rm -it \
   -v "$(pwd)/configuration/apache:/etc/share/vhosts/apache" \
   -v "$(pwd)/configuration/nginx:/etc/share/vhosts/nginx" \
+  -v "$(pwd)/configuration/node:/etc/share/vhosts/node" \
+  -v "$(pwd)/configuration/fpm:/etc/share/vhosts/fpm" \
   -v "$(pwd)/configuration/ssl:/etc/mkcert" \
+  -v "$(pwd)/configuration/certs:/etc/share/certs" \
   -v "$(pwd)/configuration/rootCA:/etc/share/rootCA" \
   -v "$(pwd)/configuration/sops:/etc/share/sops" \
+  -v "$(pwd)/logs:/global/log:ro" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   infocyph/tools:latest
 ```
@@ -326,6 +347,79 @@ Behavior:
 * Shows exactly what files it will remove
 * Requires confirmation (`y/N`) — in multi-domain mode it asks **once** for the full plan
 * If nothing exists for that domain, it exits with code `2` (useful for scripts)
+
+---
+
+## 📊 status (project diagnostics)
+
+`status` reports compose-project health and runtime diagnostics in both human and machine-readable forms.
+
+Usage:
+
+```bash
+status [--json] [--quiet] [service]
+```
+
+Examples:
+
+```bash
+status
+status php84
+status --json | jq .
+```
+
+Human output sections:
+
+* Core: `Project`, `Profiles`, `Containers`, `Ports`, `URLs`
+* Diagnostics: `Problems`, `Top consumers`, `Stats`, `Disk`, `Volumes`, `Networks`, `Probes`, `Recent errors`, `Drift`
+* `Checks`:
+  * `System test`: internet reachability, egress IP, memory, docker runtime
+  * `Project test`: container health summary, artifact counts, mount checks
+
+`--json` shape:
+
+* Top-level: `generated_at`, `full`, `core`, `sections`
+* `core`: project summary, containers, port summaries, URLs
+* `sections`: `problems`, `top_consumers`, `stats`, `disk`, `volumes`, `networks`, `probes`, `recent_errors`, `drift`, `checks`
+
+Helpful env overrides:
+
+* `STATUS_PROJECT` (force project name)
+* `STATUS_PROBE=0|1` (disable/enable URL probing)
+* `STATUS_FORCE_COLOR=1` (force ANSI colors)
+* `WORKING_DIR` / `LDS_WORKDIR` (workdir hint)
+* `ENV_DOCKER` (custom docker env file path)
+* `VHOST_NGINX_DIR` (domain source dir)
+
+---
+
+## 🔎 domain-which (domain metadata resolver)
+
+`domain-which` resolves runtime metadata for a domain by reading LDS headers from Nginx vhost files.
+
+```bash
+domain-which --list-domains
+domain-which example.com
+domain-which --json example.com
+domain-which --app example.com
+```
+
+---
+
+## 🧱 es-policy (Elasticsearch/Kibana bootstrap)
+
+`es-policy` ensures ILM policies/templates for log data streams and can provision Kibana data views.
+
+```bash
+es-policy
+es-policy --force
+```
+
+Common env overrides:
+
+* `ES_URL` (default `http://elasticsearch:9200`)
+* `KIBANA_URL` (default `http://kibana:5601`)
+* `REPLICAS` (default `0`)
 
 ---
 
@@ -542,14 +636,26 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `NOTIFY_FIFO`         | `/run/notify.fifo`                 | internal FIFO path                   |
 | `NOTIFY_PREFIX`       | `__HOST_NOTIFY__`                  | stdout prefix                        |
 | `NOTIFY_TOKEN`        | (empty)                            | optional token auth                  |
+| `LOGVIEW_AUTOSTART`   | `1`                                | start built-in LogViewer on container start |
+| `LOGVIEW_BIND`        | `0.0.0.0`                          | bind address for LogViewer PHP server |
+| `LOGVIEW_PORT`        | `9911`                             | listen port for LogViewer |
+| `LOGVIEW_ROOTS`       | `/global/log`                      | colon-separated log roots for LogViewer |
+| `LOGVIEW_MAX_TAIL_LINES` | `25000`                         | maximum tail lines returned by LogViewer APIs |
+| `LOGVIEW_CACHE_TTL`   | `2`                                | LogViewer cache ttl (seconds) |
 | `SOPS_BASE_DIR`       | `/etc/share/sops`                  | global SOPS base directory           |
 | `SOPS_KEYS_DIR`       | `/etc/share/sops/keys`             | per-project keys directory           |
 | `SOPS_CFG_DIR`        | `/etc/share/sops/config`           | per-project config directory         |
-| `SOPS_GLOBAL_DIR`    | `/etc/share/sops/global`           | global fallback key/config directory |
-| `SOPS_CONFIG_FILE`   | (empty)                            | override global fallback .sops.yaml  |
-| `SOPS_AGE_KEY_FILE`  | (empty)                            | override age key file path           |
-| `SENV_PROJECT`       | (auto)                             | project id (auto-detected from git)  |
+| `SOPS_GLOBAL_DIR`     | `/etc/share/sops/global`           | global fallback key/config directory |
+| `SOPS_CONFIG_FILE`    | (empty)                            | override global fallback .sops.yaml  |
+| `SOPS_AGE_KEY_FILE`   | (empty)                            | override age key file path           |
+| `SENV_PROJECT`        | (auto)                             | project id (auto-detected from git)  |
 | `SOPS_REPO_DIR`       | `/etc/share/vhosts/sops`           | shared encrypted env repo mount      |
+| `STATUS_PROJECT`      | (auto)                             | force project name for `status` |
+| `STATUS_PROBE`        | `1`                                | enable URL probes in `status` |
+| `STATUS_FORCE_COLOR`  | `0`                                | force color output in `status` |
+| `WORKING_DIR` / `LDS_WORKDIR` | current dir                | stack root hint for `status` |
+| `ENV_DOCKER`          | `$WORKING_DIR/docker/.env`         | compose env file path used by `status` |
+| `VHOST_NGINX_DIR`     | auto                               | vhost dir used by `status` URL discovery |
 
 ---
 

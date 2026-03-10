@@ -23,7 +23,8 @@ readonly FPM_TEMPLATE_DIR="${FPM_TEMPLATE_DIR:-/etc/fpm-templates}"
 readonly PHP_FPM_SOCK_DIR="${PHP_FPM_SOCK_DIR:-/home/${USERNAME}/.run/php-fpm}"
 readonly WEB_FPM_SOCK_DIR="${WEB_FPM_SOCK_DIR:-/run/php-fpm}"
 readonly VHOST_NODE_DIR="${VHOST_NODE_DIR:-/etc/share/vhosts/node}"
-readonly ENV_STORE="${ENV_STORE:-/etc/environment}"
+readonly ENV_STORE_JSON="${ENV_STORE_JSON:-/etc/share/state/env-store.json}"
+readonly MKHOST_STATE_KEY="${MKHOST_STATE_KEY:-MKHOST_STATE}"
 readonly NODE_PORT="${NODE_PORT:-3000}"
 readonly COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-LocalDevStack}"
 readonly APP_SCAN_DIR="${APP_SCAN_DIR:-/app}"
@@ -200,16 +201,54 @@ pick_index_default_value() {
 ###############################################################################
 # 4) Env store helpers
 ###############################################################################
+env_store_exec() {
+  command -v env-store >/dev/null 2>&1 || { err "Error: 'env-store' not found."; exit 1; }
+  local store_json="$ENV_STORE_JSON"
+  env ENV_STORE_JSON="$store_json" env-store "$@"
+}
+
 env_set() {
   local key="$1" value="$2"
-  touch "$ENV_STORE"
-  if grep -qE "^${key}=" "$ENV_STORE"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_STORE"
-  else
-    echo "${key}=${value}" >>"$ENV_STORE"
-  fi
+  env_store_exec set "$key" "$value" >/dev/null
 }
-env_get() { grep -E "^$1=" "$ENV_STORE" 2>/dev/null | cut -d'=' -f2- || true; }
+env_get() {
+  local key="$1"
+  env_store_exec get "$key" || true
+}
+
+env_set_json() {
+  local key="$1" value_json="$2"
+  env_store_exec set-json "$key" "$value_json" >/dev/null
+}
+
+mkhost_sync_state() {
+  local state_json ts apache_active active_php active_node
+  ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
+  apache_active="$(env_get "APACHE_ACTIVE")"
+  active_php="$(env_get "ACTIVE_PHP_PROFILE")"
+  active_node="$(env_get "ACTIVE_NODE_PROFILE")"
+
+  state_json="$(jq -cn \
+    --arg ts "$ts" \
+    --arg apache_active "$apache_active" \
+    --arg active_php "$active_php" \
+    --arg active_node "$active_node" \
+    '{
+      version: 1,
+      updated_at: $ts,
+      state: {
+        apache_active: $apache_active,
+        active_php_profile: $active_php,
+        active_node_profile: $active_node
+      }
+    }')"
+
+  env_set_json "$MKHOST_STATE_KEY" "$state_json"
+}
+
+mkhost_get_state_json() {
+  env_store_exec get-json "$MKHOST_STATE_KEY" --default-json '{}' || printf '{}\n'
+}
 
 ###############################################################################
 # 5) Validation helpers
@@ -730,6 +769,7 @@ create_configuration() {
     env_set "ACTIVE_PHP_PROFILE" ""
     env_set "ACTIVE_NODE_PROFILE" ""
   fi
+  mkhost_sync_state
 
 
   # Add LDS metadata header (helps tools resolve container/profile/docroot without parsing)
@@ -1505,10 +1545,12 @@ case "${1:-}" in
   env_set "APACHE_ACTIVE" ""
   env_set "ACTIVE_PHP_PROFILE" ""
   env_set "ACTIVE_NODE_PROFILE" ""
+  mkhost_sync_state
   ;;
 --ACTIVE_PHP_PROFILE)  env_get "ACTIVE_PHP_PROFILE" ;;
 --ACTIVE_NODE_PROFILE) env_get "ACTIVE_NODE_PROFILE" ;;
 --APACHE_ACTIVE)       env_get "APACHE_ACTIVE" ;;
+--JSON|--STATE_JSON)   mkhost_get_state_json ;;
 *)
   configure_server
   cleanup_vars

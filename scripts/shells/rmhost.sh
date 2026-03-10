@@ -24,6 +24,7 @@ err()  { say "${RED}${BOLD}$*${NC}"; }
 die()  { err "Error: $*"; exit 1; }
 
 trim() { echo "${1:-}" | xargs; }
+declare -a REMOVED_DOMAINS=()
 
 ###############################################################################
 # Paths / env store
@@ -33,21 +34,69 @@ NGINX_DIR="${NGINX_DIR:-${VHOST_ROOT}/nginx}"
 APACHE_DIR="${APACHE_DIR:-${VHOST_ROOT}/apache}"
 NODE_DIR="${NODE_DIR:-${VHOST_ROOT}/node}"
 FPM_DIR="${FPM_DIR:-${VHOST_ROOT}/fpm}"
-ENV_STORE="${ENV_STORE:-/etc/environment}"
+ENV_STORE_JSON="${ENV_STORE_JSON:-/etc/share/state/env-store.json}"
+RMHOST_STATE_KEY="${RMHOST_STATE_KEY:-RMHOST_STATE}"
 
 ###############################################################################
 # ENV helpers (same style as mkhost)
 ###############################################################################
+env_store_exec() {
+  command -v env-store >/dev/null 2>&1 || die "Missing command: env-store"
+  local store_json="$ENV_STORE_JSON"
+  env ENV_STORE_JSON="$store_json" env-store "$@"
+}
+
 env_set() {
   local key="$1" value="$2"
-  touch "$ENV_STORE"
-  if grep -qE "^${key}=" "$ENV_STORE"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_STORE"
-  else
-    echo "${key}=${value}" >>"$ENV_STORE"
-  fi
+  env_store_exec set "$key" "$value" >/dev/null
 }
-env_get() { grep -E "^$1=" "$ENV_STORE" 2>/dev/null | cut -d'=' -f2- || true; }
+env_get() {
+  local key="$1"
+  env_store_exec get "$key" || true
+}
+
+env_set_json() {
+  local key="$1" value_json="$2"
+  env_store_exec set-json "$key" "$value_json" >/dev/null
+}
+
+rmhost_sync_state() {
+  local ts php_del node_del apache_del domains_json state_json
+  ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
+  php_del="$(env_get "DELETE_PHP_PROFILE")"
+  node_del="$(env_get "DELETE_NODE_PROFILE")"
+  apache_del="$(env_get "APACHE_DELETE")"
+  domains_json='[]'
+
+  local d
+  for d in "${REMOVED_DOMAINS[@]}"; do
+    [[ -n "$d" ]] || continue
+    domains_json="$(jq -cn --argjson arr "$domains_json" --arg v "$d" '$arr + [$v]')"
+  done
+
+  state_json="$(jq -cn \
+    --arg ts "$ts" \
+    --arg php_del "$php_del" \
+    --arg node_del "$node_del" \
+    --arg apache_del "$apache_del" \
+    --argjson domains "$domains_json" \
+    '{
+      version: 1,
+      updated_at: $ts,
+      state: {
+        delete_php_profile: $php_del,
+        delete_node_profile: $node_del,
+        apache_delete: $apache_del
+      },
+      deleted_domains: $domains
+    }')"
+
+  env_set_json "$RMHOST_STATE_KEY" "$state_json"
+}
+
+rmhost_get_state_json() {
+  env_store_exec get-json "$RMHOST_STATE_KEY" --default-json '{}' || printf '{}\n'
+}
 
 env_add_csv_unique() {
   # env_add_csv_unique KEY VALUE  => append VALUE to KEY as comma-list (unique)
@@ -276,6 +325,7 @@ print_plan() {
 
 execute_plan() {
   local plan="$1"
+  REMOVED_DOMAINS=()
 
   # Clear delete envs for this run
   env_set "APACHE_DELETE" ""
@@ -309,6 +359,7 @@ execute_plan() {
         env_add_csv_unique "DELETE_PHP_PROFILE" "$php_profile"
       fi
     fi
+    REMOVED_DOMAINS+=("$domain")
 
     echo
   done <"$plan"
@@ -319,6 +370,8 @@ execute_plan() {
   else
     env_set "APACHE_DELETE" ""
   fi
+
+  rmhost_sync_state
 }
 
 ###############################################################################
@@ -329,10 +382,13 @@ case "${1:-}" in
   env_set "APACHE_DELETE" ""
   env_set "DELETE_PHP_PROFILE" ""
   env_set "DELETE_NODE_PROFILE" ""
+  REMOVED_DOMAINS=()
+  rmhost_sync_state
   ;;
 --DELETE_PHP_PROFILE)  env_get "DELETE_PHP_PROFILE" ;;
 --DELETE_NODE_PROFILE) env_get "DELETE_NODE_PROFILE" ;;
 --APACHE_DELETE)       env_get "APACHE_DELETE" ;;
+--JSON|--STATE_JSON)   rmhost_get_state_json ;;
 *)
   plan="$(mktemp)"
   DOMAINS=()

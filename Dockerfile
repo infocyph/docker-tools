@@ -160,6 +160,7 @@ RUN apk add --no-cache \
       /etc/share/sops/global \
       /etc/share/sops/keys \
       /etc/share/sops/config \
+      /etc/share/state \
       /etc/share/logviewer \
       /etc/share/certs \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
@@ -181,6 +182,8 @@ COPY scripts/shells/notify.sh /usr/local/bin/notify
 COPY scripts/shells/senv.sh /usr/local/bin/senv
 COPY scripts/shells/domain-which.sh /usr/local/bin/domain-which
 COPY scripts/shells/status.sh /usr/local/bin/status
+COPY scripts/shells/env-store.sh /usr/local/bin/env-store
+COPY scripts/shells/profile-chooser.sh /usr/local/bin/profile-chooser
 COPY scripts/shells/init-fpm-pool-dirs.sh /usr/local/bin/init-fpm-pool-dirs
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/http-templates/ /etc/http-templates/
@@ -212,18 +215,12 @@ RUN chmod +x \
       /usr/local/bin/senv \
       /usr/local/bin/domain-which \
       /usr/local/bin/status \
+      /usr/local/bin/env-store \
+      /usr/local/bin/profile-chooser \
       /usr/local/bin/init-fpm-pool-dirs \
       /usr/local/bin/composer \
   && init-fpm-pool-dirs \
-  && touch /etc/environment \
   && chmod -R 755 /etc/share/vhosts \
-  && chmod 644 /etc/environment \
-  && echo 'ACTIVE_PHP_PROFILE=""' >> /etc/environment \
-  && echo 'APACHE_ACTIVE=""' >> /etc/environment \
-  && echo 'ACTIVE_NODE_PROFILE=""' >> /etc/environment \
-  && echo 'DELETE_PHP_PROFILE=""' >> /etc/environment \
-  && echo 'APACHE_DELETE=""' >> /etc/environment \
-  && echo 'DELETE_NODE_PROFILE=""' >> /etc/environment \
   && mkdir -p /etc/profile.d \
   && { \
       echo 'set linenumbers'; \

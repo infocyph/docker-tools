@@ -43,7 +43,7 @@ A lightweight, multi-tool Docker image for:
 - `mkhost` generates Nginx/Apache vhost configs using predefined templates
 - Uses runtime-versions DB baked during build:
   - `/etc/share/runtime-versions.json` (override via `RUNTIME_VERSIONS_DB`)
-- Supports helper flags to query/reset internal “active” selections (`ACTIVE_PHP_PROFILE`, `ACTIVE_NODE_PROFILE`, `APACHE_ACTIVE`)
+- Stores runtime state in `env-store` (JSON), including helper query/reset flags (`ACTIVE_PHP_PROFILE`, `ACTIVE_NODE_PROFILE`, `APACHE_ACTIVE`)
 
 ### 3) SOPS/Age encrypted env workflow (Model B)
 - `age` + `sops` installed
@@ -97,6 +97,8 @@ A lightweight, multi-tool Docker image for:
 | `notify` | Send notification to `notifierd` |
 | `notifierd` | TCP → stdout bridge (for host watchers) |
 | `status` | Docker compose project status and diagnostics (`--json` supported) |
+| `env-store` | JSON-backed key/value store for runtime state (`jq` managed) |
+| `profile-chooser` | Interactive profile+env collector for host-side compose flush |
 | `domain-which` | Resolve app/container/profile/docroot for a domain (supports `--json`) |
 | `es-policy` | Bootstrap/update Elasticsearch ILM + templates + Kibana data views |
 | `gitx` | Git helper CLI |
@@ -298,7 +300,7 @@ If you enable HTTPS, `mkhost` triggers `certify` automatically so the required c
 
 ### Helpful flags
 
-`mkhost` stores the “active selections” into env (used by your `server` wrapper to enable compose profiles).
+`mkhost` stores the “active selections” in `env-store` (used by your `server` wrapper to enable compose profiles).
 You can query/reset these values:
 
 ```bash
@@ -306,12 +308,14 @@ mkhost --RESET
 mkhost --ACTIVE_PHP_PROFILE
 mkhost --ACTIVE_NODE_PROFILE
 mkhost --APACHE_ACTIVE
+mkhost --JSON
 ```
 
 * `--RESET` clears all active selections.
 * `--ACTIVE_PHP_PROFILE` prints the chosen PHP profile (if PHP was selected).
 * `--ACTIVE_NODE_PROFILE` prints the chosen Node profile (if Node was selected).
 * `--APACHE_ACTIVE` prints `apache` when Apache mode was selected.
+* `--JSON` prints structured state from key `MKHOST_STATE`.
 
 ---
 
@@ -347,6 +351,16 @@ Behavior:
 * Shows exactly what files it will remove
 * Requires confirmation (`y/N`) — in multi-domain mode it asks **once** for the full plan
 * If nothing exists for that domain, it exits with code `2` (useful for scripts)
+
+State/query flags:
+
+```bash
+rmhost --RESET
+rmhost --DELETE_PHP_PROFILE
+rmhost --DELETE_NODE_PROFILE
+rmhost --APACHE_DELETE
+rmhost --JSON
+```
 
 ---
 
@@ -402,6 +416,56 @@ domain-which --list-domains
 domain-which example.com
 domain-which --json example.com
 domain-which --app example.com
+```
+
+---
+
+## 🧩 profile-chooser (host-flush helper)
+
+`profile-chooser` lets you interactively select service profiles and their required env values, then stores state in `env-store` (JSON by default; SQLite optional).
+Host-side tooling can fetch newline-separated outputs and decide how/when to flush into compose env/profiles.
+
+```bash
+profile-chooser                # interactive selection
+profile-chooser --json         # full saved state
+profile-chooser --profiles     # newline list
+profile-chooser --services     # newline list
+profile-chooser --envs         # newline KEY=VALUE pairs
+profile-chooser --reset
+```
+
+Stored state key in `env-store`:
+
+* `PROFILE_CHOOSER_STATE` (structured JSON object)
+
+---
+
+## 🗃️ env-store (JSON state store)
+
+`env-store` is a small JSON-backed key/value store for container runtime state.
+It is used by profile/mkhost/rmhost flows as the single state backend.
+
+Default file:
+
+* `/etc/share/state/env-store.json` (override with `ENV_STORE_JSON`)
+* Optional SQLite backend: set `ENV_STORE_BACKEND=sqlite` (DB path: `ENV_STORE_DB`)
+
+Common structured keys used by bundled scripts:
+
+* `PROFILE_CHOOSER_STATE`
+* `MKHOST_STATE`
+* `RMHOST_STATE`
+
+Examples:
+
+```bash
+env-store set ACTIVE_PHP_PROFILE php84
+env-store get ACTIVE_PHP_PROFILE
+env-store set-json STACK_META '{"name":"LocalDevStack","ports":[80,443],"flags":{"probe":true}}'
+env-store get-json STACK_META
+env-store unset ACTIVE_PHP_PROFILE
+env-store list
+env-store json | jq .
 ```
 
 ---
@@ -656,6 +720,10 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `WORKING_DIR` / `LDS_WORKDIR` | current dir                | stack root hint for `status` |
 | `ENV_DOCKER`          | `$WORKING_DIR/docker/.env`         | compose env file path used by `status` |
 | `VHOST_NGINX_DIR`     | auto                               | vhost dir used by `status` URL discovery |
+| `ENV_STORE_BACKEND`   | `json`                             | backend for `env-store` (`json` or `sqlite`) |
+| `ENV_STORE_JSON`      | `/etc/share/state/env-store.json` | JSON state file used by `env-store` and stateful shell tools |
+| `ENV_STORE_DB`        | `/etc/share/state/env-store.db`   | SQLite state DB used when `ENV_STORE_BACKEND=sqlite` |
+| `ENV_STORE_SQLITE_BIN`| `sqlite3`                          | sqlite client binary used by `env-store` |
 
 ---
 

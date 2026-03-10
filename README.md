@@ -96,6 +96,7 @@ A lightweight, multi-tool Docker image for:
 | `lazydocker` | Docker TUI (requires docker socket) |
 | `notify` | Send notification to `notifierd` |
 | `notifierd` | TCP → stdout bridge (for host watchers) |
+| `status` | Docker compose project status and diagnostics |
 | `gitx` | Git helper CLI |
 | `chromacat` | Colorized output |
 | `sqlitex` | SQLite helper CLI |

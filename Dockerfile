@@ -180,6 +180,7 @@ COPY scripts/shells/notifierd.sh /usr/local/bin/notifierd
 COPY scripts/shells/notify.sh /usr/local/bin/notify
 COPY scripts/shells/senv.sh /usr/local/bin/senv
 COPY scripts/shells/domain-which.sh /usr/local/bin/domain-which
+COPY scripts/shells/status.sh /usr/local/bin/status
 COPY scripts/shells/init-fpm-pool-dirs.sh /usr/local/bin/init-fpm-pool-dirs
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/http-templates/ /etc/http-templates/
@@ -210,6 +211,7 @@ RUN chmod +x \
       /usr/local/bin/es-policy \
       /usr/local/bin/senv \
       /usr/local/bin/domain-which \
+      /usr/local/bin/status \
       /usr/local/bin/init-fpm-pool-dirs \
       /usr/local/bin/composer \
   && init-fpm-pool-dirs \

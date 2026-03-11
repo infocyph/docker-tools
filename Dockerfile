@@ -134,12 +134,14 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     SOPS_KEYS_DIR=/etc/share/sops/keys \
     SOPS_CFG_DIR=/etc/share/sops/config \
     SOPS_REPO_DIR=/etc/share/vhosts/sops \
-    LOGVIEW_AUTOSTART=1 \
-    LOGVIEW_PORT=9911 \
-    LOGVIEW_BIND=0.0.0.0 \
-    LOGVIEW_ROOTS=/global/log \
-    LOGVIEW_MAX_TAIL_LINES=25000 \
-    LOGVIEW_CACHE_TTL=2 \
+    ADMIN_PANEL_AUTOSTART=1 \
+    ADMIN_PANEL_PORT=9911 \
+    ADMIN_PANEL_BIND=0.0.0.0 \
+    ADMIN_PANEL_DOCROOT=/etc/share/admin-panel \
+    ADMIN_PANEL_PHP_SERVER_LOG=/tmp/admin-panel-php-server.log \
+    ADMIN_PANEL_PRODUCT_NAME=LocalDevStack \
+    ADMIN_PANEL_BRAND_NAME=docker-tools \
+    ADMIN_PANEL_COMPANY_NAME=infocyph \
     BANNER_SHOWN=0
 
 RUN apk add --no-cache \
@@ -162,6 +164,7 @@ RUN apk add --no-cache \
       /etc/share/sops/config \
       /etc/share/state \
       /etc/share/logviewer \
+      /etc/share/admin-panel \
       /etc/share/certs \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*
@@ -190,6 +193,7 @@ COPY scripts/http-templates/ /etc/http-templates/
 COPY scripts/docker-templates/ /etc/docker-templates/
 COPY scripts/fpm-templates/ /etc/fpm-templates/
 COPY scripts/logviewer/ /etc/share/logviewer
+COPY scripts/admin-panel/ /etc/share/admin-panel
 
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner

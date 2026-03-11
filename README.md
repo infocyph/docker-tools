@@ -388,7 +388,9 @@ Human output sections:
 * Diagnostics: `Problems`, `Top consumers`, `Stats`, `Disk`, `Volumes`, `Networks`, `Probes`, `Recent errors`, `Drift`
 * `Checks`:
   * `System test`: internet reachability, egress IP, memory, docker runtime
-  * `Project test`: container health summary, artifact counts, mount checks
+  * `Project containers`: container health summary
+  * `Project artifacts`: artifact and log counts
+  * `Project mounts`: mount readiness and emptiness checks
 
 `--json` shape:
 

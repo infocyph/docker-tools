@@ -1299,18 +1299,16 @@ _status_checks() {
 
   local proj_state
   proj_state="$(_summary_state "$proj_pass" "$proj_warn" "$proj_fail")"
-  printf "  %bProject test:%b %s  (%d pass, %d warn, %d fail)\n" \
-    "$CYAN" "$NC" "$(_state_badge "$proj_state")" "$proj_pass" "$proj_warn" "$proj_fail"
-  printf "    - containers: %s\n" "$(_state_badge "$containers_st")"
-  printf "      - total: %s\n" "$total"
-  printf "      - running: %s\n" "$running"
-  printf "      - healthy: %s\n" "$healthy"
-  printf "      - no_health: %s\n" "$no_health"
-  printf "      - starting: %s\n" "$starting"
-  printf "      - unhealthy: %s\n" "$unhealthy"
-  printf "      - restarting: %s\n" "$restarting"
-  printf "      - exited: %s\n" "$exited"
-  printf "      - other: %s\n" "$other"
+  printf "  %bProject containers:%b %s\n" "$CYAN" "$NC" "$(_state_badge "$containers_st")"
+  printf "    - total: %s\n" "$total"
+  printf "    - running: %s\n" "$running"
+  printf "    - healthy: %s\n" "$healthy"
+  printf "    - no_health: %s\n" "$no_health"
+  printf "    - starting: %s\n" "$starting"
+  printf "    - unhealthy: %s\n" "$unhealthy"
+  printf "    - restarting: %s\n" "$restarting"
+  printf "    - exited: %s\n" "$exited"
+  printf "    - other: %s\n" "$other"
   if ((${#bad_lines[@]})); then
     local -a bad_names=()
     local row bn
@@ -1320,31 +1318,32 @@ _status_checks() {
     done
     local w_name
     w_name="$(_container_name_col_width 28 "${bad_names[@]}")"
-    printf "    - container_issues:\n"
+    printf "    - issues:\n"
     for row in "${bad_lines[@]}"; do
       local bs bh
       IFS='|' read -r bn bs bh <<<"$row"
-      printf "      - %-*s  state=%s health=%s\n" "$w_name" "$(_fit_container_name "$bn" "$w_name")" "${bs:-"-"}" "${bh:-"-"}"
+      printf "      - %-*s  state=%s health=%s\n" \
+        "$w_name" "$(_fit_container_name "$bn" "$w_name")" "${bs:-"-"}" "${bh:-"-"}"
     done
   else
-    printf "    - container_issues: (none)\n"
+    printf "    - issues: (none)\n"
   fi
-  printf "    - artifacts: %s\n" "$(_state_badge "$artifacts_st")"
-  printf "      - nginx_conf: %s\n" "$c_nginx"
-  printf "      - apache_conf: %s\n" "$c_apache"
-  printf "      - node_yaml: %s\n" "$c_node"
-  printf "      - fpm_conf: %s\n" "$c_fpm"
-  printf "      - cert_files: %s\n" "$c_certs"
-  printf "      - rootca_files: %s\n" "$c_rootca"
-  printf "      - logs_total: %s\n" "$c_logs_total"
-  printf "      - logs_plain: %s\n" "$c_logs_log"
-  printf "      - logs_gz: %s\n" "$c_logs_gz"
+  printf "  %bProject artifacts:%b %s\n" "$CYAN" "$NC" "$(_state_badge "$artifacts_st")"
+  printf "    - nginx_conf: %s\n" "$c_nginx"
+  printf "    - apache_conf: %s\n" "$c_apache"
+  printf "    - node_yaml: %s\n" "$c_node"
+  printf "    - fpm_conf: %s\n" "$c_fpm"
+  printf "    - cert_files: %s\n" "$c_certs"
+  printf "    - rootca_files: %s\n" "$c_rootca"
+  printf "    - logs_total: %s\n" "$c_logs_total"
+  printf "    - logs_plain: %s\n" "$c_logs_log"
+  printf "    - logs_gz: %s\n" "$c_logs_gz"
   if ((${#missing_dirs[@]})); then
-    printf "      - missing_dirs: %s\n" "${missing_dirs[*]}"
+    printf "    - missing_dirs: %s\n" "${missing_dirs[*]}"
   else
-    printf "      - missing_dirs: (none)\n"
+    printf "    - missing_dirs: (none)\n"
   fi
-  printf "    - mounts: %s  %s\n" "$(_state_badge "$mounts_st")" "$mounts_note"
+  printf "  %bProject mounts:%b %s  %s\n" "$CYAN" "$NC" "$(_state_badge "$mounts_st")" "$mounts_note"
   local w_mount=8
   for mount_row in "${mount_rows[@]}"; do
     IFS='|' read -r m_key _ _ _ _ _ _ _ <<<"$mount_row"
@@ -1354,7 +1353,7 @@ _status_checks() {
   for mount_row in "${mount_rows[@]}"; do
     IFS='|' read -r m_key m_path m_kind m_exists m_entries m_files m_state m_flag <<<"$mount_row"
     local m_msg="$m_flag"
-    printf "      - %-*s  %s  %s\n" \
+    printf "    - %-*s  %s  %s\n" \
       "$w_mount" "$m_key" "$(_state_badge "$m_state")" "$m_msg"
   done
 }

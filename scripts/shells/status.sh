@@ -353,6 +353,26 @@ _count_files_recursive() {
   find "$base" -type f -name "$pattern" 2>/dev/null | wc -l | awk '{print $1}'
 }
 
+_count_files_depth_limited() {
+  local base="${1:-}" pattern="${2:-*}" max_depth="${3:-3}"
+  [[ -d "$base" ]] || {
+    printf "0"
+    return 0
+  }
+
+  if [[ "$max_depth" == "all" || "$max_depth" == "-1" ]]; then
+    _count_files_recursive "$base" "$pattern"
+    return 0
+  fi
+
+  if [[ "$max_depth" =~ ^[0-9]+$ ]]; then
+    find "$base" -mindepth 1 -maxdepth "$max_depth" -type f -name "$pattern" 2>/dev/null | wc -l | awk '{print $1}'
+    return 0
+  fi
+
+  _count_files_recursive "$base" "$pattern"
+}
+
 _count_dir_entries() {
   local base="${1:-}"
   [[ -d "$base" ]] || {
@@ -360,6 +380,28 @@ _count_dir_entries() {
     return 0
   }
   find "$base" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | awk '{print $1}'
+}
+
+_count_mount_files_for_status() {
+  local base="${1:-}" entry_count="${2:-0}"
+  [[ -d "$base" ]] || {
+    printf "0"
+    return 0
+  }
+
+  # Deep recursive scans over bind mounts are very slow on some hosts
+  # (notably Docker Desktop on Windows). Keep status responsive by using
+  # shallow counts unless explicitly requested.
+  if [[ "${STATUS_MOUNT_DEEP_COUNT:-0}" == "1" ]]; then
+    _count_files_recursive "$base" "*"
+    return 0
+  fi
+
+  if [[ "$entry_count" =~ ^[0-9]+$ ]]; then
+    printf "%s" "$entry_count"
+  else
+    printf "0"
+  fi
 }
 
 _status_project_mount_checks_rows() {
@@ -404,10 +446,14 @@ _status_project_mount_checks_rows() {
         if [[ -d "$path" ]]; then
           exists=1
           entry_count="$(_count_dir_entries "$path")"
-          file_count="$(_count_files_recursive "$path" "*")"
+          file_count="$(_count_mount_files_for_status "$path" "$entry_count")"
           if [[ "$entry_count" =~ ^[0-9]+$ ]] && ((entry_count > 0)); then
             state="PASS"
-            flag="files=$file_count"
+            if [[ "${STATUS_MOUNT_DEEP_COUNT:-0}" == "1" ]]; then
+              flag="files=$file_count"
+            else
+              flag="entries=$entry_count"
+            fi
           else
             state="WARN"
             flag="empty"
@@ -1205,6 +1251,7 @@ _status_checks() {
   local cert_dir="/etc/share/certs"
   local rootca_dir="/etc/share/rootCA"
   local logs_dir="/global/log"
+  local logs_scan_depth="${STATUS_LOG_SCAN_MAX_DEPTH:-3}"
 
   local c_nginx c_apache c_node c_fpm c_certs c_rootca c_logs_log c_logs_gz c_logs_total
   c_nginx="$(_count_glob_matches "$nginx_dir" "*.conf")"
@@ -1213,8 +1260,8 @@ _status_checks() {
   c_fpm="$(_count_glob_matches "$fpm_dir" "*.conf")"
   c_certs="$(_count_glob_matches "$cert_dir" "*")"
   c_rootca="$(_count_glob_matches "$rootca_dir" "*")"
-  c_logs_log="$(_count_files_recursive "$logs_dir" "*.log")"
-  c_logs_gz="$(_count_files_recursive "$logs_dir" "*.gz")"
+  c_logs_log="$(_count_files_depth_limited "$logs_dir" "*.log" "$logs_scan_depth")"
+  c_logs_gz="$(_count_files_depth_limited "$logs_dir" "*.gz" "$logs_scan_depth")"
   c_logs_total=$((c_logs_log + c_logs_gz))
 
   local -a missing_dirs=()
@@ -2054,6 +2101,7 @@ _status_json_checks() {
   local cert_dir="/etc/share/certs"
   local rootca_dir="/etc/share/rootCA"
   local logs_dir="/global/log"
+  local logs_scan_depth="${STATUS_LOG_SCAN_MAX_DEPTH:-3}"
 
   local c_nginx c_apache c_node c_fpm c_certs c_rootca c_logs_log c_logs_gz c_logs_total
   c_nginx="$(_count_glob_matches "$nginx_dir" "*.conf")"
@@ -2062,8 +2110,8 @@ _status_json_checks() {
   c_fpm="$(_count_glob_matches "$fpm_dir" "*.conf")"
   c_certs="$(_count_glob_matches "$cert_dir" "*")"
   c_rootca="$(_count_glob_matches "$rootca_dir" "*")"
-  c_logs_log="$(_count_files_recursive "$logs_dir" "*.log")"
-  c_logs_gz="$(_count_files_recursive "$logs_dir" "*.gz")"
+  c_logs_log="$(_count_files_depth_limited "$logs_dir" "*.log" "$logs_scan_depth")"
+  c_logs_gz="$(_count_files_depth_limited "$logs_dir" "*.gz" "$logs_scan_depth")"
   c_logs_total=$((c_logs_log + c_logs_gz))
 
   local -a missing_dirs=()

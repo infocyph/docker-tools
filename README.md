@@ -403,6 +403,8 @@ Helpful env overrides:
 * `STATUS_PROJECT` (force project name)
 * `STATUS_PROBE=0|1` (disable/enable URL probing)
 * `STATUS_FORCE_COLOR=1` (force ANSI colors)
+* `STATUS_MOUNT_DEEP_COUNT=1` (opt-in deep recursive mount file counts; default is fast shallow mode)
+* `STATUS_LOG_SCAN_MAX_DEPTH=3` (depth limit for `/global/log` checks; use `all` or `-1` for full recursion)
 * `WORKING_DIR` / `LDS_WORKDIR` (workdir hint)
 * `ENV_DOCKER` (custom docker env file path)
 * `VHOST_NGINX_DIR` (domain source dir)
@@ -719,6 +721,8 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `STATUS_PROJECT`      | (auto)                             | force project name for `status` |
 | `STATUS_PROBE`        | `1`                                | enable URL probes in `status` |
 | `STATUS_FORCE_COLOR`  | `0`                                | force color output in `status` |
+| `STATUS_MOUNT_DEEP_COUNT` | `0`                           | deep recursive mount file counts in `status` checks (slow on bind mounts) |
+| `STATUS_LOG_SCAN_MAX_DEPTH` | `3`                         | max depth for `/global/log` file counts in `status` checks (`all`/`-1` = full recursion) |
 | `WORKING_DIR` / `LDS_WORKDIR` | current dir                | stack root hint for `status` |
 | `ENV_DOCKER`          | `$WORKING_DIR/docker/.env`         | compose env file path used by `status` |
 | `VHOST_NGINX_DIR`     | auto                               | vhost dir used by `status` URL discovery |

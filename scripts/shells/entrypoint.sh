@@ -14,9 +14,11 @@ if [[ "${ADMIN_PANEL_AUTOSTART:-1}" == "1" ]]; then
     echo "[entrypoint] Admin panel docroot not found: $ADMIN_PANEL_DOCROOT" >&2
   elif [[ ! -f "$ADMIN_PANEL_DOCROOT/index.php" ]]; then
     echo "[entrypoint] Admin panel index not found: $ADMIN_PANEL_DOCROOT/index.php" >&2
+  elif [[ ! -f "$ADMIN_PANEL_DOCROOT/router.php" ]]; then
+    echo "[entrypoint] Admin panel router not found: $ADMIN_PANEL_DOCROOT/router.php" >&2
   else
     if ! pgrep -f "php -S ${ADMIN_PANEL_BIND}:${ADMIN_PANEL_PORT}" >/dev/null 2>&1; then
-      php -S "${ADMIN_PANEL_BIND}:${ADMIN_PANEL_PORT}" -t "$ADMIN_PANEL_DOCROOT" >>"$ADMIN_PANEL_PHP_SERVER_LOG" 2>&1 &
+      php -S "${ADMIN_PANEL_BIND}:${ADMIN_PANEL_PORT}" -t "$ADMIN_PANEL_DOCROOT" "$ADMIN_PANEL_DOCROOT/router.php" >>"$ADMIN_PANEL_PHP_SERVER_LOG" 2>&1 &
     fi
   fi
 fi

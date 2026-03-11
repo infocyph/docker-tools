@@ -2,14 +2,16 @@
 
 Bootstrap-based admin shell aligned to:
 
-- Priority 1: TailAdmin Analytics-style dashboard composition
-- Priority 2: TailAdmin SaaS-style secondary widgets
+https://vue-demo.tailadmin.com/
 
 ## Structure
 
 - `index.php` entry file
-- `app/index.php` simple page router
+- `router.php` PHP built-in server router
+- `app/bootstrap.php` namespace autoloader
+- `app/index.php` app kernel entry
 - `app/pages/*` layout and dashboard view
+- `src/*` namespaced routing/http/kernel classes
 - `public/css/panel.css` theme and component styles
 - `public/js/panel.js` UI interactions (theme, sidebar, meters)
 
@@ -17,14 +19,26 @@ Bootstrap-based admin shell aligned to:
 
 ```bash
 cd scripts/admin-panel
-php -S 0.0.0.0:9920
+php -S 0.0.0.0:9920 -t . router.php
 ```
 
 Open:
 
 `http://localhost:9920`
 
+Additional routes:
+
+- `http://localhost:9920/logs`
+- `http://localhost:9920/live-stats`
+
+AJAX data endpoint:
+
+- `http://localhost:9920/api/live-stats` (powered by full `status --json` payload)
+  - Includes `core`, `sections`, `checks`, and derived summary fields.
+
 ## Notes
 
 - Current data in dashboard cards/tables/charts is placeholder seed data.
-- Next step is wiring real LDS sources such as `status --json`, `profile-chooser`, and `env-store`.
+- Live Stats page is wired to `status --json` via `/api/live-stats`.
+- Live Stats includes both structured widgets and a full raw JSON viewer.
+- Next step is wiring additional LDS sources such as `profile-chooser` and `env-store`.

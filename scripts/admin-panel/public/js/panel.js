@@ -16,6 +16,9 @@
 
   var THEME_KEY = "ap_theme_mode";
   var SIDEBAR_KEY = "ap_sidebar_collapsed";
+  var LIVE_SECTIONS_KEY = "ap_live_sections_collapsed";
+  var LIVE_COMPACT_KEY = "ap_live_compact";
+  var LIVE_STATS_SERIES_KEY = "ap_live_stats_series";
   var desktopMql = window.matchMedia("(min-width: 992px)");
 
   var basePath = (body && body.getAttribute("data-ap-base")) || "";
@@ -27,6 +30,7 @@
   var livePayload = null;
   var liveTimer = null;
   var charts = [];
+  var liveMatrixDetailMap = {};
 
   function cssVar(name, fallback) {
     var value = getComputedStyle(root).getPropertyValue(name).trim();
@@ -163,6 +167,14 @@
     el.textContent = value;
   }
 
+  function setHidden(id, hidden) {
+    var el = doc.getElementById(id);
+    if (!el) {
+      return;
+    }
+    el.classList.toggle("d-none", !!hidden);
+  }
+
   function renderCheckCountCapsules(id, summary) {
     var el = doc.getElementById(id);
     if (!el) {
@@ -176,11 +188,23 @@
     pass = isFinite(pass) ? pass : 0;
     warn = isFinite(warn) ? warn : 0;
     fail = isFinite(fail) ? fail : 0;
+    var total = pass + warn + fail;
+    var chips = [];
 
-    el.innerHTML = ""
-      + '<span class="ap-badge ap-live-state-running">Pass ' + escapeHtml(numberFmt(pass)) + "</span>"
-      + '<span class="ap-badge ap-live-state-starting">Warn ' + escapeHtml(numberFmt(warn)) + "</span>"
-      + '<span class="ap-badge ap-live-state-unhealthy">Fail ' + escapeHtml(numberFmt(fail)) + "</span>";
+    if (total > 0) {
+      if (pass > 0) {
+        chips.push('<span class="ap-badge ap-live-state-running">Pass ' + escapeHtml(numberFmt(pass)) + "</span>");
+      }
+      if (warn > 0) {
+        chips.push('<span class="ap-badge ap-live-state-starting">Warn ' + escapeHtml(numberFmt(warn)) + "</span>");
+      }
+      if (fail > 0) {
+        chips.push('<span class="ap-badge ap-live-state-unhealthy">Fail ' + escapeHtml(numberFmt(fail)) + "</span>");
+      }
+    }
+
+    el.innerHTML = chips.join("");
+    el.classList.toggle("d-none", total <= 0);
   }
 
   function setLiveError(message) {
@@ -209,24 +233,286 @@
     }
   }
 
+  function updateLiveStickyOffsets() {
+    var topbarInner = doc.querySelector(".ap-topbar-inner");
+    var topbar = doc.querySelector(".ap-topbar");
+    var kpiRow = doc.getElementById("apLiveStatsPage");
+
+    var topbarHeight = 66;
+    if (topbarInner && topbarInner.getBoundingClientRect) {
+      topbarHeight = Math.max(40, Math.round(topbarInner.getBoundingClientRect().height));
+    } else if (topbar && topbar.getBoundingClientRect) {
+      topbarHeight = Math.max(40, Math.round(topbar.getBoundingClientRect().height));
+    }
+
+    var kpiHeight = 0;
+    if (kpiRow && kpiRow.getBoundingClientRect) {
+      kpiHeight = Math.max(0, Math.round(kpiRow.getBoundingClientRect().height));
+    }
+
+    var kpiTop = topbarHeight + 8;
+    var tableTop = kpiTop + kpiHeight + 8;
+
+    root.style.setProperty("--ap-topbar-height", String(topbarHeight) + "px");
+    root.style.setProperty("--ap-kpi-sticky-top", String(kpiTop) + "px");
+    root.style.setProperty("--ap-table-sticky-top", String(tableTop) + "px");
+  }
+
+  function readJsonStorage(key, fallback) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (!raw) {
+        return fallback;
+      }
+      var parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : fallback;
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  function writeJsonStorage(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      // ignore storage errors
+    }
+  }
+
+  function getCollapsedSectionsMap() {
+    return readJsonStorage(LIVE_SECTIONS_KEY, {});
+  }
+
+  function setCollapsedSectionsMap(map) {
+    writeJsonStorage(LIVE_SECTIONS_KEY, map || {});
+  }
+
+  function getActiveChipValue(containerId, attrName, fallback) {
+    var scope = doc.getElementById(containerId);
+    if (!scope) {
+      return String(fallback || "");
+    }
+    var active = scope.querySelector(".ap-chip-btn.is-active[" + attrName + "]");
+    if (!active) {
+      return String(fallback || "");
+    }
+    return String(active.getAttribute(attrName) || fallback || "");
+  }
+
+  function setActiveChip(containerId, attrName, value) {
+    var scope = doc.getElementById(containerId);
+    if (!scope) {
+      return;
+    }
+    var chips = Array.prototype.slice.call(scope.querySelectorAll(".ap-chip-btn[" + attrName + "]"));
+    var next = String(value || "");
+    chips.forEach(function (chip) {
+      var isActive = String(chip.getAttribute(attrName) || "") === next;
+      chip.classList.toggle("is-active", isActive);
+      chip.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+  }
+
+  function defaultStatsSeriesPrefs() {
+    return {
+      cpu: true,
+      memory: true,
+      network: false,
+      block: false
+    };
+  }
+
+  function getStatsSeriesPrefs() {
+    var defaults = defaultStatsSeriesPrefs();
+    var stored = readJsonStorage(LIVE_STATS_SERIES_KEY, defaults);
+    return {
+      cpu: stored.cpu !== false,
+      memory: stored.memory !== false,
+      network: !!stored.network,
+      block: !!stored.block
+    };
+  }
+
+  function setStatsSeriesPrefs(prefs) {
+    writeJsonStorage(LIVE_STATS_SERIES_KEY, {
+      cpu: !!prefs.cpu,
+      memory: !!prefs.memory,
+      network: !!prefs.network,
+      block: !!prefs.block
+    });
+  }
+
+  function updateStatsSeriesButtons(prefs) {
+    var scope = doc.getElementById("apLiveStatsSeriesControls");
+    if (!scope) {
+      return;
+    }
+    var map = prefs || getStatsSeriesPrefs();
+    Array.prototype.slice.call(scope.querySelectorAll(".ap-chip-btn[data-series]")).forEach(function (btn) {
+      var key = String(btn.getAttribute("data-series") || "");
+      var isActive = !!map[key];
+      btn.classList.toggle("is-active", isActive);
+      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+  }
+
+  function getCollapseButtonsByTarget(targetId) {
+    return Array.prototype.slice.call(doc.querySelectorAll('.ap-card-collapse-toggle[data-target="' + targetId + '"]'));
+  }
+
+  function setCollapseButtonState(btn, isCollapsed) {
+    if (!btn) {
+      return;
+    }
+    btn.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+    btn.setAttribute("title", isCollapsed ? "Expand section" : "Collapse section");
+    var icon = btn.querySelector("i");
+    if (icon) {
+      icon.className = "bi " + (isCollapsed ? "bi-chevron-down" : "bi-chevron-up");
+    }
+  }
+
+  function setSectionCollapsed(targetId, isCollapsed, persist) {
+    var bodyEl = doc.getElementById(targetId);
+    if (!bodyEl) {
+      return;
+    }
+    bodyEl.classList.toggle("ap-collapsed", !!isCollapsed);
+    getCollapseButtonsByTarget(targetId).forEach(function (btn) {
+      setCollapseButtonState(btn, !!isCollapsed);
+    });
+
+    if (persist !== false) {
+      var map = getCollapsedSectionsMap();
+      map[targetId] = !!isCollapsed;
+      setCollapsedSectionsMap(map);
+    }
+  }
+
+  function initSectionCollapseControls() {
+    var buttons = Array.prototype.slice.call(doc.querySelectorAll(".ap-card-collapse-toggle[data-target]"));
+    if (!buttons.length) {
+      return;
+    }
+
+    var stored = getCollapsedSectionsMap();
+    var seenTargets = {};
+
+    buttons.forEach(function (btn) {
+      var targetId = String(btn.getAttribute("data-target") || "").trim();
+      if (!targetId) {
+        return;
+      }
+
+      if (!(targetId in seenTargets)) {
+        seenTargets[targetId] = true;
+        setSectionCollapsed(targetId, !!stored[targetId], false);
+      } else {
+        setCollapseButtonState(btn, !!stored[targetId]);
+      }
+
+      btn.addEventListener("click", function () {
+        var target = doc.getElementById(targetId);
+        if (!target) {
+          return;
+        }
+        var collapsed = !target.classList.contains("ap-collapsed");
+        setSectionCollapsed(targetId, collapsed, true);
+      });
+    });
+
+    var collapseAllBtn = doc.getElementById("apLiveCollapseAllBtn");
+    if (collapseAllBtn) {
+      collapseAllBtn.addEventListener("click", function () {
+        Object.keys(seenTargets).forEach(function (targetId) {
+          setSectionCollapsed(targetId, true, false);
+        });
+        var nextMap = {};
+        Object.keys(seenTargets).forEach(function (targetId) {
+          nextMap[targetId] = true;
+        });
+        setCollapsedSectionsMap(nextMap);
+      });
+    }
+
+    var expandAllBtn = doc.getElementById("apLiveExpandAllBtn");
+    if (expandAllBtn) {
+      expandAllBtn.addEventListener("click", function () {
+        Object.keys(seenTargets).forEach(function (targetId) {
+          setSectionCollapsed(targetId, false, false);
+        });
+        setCollapsedSectionsMap({});
+      });
+    }
+  }
+
+  function applyCompactMode(enabled, persist) {
+    var isEnabled = !!enabled;
+    body.classList.toggle("ap-live-compact", isEnabled);
+    var btn = doc.getElementById("apLiveCompactToggleBtn");
+    if (btn) {
+      btn.setAttribute("aria-pressed", isEnabled ? "true" : "false");
+      var iconCls = isEnabled ? "bi-layout-text-sidebar" : "bi-layout-text-sidebar-reverse";
+      var label = isEnabled ? "Spacious" : "Compact";
+      btn.innerHTML = '<i class="bi ' + iconCls + ' me-1"></i> ' + label;
+    }
+    if (persist !== false) {
+      try {
+        localStorage.setItem(LIVE_COMPACT_KEY, isEnabled ? "1" : "0");
+      } catch (e) {
+        // ignore storage errors
+      }
+    }
+    updateLiveStickyOffsets();
+  }
+
+  function initCompactToggle() {
+    var btn = doc.getElementById("apLiveCompactToggleBtn");
+    if (!btn) {
+      return;
+    }
+    var enabled = true;
+    try {
+      var saved = localStorage.getItem(LIVE_COMPACT_KEY);
+      enabled = saved === null ? true : saved === "1";
+    } catch (e) {
+      enabled = true;
+    }
+    applyCompactMode(enabled, false);
+
+    btn.addEventListener("click", function () {
+      applyCompactMode(!body.classList.contains("ap-live-compact"), true);
+    });
+  }
+
+  function toTitleWords(value) {
+    return String(value || "")
+      .split(/[_\s-]+/)
+      .filter(function (part) { return part !== ""; })
+      .map(function (part) {
+        return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+      })
+      .join(" ");
+  }
+
   function stateIconMeta(state) {
     var s = String(state || "").toLowerCase();
     if (s === "running") {
-      return { icon: "bi-play-circle-fill", label: "running", tone: "ap-live-health-healthy", spin: false };
+      return { icon: "bi-play-circle-fill", label: "Running", tone: "ap-live-health-healthy", spin: false };
     }
     if (s === "restarting") {
-      return { icon: "bi-arrow-repeat", label: "restarting", tone: "ap-live-health-degraded", spin: true };
+      return { icon: "bi-arrow-repeat", label: "Restarting", tone: "ap-live-health-degraded", spin: true };
     }
     if (s === "starting" || s === "created") {
-      return { icon: "bi-hourglass-split", label: s || "starting", tone: "ap-live-health-degraded", spin: false };
+      return { icon: "bi-hourglass-split", label: toTitleWords(s || "starting"), tone: "ap-live-health-degraded", spin: false };
     }
     if (s === "paused") {
-      return { icon: "bi-pause-circle-fill", label: "paused", tone: "ap-live-health-degraded", spin: false };
+      return { icon: "bi-pause-circle-fill", label: "Paused", tone: "ap-live-health-degraded", spin: false };
     }
     if (s === "exited" || s === "dead" || s === "stopped") {
-      return { icon: "bi-x-octagon-fill", label: s, tone: "ap-live-health-failing", spin: false };
+      return { icon: "bi-x-octagon-fill", label: toTitleWords(s), tone: "ap-live-health-failing", spin: false };
     }
-    return { icon: "bi-question-circle-fill", label: s || "unknown", tone: "ap-live-health-degraded", spin: false };
+    return { icon: "bi-question-circle-fill", label: toTitleWords(s || "unknown"), tone: "ap-live-health-degraded", spin: false };
   }
 
   function checkStateClass(state) {
@@ -246,15 +532,15 @@
   function checkStateMeta(state) {
     var s = String(state || "").toLowerCase();
     if (s === "pass") {
-      return { icon: "bi-check-circle-fill", label: "PASS", tone: "ap-live-health-healthy", spin: false };
+      return { icon: "bi-check-circle-fill", label: "Pass", tone: "ap-live-health-healthy", spin: false };
     }
     if (s === "warn") {
-      return { icon: "bi-exclamation-triangle-fill", label: "WARN", tone: "ap-live-health-degraded", spin: false };
+      return { icon: "bi-exclamation-triangle-fill", label: "Warn", tone: "ap-live-health-degraded", spin: false };
     }
     if (s === "fail") {
-      return { icon: "bi-x-octagon-fill", label: "FAIL", tone: "ap-live-health-failing", spin: false };
+      return { icon: "bi-x-octagon-fill", label: "Fail", tone: "ap-live-health-failing", spin: false };
     }
-    return { icon: "bi-question-circle-fill", label: "UNKNOWN", tone: "ap-live-health-degraded", spin: false };
+    return { icon: "bi-question-circle-fill", label: "Unknown", tone: "ap-live-health-degraded", spin: false };
   }
 
   function renderCheckStateIcon(state, extraClass) {
@@ -326,6 +612,47 @@
     return list.map(function (value) {
       return '<span class="' + badgeClass + '">' + escapeHtml(String(value)) + "</span>";
     }).join("");
+  }
+
+  function parseMemUsageToMiB(value) {
+    var text = String(value || "").trim();
+    if (!text) {
+      return 0;
+    }
+    var firstPart = text.split("/")[0];
+    return sizeToMiB(String(firstPart || "").trim());
+  }
+
+  function stateBucket(state, health) {
+    var s = String(state || "").toLowerCase();
+    var h = String(health || "").toLowerCase();
+
+    if (h === "unhealthy" || s === "exited" || s === "dead" || s === "stopped") {
+      return "fail";
+    }
+    if (h === "healthy" && s === "running") {
+      return "pass";
+    }
+    return "warn";
+  }
+
+  function readMatrixControls() {
+    var search = doc.getElementById("apLiveMatrixSearch");
+    var sort = doc.getElementById("apLiveMatrixSort");
+
+    return {
+      query: String(search && search.value ? search.value : "").trim().toLowerCase(),
+      state: getActiveChipValue("apLiveMatrixStateFilter", "data-runtime-state", "all").toLowerCase(),
+      sort: String(sort && sort.value ? sort.value : "cpu_desc").toLowerCase()
+    };
+  }
+
+  function readChecksControls() {
+    var search = doc.getElementById("apLiveChecksSearch");
+    return {
+      query: String(search && search.value ? search.value : "").trim().toLowerCase(),
+      state: getActiveChipValue("apLiveChecksFilter", "data-check-state", "all").toLowerCase()
+    };
   }
 
   function parseMountFlagTokens(flag) {
@@ -614,7 +941,8 @@
     rows.push({
       key: "build_cache_reclaimable",
       state: reclaimState,
-      detail: '<div class="ap-system-test-detail">' + renderSystemDetailChip("", reclaimable, reclaimWarn ? "ap-live-state-starting" : "ap-live-state-running") + "</div>"
+      detail: '<div class="ap-system-test-detail">' + renderSystemDetailChip("", reclaimable, reclaimWarn ? "ap-live-state-starting" : "ap-live-state-running") + "</div>",
+      detailText: reclaimable
     });
 
     var pruneKnown = typeof drift.builder_prune_hint === "boolean";
@@ -626,28 +954,32 @@
         pruneKnown
           ? renderSystemDetailChip("", pruneHint ? "true" : "false", pruneHint ? "ap-live-state-starting" : "ap-live-state-running")
           : renderSystemDetailChip("", "-", "ap-live-state-no-health")
-      ) + "</div>"
+      ) + "</div>",
+      detailText: pruneKnown ? (pruneHint ? "true" : "false") : "-"
     });
 
     var orphans = asArray(drift.orphan_containers || []);
     rows.push({
       key: "orphan_containers",
       state: orphans.length ? "warn" : "pass",
-      detail: renderSystemValueChips(orphans, orphans.length ? "ap-live-state-unhealthy" : "ap-live-state-running", "ap-live-state-running")
+      detail: renderSystemValueChips(orphans, orphans.length ? "ap-live-state-unhealthy" : "ap-live-state-running", "ap-live-state-running"),
+      detailText: orphans.length ? orphans.join(" ") : "none"
     });
 
     var labeled = asArray(drift.labeled_volumes || []);
     rows.push({
       key: "labeled_volumes",
       state: "pass",
-      detail: renderSystemValueChips(labeled, "ap-live-state-no-health", "ap-live-state-no-health")
+      detail: renderSystemValueChips(labeled, "ap-live-state-no-health", "ap-live-state-no-health"),
+      detailText: labeled.join(" ")
     });
 
     var unused = asArray(drift.unused_labeled_volumes || []);
     rows.push({
       key: "unused_labeled_volumes",
       state: unused.length ? "warn" : "pass",
-      detail: renderSystemValueChips(unused, unused.length ? "ap-live-state-starting" : "ap-live-state-running", "ap-live-state-running")
+      detail: renderSystemValueChips(unused, unused.length ? "ap-live-state-starting" : "ap-live-state-running", "ap-live-state-running"),
+      detailText: unused.length ? unused.join(" ") : "none"
     });
 
     return rows;
@@ -672,27 +1004,52 @@
     var driftStates = driftRows.map(function (row) { return row.state; });
     setTitleStateIcon("apLiveSystemTestsStateIcon", worstCheckState([systemState].concat(driftStates)));
 
-    var testRowsHtml = keys.map(function (key) {
+    var controls = readChecksControls();
+    var combinedRows = keys.map(function (key) {
       var test = tests[key] || {};
-      var detail = renderSystemTestDetail(key, test);
-      return ""
-        + "<tr>"
-        + '  <td><span class="ap-system-test-name">' + escapeHtml(formatCheckLabel(key)) + "</span></td>"
-        + '  <td class="text-end">' + renderCheckStateIcon(test.state, "ap-check-state-icon") + "</td>"
-        + "  <td>" + detail + "</td>"
-        + "</tr>";
+      return {
+        key: key,
+        label: formatCheckLabel(key),
+        state: normalizeCheckState(test.state),
+        detail: renderSystemTestDetail(key, test),
+        detailText: String(test.detail || test.value || "")
+      };
     });
 
-    var driftRowsHtml = driftRows.map(function (row) {
+    driftRows.forEach(function (row) {
+      combinedRows.push({
+        key: row.key,
+        label: formatCheckLabel(row.key),
+        state: normalizeCheckState(row.state),
+        detail: row.detail,
+        detailText: String(row.detailText || "")
+      });
+    });
+
+    var filteredRows = combinedRows.filter(function (row) {
+      if (controls.state !== "all" && row.state !== controls.state) {
+        return false;
+      }
+      if (!controls.query) {
+        return true;
+      }
+      var haystack = (String(row.label || "") + " " + String(row.detailText || "")).toLowerCase();
+      return haystack.indexOf(controls.query) !== -1;
+    });
+
+    if (!filteredRows.length) {
+      rowsEl.innerHTML = '<tr><td colspan="3" class="text-center ap-page-sub py-4">No tests matching current filters.</td></tr>';
+      return;
+    }
+
+    rowsEl.innerHTML = filteredRows.map(function (row) {
       return ""
         + "<tr>"
-        + '  <td><span class="ap-system-test-name">' + escapeHtml(formatCheckLabel(row.key)) + "</span></td>"
+        + '  <td><span class="ap-system-test-name">' + escapeHtml(row.label) + "</span></td>"
         + '  <td class="text-end">' + renderCheckStateIcon(row.state, "ap-check-state-icon") + "</td>"
         + "  <td>" + row.detail + "</td>"
         + "</tr>";
-    });
-
-    rowsEl.innerHTML = testRowsHtml.concat(driftRowsHtml).join("");
+    }).join("");
   }
 
   function renderProjectContainersCheck(payload) {
@@ -791,6 +1148,59 @@
     }).join("");
   }
 
+  function buildLogViewerUrl(service, containerName) {
+    var svc = String(service || "").trim();
+    var name = String(containerName || "").trim();
+    var filter = svc || name;
+    if (!filter) {
+      return "";
+    }
+    return basePath + "/logs?svc=" + encodeURIComponent(filter);
+  }
+
+  function showContainerDetails(detailKey) {
+    var key = String(detailKey || "").trim();
+    if (!key || !(key in liveMatrixDetailMap)) {
+      return;
+    }
+    var detail = liveMatrixDetailMap[key];
+    var titleEl = doc.getElementById("apLiveContainerDetailsTitle");
+    var gridEl = doc.getElementById("apLiveContainerDetailsGrid");
+    if (!gridEl) {
+      return;
+    }
+
+    if (titleEl) {
+      titleEl.textContent = String(detail.container || "Container Details");
+    }
+
+    var rows = [
+      { key: "Container", value: detail.container || "-" },
+      { key: "Service", value: detail.service || "-" },
+      { key: "State", value: detail.state || "-" },
+      { key: "Health", value: detail.health || "-" },
+      { key: "CPU %", value: detail.cpu || "-" },
+      { key: "Memory", value: detail.memory || "-" },
+      { key: "Exposed Ports", value: detail.exposedPorts || "none" },
+      { key: "Access Ports", value: detail.accessPorts || "none" },
+      { key: "Networks", value: detail.networks || "none" }
+    ];
+
+    gridEl.innerHTML = rows.map(function (row) {
+      return ""
+        + "<dt>" + escapeHtml(row.key) + "</dt>"
+        + "<dd>" + escapeHtml(row.value) + "</dd>";
+    }).join("");
+
+    var modalEl = doc.getElementById("apLiveContainerDetailsModal");
+    if (!modalEl || !window.bootstrap || typeof window.bootstrap.Modal !== "function") {
+      return;
+    }
+
+    var modal = window.bootstrap.Modal.getOrCreateInstance(modalEl);
+    modal.show();
+  }
+
   function renderNetworkMatrix(payload) {
     var headEl = doc.getElementById("apLiveNetworkMatrixHead");
     var rowsEl = doc.getElementById("apLiveNetworkMatrixRows");
@@ -865,12 +1275,7 @@
       }
     });
 
-    if (!names.length) {
-      headEl.innerHTML = "<tr><th>Container / Service</th><th>State</th><th>Ports</th><th class=\"text-end\">CPU %</th><th class=\"text-end\">Mem Usage</th><th class=\"text-end\">Networks</th></tr>";
-      rowsEl.innerHTML = '<tr><td colspan="6" class="text-center ap-page-sub py-4">No container, consumer, or matrix data.</td></tr>';
-      return;
-    }
-
+    var controls = readMatrixControls();
     var matrixColumns = columns.length ? columns.slice() : ["Networks"];
     var networkHeaderCells = matrixColumns.map(function (col) {
       if (!columns.length) {
@@ -879,9 +1284,9 @@
 
       var key = String(col || "").toLowerCase();
       var meta = key in networkByName ? networkByName[key] : {};
-      var containers = meta && meta.containers != null ? numberFmt(meta.containers) : "-";
+      var containersCount = meta && meta.containers != null ? numberFmt(meta.containers) : "-";
       var subnet = meta && meta.subnet ? String(meta.subnet) : "-";
-      var title = String(col || "-") + " (" + containers + ")";
+      var title = String(col || "-") + " (" + containersCount + ")";
 
       return ""
         + '<th class="text-end ap-matrix-col">'
@@ -892,7 +1297,13 @@
 
     headEl.innerHTML = "<tr><th>Container / Service</th><th>State</th><th>Ports</th><th class=\"text-end\">CPU %</th><th class=\"text-end\">Mem Usage</th>" + networkHeaderCells + "</tr>";
 
-    rowsEl.innerHTML = names.map(function (name) {
+    if (!names.length) {
+      liveMatrixDetailMap = {};
+      rowsEl.innerHTML = '<tr><td colspan="' + String(5 + matrixColumns.length) + '" class="text-center ap-page-sub py-4">No container, consumer, or matrix data.</td></tr>';
+      return;
+    }
+
+    var rowsData = names.map(function (name) {
       var container = containerByName[name] || {};
       var matrixRow = matrixByName[name] || {};
       var topConsumer = topByName[name] || {};
@@ -903,10 +1314,71 @@
       var health = String(container.health || "-");
       var healthIcon = String(container.health_icon || "!");
       var cpuPercent = String(topConsumer.cpu_percent || "-");
+      var cpuValue = percentToNumber(cpuPercent);
       var memUsage = String(topConsumer.mem_usage || "-");
+      var memMiB = parseMemUsageToMiB(memUsage);
       var portGroups = portsByName[name] || { exposed: [], mapped: [] };
+
+      return {
+        name: name,
+        containerName: containerName,
+        service: service,
+        state: state,
+        health: health,
+        healthIcon: healthIcon,
+        cpuPercent: cpuPercent,
+        cpuValue: cpuValue,
+        memUsage: memUsage,
+        memMiB: memMiB,
+        portGroups: portGroups,
+        ips: ips,
+        bucket: stateBucket(state, health)
+      };
+    }).filter(function (row) {
+      var matchesState = controls.state === "all" || row.bucket === controls.state;
+      if (!matchesState) {
+        return false;
+      }
+      if (!controls.query) {
+        return true;
+      }
+      var searchable = (row.containerName + " " + row.service + " " + row.name).toLowerCase();
+      return searchable.indexOf(controls.query) !== -1;
+    });
+
+    if (controls.sort === "mem_desc") {
+      rowsData.sort(function (a, b) {
+        if (b.memMiB !== a.memMiB) {
+          return b.memMiB - a.memMiB;
+        }
+        return String(a.containerName).localeCompare(String(b.containerName));
+      });
+    } else if (controls.sort === "name_asc") {
+      rowsData.sort(function (a, b) {
+        return String(a.containerName).localeCompare(String(b.containerName));
+      });
+    } else {
+      rowsData.sort(function (a, b) {
+        if (b.cpuValue !== a.cpuValue) {
+          return b.cpuValue - a.cpuValue;
+        }
+        return String(a.containerName).localeCompare(String(b.containerName));
+      });
+    }
+
+    if (!rowsData.length) {
+      liveMatrixDetailMap = {};
+      rowsEl.innerHTML = '<tr><td colspan="' + String(5 + matrixColumns.length) + '" class="text-center ap-page-sub py-4">No rows matching current filters.</td></tr>';
+      return;
+    }
+
+    var detailsMap = {};
+    rowsEl.innerHTML = rowsData.map(function (row, index) {
+      var state = row.state;
+      var health = row.health;
+      var healthIcon = row.healthIcon;
       var cells = matrixColumns.map(function (col) {
-        var value = columns.length && ips && typeof ips === "object" && (col in ips) ? ips[col] : null;
+        var value = columns.length && row.ips && typeof row.ips === "object" && (col in row.ips) ? row.ips[col] : null;
         return '<td class="text-end">' + escapeHtml(value || "-") + "</td>";
       }).join("");
 
@@ -922,23 +1394,52 @@
         ? "ap-live-health-healthy"
         : (health === "unhealthy" ? "ap-live-health-failing" : "ap-live-health-degraded");
       var healthPulse = health === "healthy" ? "" : " ap-health-icon-pulse";
+      var healthLabel = toTitleWords(health || "unknown");
       var healthCell = '<span class="ap-health-icon ' + healthClass + healthPulse + '"'
-        + ' title="health: ' + escapeHtml(health) + '"'
-        + ' aria-label="health: ' + escapeHtml(health) + '">'
+        + ' title="health: ' + escapeHtml(healthLabel) + '"'
+        + ' aria-label="health: ' + escapeHtml(healthLabel) + '">'
         + escapeHtml(healthIcon || "!")
         + "</span>";
+      var detailKey = "row_" + String(index) + "_" + String(row.name || "");
+      var networksText = matrixColumns.map(function (col) {
+        var value = columns.length && row.ips && typeof row.ips === "object" && (col in row.ips) ? row.ips[col] : "";
+        if (!value || value === "-") {
+          return "";
+        }
+        return String(col) + ":" + String(value);
+      }).filter(function (part) { return part !== ""; }).join(", ");
+      detailsMap[detailKey] = {
+        container: row.containerName,
+        service: row.service,
+        state: toTitleWords(state || "unknown"),
+        health: healthLabel,
+        cpu: row.cpuPercent,
+        memory: row.memUsage,
+        exposedPorts: asArray(row.portGroups.exposed || []).join(", "),
+        accessPorts: asArray(row.portGroups.mapped || []).join(", "),
+        networks: networksText
+      };
+      var logsUrl = buildLogViewerUrl(row.service, row.containerName);
+      var actions = ""
+        + '<div class="ap-matrix-actions">'
+        + (logsUrl
+          ? '<a class="ap-matrix-action-btn" href="' + escapeHtml(logsUrl) + '" title="Inspect logs" aria-label="Inspect logs"><i class="bi bi-journal-text"></i></a>'
+          : "")
+        + '<button class="btn ap-matrix-action-btn ap-matrix-details-btn" type="button" data-detail-key="' + escapeHtml(detailKey) + '" title="Open container details" aria-label="Open container details"><i class="bi bi-info-circle"></i></button>'
+        + "</div>";
       var identityCell = ""
         + '<div class="ap-matrix-identity">'
-        + '  <span class="ap-matrix-name">' + escapeHtml(containerName) + "</span>"
-        + '  <span class="ap-matrix-service">' + escapeHtml(service) + "</span>"
+        + '  <span class="ap-matrix-name">' + escapeHtml(row.containerName) + "</span>"
+        + '  <span class="ap-matrix-service">' + escapeHtml(row.service) + "</span>"
+        + "  " + actions
         + "</div>";
       var stateCellMerged = ""
         + '<div class="ap-matrix-state">'
         + "  <span>" + stateCell + "</span>"
         + "  <span>" + healthCell + "</span>"
         + "</div>";
-      var exposedPortsHtml = renderPortBadges(portGroups.exposed, "ap-port-badge ap-port-badge-exposed");
-      var mappedPortsHtml = renderPortBadges(portGroups.mapped, "ap-port-badge ap-port-badge-mapped");
+      var exposedPortsHtml = renderPortBadges(row.portGroups.exposed, "ap-port-badge ap-port-badge-exposed");
+      var mappedPortsHtml = renderPortBadges(row.portGroups.mapped, "ap-port-badge ap-port-badge-mapped");
       var portRowsHtml = "";
       if (exposedPortsHtml) {
         portRowsHtml += '<div class="ap-matrix-port-row"><span class="ap-matrix-port-values">' + exposedPortsHtml + "</span></div>";
@@ -953,11 +1454,12 @@
         + "  <td>" + identityCell + "</td>"
         + "  <td>" + stateCellMerged + "</td>"
         + "  <td>" + portsCell + "</td>"
-        + '  <td class="text-end">' + escapeHtml(cpuPercent) + "</td>"
-        + '  <td class="text-end">' + escapeHtml(memUsage) + "</td>"
+        + '  <td class="text-end">' + escapeHtml(row.cpuPercent) + "</td>"
+        + '  <td class="text-end">' + escapeHtml(row.memUsage) + "</td>"
         + cells
         + "</tr>";
     }).join("");
+    liveMatrixDetailMap = detailsMap;
   }
 
   function normalizeIssueText(item) {
@@ -1105,8 +1607,20 @@
     setText("apLiveProblems", numberFmt(summary.problem_count));
     var systemTotalChecks = Number(systemChecks.pass || 0) + Number(systemChecks.warn || 0) + Number(systemChecks.fail || 0);
     var projectTotalChecks = Number(projectChecks.pass || 0) + Number(projectChecks.warn || 0) + Number(projectChecks.fail || 0);
-    setText("apLiveSystemChecks", numberFmt(systemTotalChecks));
-    setText("apLiveProjectChecks", numberFmt(projectTotalChecks));
+    var systemHasNonZeroChip = Number(systemChecks.pass || 0) > 0 || Number(systemChecks.warn || 0) > 0 || Number(systemChecks.fail || 0) > 0;
+    var projectHasNonZeroChip = Number(projectChecks.pass || 0) > 0 || Number(projectChecks.warn || 0) > 0 || Number(projectChecks.fail || 0) > 0;
+    setHidden("apLiveSystemChecks", systemHasNonZeroChip);
+    setHidden("apLiveProjectChecks", projectHasNonZeroChip);
+    if (systemHasNonZeroChip) {
+      setText("apLiveSystemChecks", "");
+    } else {
+      setText("apLiveSystemChecks", numberFmt(systemTotalChecks));
+    }
+    if (projectHasNonZeroChip) {
+      setText("apLiveProjectChecks", "");
+    } else {
+      setText("apLiveProjectChecks", numberFmt(projectTotalChecks));
+    }
     renderCheckCountCapsules("apLiveSystemChecksCaps", systemChecks);
     renderCheckCountCapsules("apLiveProjectChecksCaps", projectChecks);
     setText("apLiveUpdatedAt", generatedAt ? "Updated: " + generatedAt : "Updated: -");
@@ -1123,6 +1637,7 @@
     clearCharts();
 
     var mutedColor = cssVar("--ap-muted", "#6b7280");
+    var textColor = cssVar("--ap-text", "#111827");
     var borderColor = cssVar("--ap-border", "#e5e9f2");
     var primary = cssVar("--ap-primary", "#465fff");
     var success = cssVar("--ap-success", "#16a34a");
@@ -1267,7 +1782,7 @@
         })
         .filter(function (row) { return isFinite(row.cpu); })
         .sort(function (a, b) { return b.cpu - a.cpu; })
-        .slice(0, 12);
+        .slice(0, 8);
 
       var statsLabels = statsRows.map(function (row) { return row.name; });
       var statsCpuRaw = statsRows.map(function (row) { return Math.max(0, row.cpu); });
@@ -1296,48 +1811,70 @@
         statsBlockRaw = [0];
       }
 
+      var statsPrefs = getStatsSeriesPrefs();
+      updateStatsSeriesButtons(statsPrefs);
+      var statsDatasets = [];
+      if (statsPrefs.cpu) {
+        statsDatasets.push({
+          label: "CPU %",
+          data: statsCpuValues,
+          rawValues: statsCpuRaw,
+          rawUnit: "%",
+          backgroundColor: primary,
+          borderRadius: 6,
+          barThickness: 10
+        });
+      }
+      if (statsPrefs.memory) {
+        statsDatasets.push({
+          label: "Memory (MiB)",
+          data: statsMemValues,
+          rawValues: statsMemRaw,
+          rawUnit: "MiB",
+          backgroundColor: success,
+          borderRadius: 6,
+          barThickness: 10
+        });
+      }
+      if (statsPrefs.network) {
+        statsDatasets.push({
+          label: "Net I/O (MiB)",
+          data: statsNetValues,
+          rawValues: statsNetRaw,
+          rawUnit: "MiB",
+          backgroundColor: warn,
+          borderRadius: 6,
+          barThickness: 10
+        });
+      }
+      if (statsPrefs.block) {
+        statsDatasets.push({
+          label: "Block I/O (MiB)",
+          data: statsBlockValues,
+          rawValues: statsBlockRaw,
+          rawUnit: "MiB",
+          backgroundColor: danger,
+          borderRadius: 6,
+          barThickness: 10
+        });
+      }
+      if (!statsDatasets.length) {
+        statsDatasets.push({
+          label: "CPU %",
+          data: statsCpuValues,
+          rawValues: statsCpuRaw,
+          rawUnit: "%",
+          backgroundColor: primary,
+          borderRadius: 6,
+          barThickness: 10
+        });
+      }
+
       charts.push(new window.Chart(liveStatsEl, {
         type: "bar",
         data: {
           labels: statsLabels,
-          datasets: [
-            {
-              label: "CPU %",
-              data: statsCpuValues,
-              rawValues: statsCpuRaw,
-              rawUnit: "%",
-              backgroundColor: primary,
-              borderRadius: 6,
-              barThickness: 10
-            },
-            {
-              label: "Memory (MiB)",
-              data: statsMemValues,
-              rawValues: statsMemRaw,
-              rawUnit: "MiB",
-              backgroundColor: success,
-              borderRadius: 6,
-              barThickness: 10
-            },
-            {
-              label: "Net I/O (MiB)",
-              data: statsNetValues,
-              rawValues: statsNetRaw,
-              rawUnit: "MiB",
-              backgroundColor: warn,
-              borderRadius: 6,
-              barThickness: 10
-            },
-            {
-              label: "Block I/O (MiB)",
-              data: statsBlockValues,
-              rawValues: statsBlockRaw,
-              rawUnit: "MiB",
-              backgroundColor: danger,
-              borderRadius: 6,
-              barThickness: 10
-            }
-          ]
+          datasets: statsDatasets
         },
         options: {
           maintainAspectRatio: false,
@@ -1350,9 +1887,9 @@
               position: "top",
               align: "start",
               labels: {
-                color: mutedColor,
+                color: textColor,
                 boxWidth: 10,
-                font: { size: 10, weight: "600" }
+                font: { size: 11, weight: "600" }
               }
             },
             tooltip: {
@@ -1372,7 +1909,7 @@
           scales: {
             x: {
               grid: { display: false },
-              ticks: { color: mutedColor, font: { size: 10 }, maxRotation: 45, minRotation: 25 }
+              ticks: { color: textColor, font: { size: 11 }, maxRotation: 25, minRotation: 0 }
             },
             y: {
               type: "linear",
@@ -1381,8 +1918,8 @@
               border: { display: false },
               grid: { color: borderColor },
               ticks: {
-                color: mutedColor,
-                font: { size: 10 },
+                color: textColor,
+                font: { size: 11 },
                 callback: function (value) {
                   return value + "%";
                 }
@@ -1390,7 +1927,7 @@
               title: {
                 display: true,
                 text: "Percent of max per metric",
-                color: mutedColor,
+                color: textColor,
                 font: { size: 10, weight: "600" }
               }
             }
@@ -1439,12 +1976,12 @@
             x: {
               border: { display: false },
               grid: { color: borderColor },
-              ticks: { color: mutedColor, font: { size: 10 } }
+              ticks: { color: textColor, font: { size: 10 } }
             },
             y: {
               border: { display: false },
               grid: { display: false },
-              ticks: { color: mutedColor, font: { size: 10 } }
+              ticks: { color: textColor, font: { size: 10 } }
             }
           }
         }
@@ -1492,12 +2029,12 @@
             x: {
               border: { display: false },
               grid: { color: borderColor },
-              ticks: { color: mutedColor, font: { size: 10 } }
+              ticks: { color: textColor, font: { size: 10 } }
             },
             y: {
               border: { display: false },
               grid: { display: false },
-              ticks: { color: mutedColor, font: { size: 10 } }
+              ticks: { color: textColor, font: { size: 10 } }
             }
           }
         }
@@ -1596,6 +2133,50 @@
     }
   }
 
+  function setNavSubmenuState(toggleBtn, submenuEl, isOpen) {
+    var expanded = !!isOpen;
+    toggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+    submenuEl.classList.toggle("is-open", expanded);
+    var tree = toggleBtn.closest(".ap-nav-tree");
+    if (tree) {
+      tree.classList.toggle("is-open", expanded);
+    }
+  }
+
+  function initNavSubmenus() {
+    var toggles = Array.prototype.slice.call(doc.querySelectorAll(".ap-nav-link-toggle[data-nav-toggle]"));
+    toggles.forEach(function (toggleBtn) {
+      var targetId = toggleBtn.getAttribute("aria-controls");
+      if (!targetId) {
+        return;
+      }
+
+      var submenuEl = doc.getElementById(targetId);
+      if (!submenuEl) {
+        return;
+      }
+
+      var initiallyOpen = toggleBtn.getAttribute("aria-expanded") === "true" || submenuEl.classList.contains("is-open");
+      setNavSubmenuState(toggleBtn, submenuEl, initiallyOpen);
+
+      toggleBtn.addEventListener("click", function (ev) {
+        ev.preventDefault();
+
+        if (desktopMql.matches && body.classList.contains("ap-sidebar-collapsed")) {
+          body.classList.remove("ap-sidebar-collapsed");
+          try {
+            localStorage.setItem(SIDEBAR_KEY, "0");
+          } catch (e) {
+            // ignore storage errors
+          }
+        }
+
+        var nextOpen = toggleBtn.getAttribute("aria-expanded") !== "true";
+        setNavSubmenuState(toggleBtn, submenuEl, nextOpen);
+      });
+    });
+  }
+
   function initSidebar() {
     try {
       if (localStorage.getItem(SIDEBAR_KEY) === "1" && desktopMql.matches) {
@@ -1627,8 +2208,13 @@
       overlay.addEventListener("click", closeMobileSidebar);
     }
 
+    initNavSubmenus();
+
     doc.querySelectorAll(".ap-nav-link").forEach(function (link) {
       link.addEventListener("click", function () {
+        if (link.hasAttribute("data-nav-toggle")) {
+          return;
+        }
         if (!desktopMql.matches) {
           closeMobileSidebar();
         }
@@ -1664,6 +2250,7 @@
     renderProjectArtifactsCheck(payload);
     renderProjectMountsCheck(payload);
     renderCharts();
+    updateLiveStickyOffsets();
   }
 
   function fetchLiveStats() {
@@ -1702,10 +2289,115 @@
       });
   }
 
+  function initRuntimeMatrixControls() {
+    var search = doc.getElementById("apLiveMatrixSearch");
+    var stateFilter = doc.getElementById("apLiveMatrixStateFilter");
+    var sort = doc.getElementById("apLiveMatrixSort");
+    setActiveChip("apLiveMatrixStateFilter", "data-runtime-state", getActiveChipValue("apLiveMatrixStateFilter", "data-runtime-state", "all"));
+
+    function rerenderMatrix() {
+      if (livePayload) {
+        renderNetworkMatrix(livePayload);
+      }
+    }
+
+    if (search) {
+      search.addEventListener("input", rerenderMatrix);
+    }
+    if (stateFilter) {
+      stateFilter.addEventListener("click", function (ev) {
+        var btn = ev.target && ev.target.closest ? ev.target.closest(".ap-chip-btn[data-runtime-state]") : null;
+        if (!btn) {
+          return;
+        }
+        var value = String(btn.getAttribute("data-runtime-state") || "all");
+        setActiveChip("apLiveMatrixStateFilter", "data-runtime-state", value);
+        rerenderMatrix();
+      });
+    }
+    if (sort) {
+      sort.addEventListener("change", rerenderMatrix);
+    }
+
+    doc.addEventListener("click", function (ev) {
+      var btn = ev.target && ev.target.closest ? ev.target.closest(".ap-matrix-details-btn[data-detail-key]") : null;
+      if (!btn) {
+        return;
+      }
+      showContainerDetails(btn.getAttribute("data-detail-key"));
+    });
+  }
+
+  function initChecksControls() {
+    var filter = doc.getElementById("apLiveChecksFilter");
+    var search = doc.getElementById("apLiveChecksSearch");
+    setActiveChip("apLiveChecksFilter", "data-check-state", getActiveChipValue("apLiveChecksFilter", "data-check-state", "all"));
+
+    function rerenderChecks() {
+      if (livePayload) {
+        renderSystemTestsTable(livePayload);
+      }
+    }
+
+    if (filter) {
+      filter.addEventListener("click", function (ev) {
+        var btn = ev.target && ev.target.closest ? ev.target.closest(".ap-chip-btn[data-check-state]") : null;
+        if (!btn) {
+          return;
+        }
+        var value = String(btn.getAttribute("data-check-state") || "all");
+        setActiveChip("apLiveChecksFilter", "data-check-state", value);
+        rerenderChecks();
+      });
+    }
+
+    if (search) {
+      search.addEventListener("input", rerenderChecks);
+    }
+  }
+
+  function initStatsSeriesControls() {
+    var scope = doc.getElementById("apLiveStatsSeriesControls");
+    if (!scope) {
+      return;
+    }
+
+    var prefs = getStatsSeriesPrefs();
+    updateStatsSeriesButtons(prefs);
+
+    scope.addEventListener("click", function (ev) {
+      var btn = ev.target && ev.target.closest ? ev.target.closest(".ap-chip-btn[data-series]") : null;
+      if (!btn) {
+        return;
+      }
+      var key = String(btn.getAttribute("data-series") || "");
+      if (!key) {
+        return;
+      }
+
+      var next = getStatsSeriesPrefs();
+      next[key] = !next[key];
+      if (!next.cpu && !next.memory && !next.network && !next.block) {
+        next.cpu = true;
+      }
+      setStatsSeriesPrefs(next);
+      updateStatsSeriesButtons(next);
+      renderCharts();
+    });
+  }
+
   function initLiveStats() {
     if (!doc.getElementById("apLiveStatsPage")) {
       return;
     }
+
+    initSectionCollapseControls();
+    initCompactToggle();
+    initRuntimeMatrixControls();
+    initChecksControls();
+    initStatsSeriesControls();
+    updateLiveStickyOffsets();
+    window.addEventListener("resize", updateLiveStickyOffsets);
 
     var refreshBtn = doc.getElementById("apLiveRefreshBtn");
     if (refreshBtn) {

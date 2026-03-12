@@ -22,6 +22,7 @@ $routeHref = static function (string $slug = '') use ($basePath): string {
     }
     return ($basePath === '' ? '' : $basePath) . '/' . $clean;
 };
+$monitoringActive = in_array($activePage, ['logs', 'live-stats'], true);
 ?>
 <!doctype html>
 <html lang="en">
@@ -70,11 +71,34 @@ $routeHref = static function (string $slug = '') use ($basePath): string {
 
     <nav class="ap-nav" aria-label="Sidebar navigation">
       <div class="ap-nav-group">
-        <p class="ap-nav-group-title">Main</p>
+        <p class="ap-nav-group-title">LocalDevStack</p>
         <a class="ap-nav-link <?= $activePage === 'dashboard' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('dashboard'), ENT_QUOTES, 'UTF-8') ?>">
           <i class="bi bi-speedometer2"></i>
           <span>Dashboard</span>
         </a>
+        <div class="ap-nav-tree <?= $monitoringActive ? 'is-open' : '' ?>">
+          <button
+            class="ap-nav-link ap-nav-link-toggle <?= $monitoringActive ? 'active' : '' ?>"
+            type="button"
+            data-nav-toggle="monitoring"
+            aria-expanded="<?= $monitoringActive ? 'true' : 'false' ?>"
+            aria-controls="apNavMonitoringSubmenu"
+          >
+            <i class="bi bi-binoculars"></i>
+            <span>Monitoring</span>
+            <i class="bi bi-chevron-down ap-nav-caret" aria-hidden="true"></i>
+          </button>
+          <div id="apNavMonitoringSubmenu" class="ap-nav-submenu <?= $monitoringActive ? 'is-open' : '' ?>" aria-label="Monitoring submenu">
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'logs' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('logs'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-file-earmark-text"></i>
+              <span>Logs</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'live-stats' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('live-stats'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-activity"></i>
+              <span>Live Stats</span>
+            </a>
+          </div>
+        </div>
         <button class="ap-nav-link ap-nav-link-muted" type="button" disabled>
           <i class="bi bi-hdd-stack"></i>
           <span>Containers</span>
@@ -87,22 +111,6 @@ $routeHref = static function (string $slug = '') use ($basePath): string {
         </button>
       </div>
 
-      <div class="ap-nav-group">
-        <p class="ap-nav-group-title">Tools</p>
-        <a class="ap-nav-link <?= $activePage === 'logs' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('logs'), ENT_QUOTES, 'UTF-8') ?>">
-          <i class="bi bi-file-earmark-text"></i>
-          <span>Logs</span>
-        </a>
-        <a class="ap-nav-link <?= $activePage === 'live-stats' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('live-stats'), ENT_QUOTES, 'UTF-8') ?>">
-          <i class="bi bi-activity"></i>
-          <span>Live Stats</span>
-        </a>
-        <button class="ap-nav-link ap-nav-link-muted" type="button" disabled>
-          <i class="bi bi-gear"></i>
-          <span>Settings</span>
-          <span class="ap-nav-chip">Soon</span>
-        </button>
-      </div>
     </nav>
 
     <div class="ap-sidebar-foot">

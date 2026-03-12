@@ -54,88 +54,45 @@ declare(strict_types=1);
       </div>
     </article>
   </div>
-</section>
-
-<section class="row g-3 mt-1">
-  <div class="col-12 col-lg-6">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Checks Summary</h4>
-          <p class="ap-card-sub mb-0">System + project check overview</p>
-        </div>
-      </header>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="card ap-card ap-kpi-card h-100">
       <div class="card-body">
-        <ul class="ap-live-list list-unstyled mb-3" id="apLiveChecksSummary"></ul>
-        <ul class="ap-live-list list-unstyled mb-0" id="apLiveChecksDetails"></ul>
+        <p class="ap-kpi-label mb-1">System Checks</p>
+        <h3 class="ap-kpi-value mb-1" id="apLiveSystemChecks">-</h3>
+        <p class="ap-kpi-meta mb-2">Total checks</p>
+        <div class="ap-kpi-capsules" id="apLiveSystemChecksCaps"></div>
       </div>
     </article>
   </div>
-  <div class="col-12 col-lg-6">
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="card ap-card ap-kpi-card h-100">
+      <div class="card-body">
+        <p class="ap-kpi-label mb-1">Project Checks</p>
+        <h3 class="ap-kpi-value mb-1" id="apLiveProjectChecks">-</h3>
+        <p class="ap-kpi-meta mb-2">Total checks</p>
+        <div class="ap-kpi-capsules" id="apLiveProjectChecksCaps"></div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section class="row g-3 mt-1">
+  <div class="col-12">
     <article class="card ap-card h-100">
       <header class="card-header ap-card-head">
         <div>
           <h4 class="ap-card-title mb-1">URLs</h4>
-          <p class="ap-card-sub mb-0">Resolved endpoints</p>
+          <p class="ap-card-sub mb-0">Resolved endpoints and probe status</p>
         </div>
       </header>
       <div class="card-body">
-        <ul class="ap-live-list list-unstyled mb-0" id="apLiveUrlList"></ul>
-      </div>
-    </article>
-  </div>
-</section>
-
-<section class="row g-3 mt-1">
-  <div class="col-12 col-xl-4">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Internal Ports</h4>
-          <p class="ap-card-sub mb-0">Values from <code>core.ports</code></p>
-        </div>
-      </header>
-      <div class="card-body">
-        <ul class="ap-live-list list-unstyled mb-0" id="apLivePortList"></ul>
-      </div>
-    </article>
-  </div>
-  <div class="col-12 col-xl-4">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Service Ports</h4>
-          <p class="ap-card-sub mb-0">Ports mapped per container</p>
-        </div>
-      </header>
-      <div class="card-body">
-        <ul class="ap-live-list list-unstyled mb-0" id="apLivePortContainerList"></ul>
-      </div>
-    </article>
-  </div>
-  <div class="col-12 col-xl-4">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Drifts</h4>
-          <p class="ap-card-sub mb-0">Summary and detailed drift outputs</p>
-        </div>
-      </header>
-      <div class="card-body">
-        <ul class="ap-live-list list-unstyled mb-0" id="apLiveDriftList"></ul>
-        <div class="row g-3 mt-1">
-          <div class="col-12 col-md-4">
-            <h5 class="ap-card-title mb-2">Orphan Containers</h5>
-            <ul class="ap-live-list list-unstyled mb-0" id="apLiveDriftOrphans"></ul>
-          </div>
-          <div class="col-12 col-md-4">
-            <h5 class="ap-card-title mb-2">Labeled Volumes</h5>
-            <ul class="ap-live-list list-unstyled mb-0" id="apLiveDriftLabeledVolumes"></ul>
-          </div>
-          <div class="col-12 col-md-4">
-            <h5 class="ap-card-title mb-2">Unused Labeled Volumes</h5>
-            <ul class="ap-live-list list-unstyled mb-0" id="apLiveDriftUnusedVolumes"></ul>
-          </div>
+        <div class="table-responsive">
+          <table class="table ap-table mb-0">
+            <thead><tr><th>URL</th><th class="text-end">Status</th><th class="text-end">Time</th></tr></thead>
+            <tbody id="apLiveUrlProbeRows">
+            <tr><td colspan="3" class="text-center ap-page-sub py-4">Loading...</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </article>
@@ -148,112 +105,11 @@ declare(strict_types=1);
       <header class="card-header ap-card-head">
         <div>
           <h4 class="ap-card-title mb-1">Problems</h4>
-          <p class="ap-card-sub mb-0">Current reported problems list</p>
+          <p class="ap-card-sub mb-0">Problems and recent errors</p>
         </div>
       </header>
       <div class="card-body">
-        <ul class="ap-live-list list-unstyled mb-0" id="apLiveProblemList"></ul>
-      </div>
-    </article>
-  </div>
-</section>
-
-<section class="row g-3 mt-1">
-  <div class="col-12 col-xl-6">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">System Tests</h4>
-          <p class="ap-card-sub mb-0">Checks: <code>system.tests</code></p>
-        </div>
-      </header>
-      <div class="table-responsive">
-        <table class="table ap-table mb-0">
-          <thead><tr><th>Test</th><th class="text-end">State</th><th>Detail</th></tr></thead>
-          <tbody id="apLiveSystemTestsRows">
-          <tr><td colspan="3" class="text-center ap-page-sub py-4">Loading...</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </article>
-  </div>
-  <div class="col-12 col-xl-6">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Project Containers Check</h4>
-          <p class="ap-card-sub mb-0">Checks: <code>project.tests.containers</code></p>
-        </div>
-      </header>
-      <div class="card-body">
-        <ul class="ap-live-list list-unstyled mb-0" id="apLiveProjectContainersList"></ul>
-      </div>
-    </article>
-  </div>
-</section>
-
-<section class="row g-3 mt-1">
-  <div class="col-12 col-xl-6">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Project Artifacts Check</h4>
-          <p class="ap-card-sub mb-0">Checks: <code>project.tests.artifacts</code></p>
-        </div>
-      </header>
-      <div class="card-body">
-        <ul class="ap-live-list list-unstyled mb-0" id="apLiveProjectArtifactsList"></ul>
-      </div>
-    </article>
-  </div>
-  <div class="col-12 col-xl-6">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Project Mounts Check</h4>
-          <p class="ap-card-sub mb-0">Checks: <code>project.tests.mounts</code></p>
-        </div>
-      </header>
-      <div class="table-responsive">
-        <table class="table ap-table mb-0">
-          <thead><tr><th>Key</th><th>Path</th><th class="text-end">State</th><th>Flag</th></tr></thead>
-          <tbody id="apLiveProjectMountRows">
-          <tr><td colspan="4" class="text-center ap-page-sub py-4">Loading...</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </article>
-  </div>
-</section>
-
-<section class="row g-3 mt-1">
-  <div class="col-12 col-xxl-8">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Top CPU Consumers</h4>
-          <p class="ap-card-sub mb-0">Top 5 by CPU usage</p>
-        </div>
-      </header>
-      <div class="card-body">
-        <div class="ap-chart-wrap">
-          <canvas id="apLiveCpuChart" height="120" aria-label="Top CPU chart"></canvas>
-        </div>
-      </div>
-    </article>
-  </div>
-  <div class="col-12 col-xxl-4">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Top Memory Consumers</h4>
-          <p class="ap-card-sub mb-0">Top 5 by memory usage</p>
-        </div>
-      </header>
-      <div class="card-body">
-        <div class="ap-chart-wrap ap-chart-sm">
-          <canvas id="apLiveMemoryChart" height="190" aria-label="Top memory chart"></canvas>
-        </div>
+        <ul class="ap-live-list list-unstyled mb-0" id="apLiveIssueFeed"></ul>
       </div>
     </article>
   </div>
@@ -315,19 +171,36 @@ declare(strict_types=1);
     <article class="card ap-card h-100">
       <header class="card-header ap-card-head">
         <div>
-          <h4 class="ap-card-title mb-1">Containers + Network + Top Consumers</h4>
-          <p class="ap-card-sub mb-0">Merged container status, top consumer CPU/memory, and network matrix</p>
+          <h4 class="ap-card-title mb-1">Project Health Snapshot</h4>
+          <p class="ap-card-sub mb-0">System tests, project checks, mounts, and drift indicators in one place</p>
         </div>
       </header>
-      <div class="table-responsive">
-        <table class="table ap-table mb-0">
-          <thead id="apLiveNetworkMatrixHead">
-          <tr><th>Container</th><th>Service</th><th>State</th><th>Health</th><th class="text-end">CPU %</th><th class="text-end">Mem Usage</th><th class="text-end">Networks</th></tr>
-          </thead>
-          <tbody id="apLiveNetworkMatrixRows">
-          <tr><td colspan="7" class="text-center ap-page-sub py-4">Loading...</td></tr>
-          </tbody>
-        </table>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <h5 class="ap-card-title mb-2 ap-title-with-state"><span>System Tests</span><span id="apLiveSystemTestsStateIcon"></span></h5>
+            <div class="table-responsive">
+              <table class="table ap-table mb-0">
+                <thead><tr><th>Test</th><th class="text-end">State</th><th>Detail</th></tr></thead>
+                <tbody id="apLiveSystemTestsRows">
+                <tr><td colspan="3" class="text-center ap-page-sub py-4">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="col-12 col-xl-4">
+            <h5 class="ap-card-title mb-2 ap-title-with-state"><span>Containers</span><span id="apLiveProjectContainersStateIcon"></span></h5>
+            <ul class="ap-live-list list-unstyled mb-0" id="apLiveProjectContainersList"></ul>
+          </div>
+          <div class="col-12 col-xl-4">
+            <h5 class="ap-card-title mb-2 ap-title-with-state"><span>Artifacts</span><span id="apLiveProjectArtifactsStateIcon"></span></h5>
+            <ul class="ap-live-list list-unstyled mb-0" id="apLiveProjectArtifactsList"></ul>
+          </div>
+          <div class="col-12 col-xl-4">
+            <h5 class="ap-card-title mb-2 ap-title-with-state"><span>Project Mounts Check</span><span id="apLiveProjectMountsStateIcon"></span></h5>
+            <ul class="ap-live-list list-unstyled mb-0" id="apLiveProjectMountList"></ul>
+          </div>
+        </div>
       </div>
     </article>
   </div>
@@ -338,37 +211,19 @@ declare(strict_types=1);
     <article class="card ap-card h-100">
       <header class="card-header ap-card-head">
         <div>
-          <h4 class="ap-card-title mb-1">Probes + Recent Errors</h4>
-          <p class="ap-card-sub mb-0">Probe response and error feed</p>
+          <h4 class="ap-card-title mb-1">Container Runtime Matrix</h4>
+          <p class="ap-card-sub mb-0">Container identity, health, ports, CPU/memory usage, and network connectivity</p>
         </div>
       </header>
       <div class="table-responsive">
         <table class="table ap-table mb-0">
-          <thead><tr><th>Probe URL</th><th class="text-end">Status</th><th class="text-end">Time</th></tr></thead>
-          <tbody id="apLiveProbeRows">
-          <tr><td colspan="3" class="text-center ap-page-sub py-4">Loading...</td></tr>
+          <thead id="apLiveNetworkMatrixHead">
+          <tr><th>Container / Service</th><th>State</th><th>Ports</th><th class="text-end">CPU %</th><th class="text-end">Mem Usage</th><th class="text-end">Networks</th></tr>
+          </thead>
+          <tbody id="apLiveNetworkMatrixRows">
+          <tr><td colspan="6" class="text-center ap-page-sub py-4">Loading...</td></tr>
           </tbody>
         </table>
-      </div>
-      <div class="card-body pt-2">
-        <p class="ap-page-sub mb-2">Recent Errors</p>
-        <ul class="ap-live-list list-unstyled mb-0" id="apLiveRecentErrors"></ul>
-      </div>
-    </article>
-  </div>
-</section>
-
-<section class="row g-3 mt-1">
-  <div class="col-12">
-    <article class="card ap-card">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Raw status --json Payload</h4>
-          <p class="ap-card-sub mb-0">Full response for parity checks</p>
-        </div>
-      </header>
-      <div class="card-body">
-        <pre id="apLiveRawJson" class="ap-live-raw mb-0">Loading...</pre>
       </div>
     </article>
   </div>

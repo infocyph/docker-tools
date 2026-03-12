@@ -385,7 +385,7 @@ status --json | jq .
 Human output sections:
 
 * Core: `Project`, `Profiles`, `Containers`, `Ports`, `URLs`
-* Diagnostics: `Problems`, `Top consumers`, `Stats`, `Disk`, `Volumes`, `Networks`, `Probes`, `Recent errors`, `Drift`
+* Diagnostics: `Problems`, `Container runtime` (`Top consumers` + `Stats`), `Disk`, `Volumes`, `Networks`, `Probes`, `Recent errors`, `Drift`
 * `Checks`:
   * `System test`: internet reachability, egress IP, memory, docker runtime
   * `Project containers`: container health summary
@@ -395,8 +395,8 @@ Human output sections:
 `--json` shape:
 
 * Top-level: `generated_at`, `full`, `core`, `sections`
-* `core`: project summary, containers, port summaries, URLs
-* `sections`: `problems`, `top_consumers`, `stats`, `disk`, `volumes`, `networks`, `probes`, `recent_errors`, `drift`, `checks`
+* `core`: project metadata, running summary, port summaries, URLs
+* `sections`: `problems`, `containers` (merged `core` + `top_consumers` + `stats`), `disk`, `volumes`, `networks`, `probes`, `recent_errors`, `drift`, `checks`
 
 Helpful env overrides:
 

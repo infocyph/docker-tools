@@ -50,7 +50,7 @@ final class StatusSnapshot
      */
     private function buildSummary(array $payload): array
     {
-        $containers = (array)($payload['core']['containers'] ?? []);
+        $containers = (array)($payload['sections']['containers']['core']['items'] ?? []);
         $healthy = 0;
         $unhealthy = 0;
         $noHealth = 0;
@@ -78,10 +78,10 @@ final class StatusSnapshot
             'problem_count' => (int)($payload['sections']['problems']['count'] ?? 0),
             'url_count' => count((array)($payload['core']['urls'] ?? [])),
             'port_count' => count((array)($payload['core']['ports'] ?? [])),
-            'system_checks' => (array)($payload['checks']['system']['summary'] ?? []),
-            'project_checks' => (array)($payload['checks']['project']['summary'] ?? []),
+            'system_checks' => (array)($payload['sections']['checks']['system']['summary'] ?? []),
+            'project_checks' => (array)($payload['sections']['checks']['project']['summary'] ?? []),
             'build_cache_reclaimable' => (string)($payload['sections']['drift']['build_cache_reclaimable'] ?? ''),
-            'egress_ip' => (string)($payload['checks']['system']['tests']['egress_ip']['value'] ?? ''),
+            'egress_ip' => (string)($payload['sections']['checks']['system']['tests']['egress_ip']['value'] ?? ''),
         ];
     }
 

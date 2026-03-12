@@ -1563,6 +1563,72 @@ _status_json_stats() {
   printf ']}'
 }
 
+_status_json_containers_core() {
+  local -a cids=() ctrs=()
+  mapfile -t cids < <(_status_project_cids)
+  if ((${#cids[@]})); then
+    mapfile -t ctrs < <(
+      docker inspect -f '{{.Name}}|{{ index .Config.Labels "com.docker.compose.service" }}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+        "${cids[@]}" 2>/dev/null |
+        sed 's#^/##' |
+        sed '/^[[:space:]]*$/d' |
+        sort
+    )
+  fi
+
+  local total running
+  total=${#ctrs[@]}
+  running=0
+  if ((total)); then
+    local line _n _svc st _h
+    for line in "${ctrs[@]}"; do
+      IFS='|' read -r _n _svc st _h <<<"$line"
+      [[ "$st" == "running" ]] && ((++running))
+    done
+  fi
+
+  printf '{'
+  printf '"summary":{"running":%s,"total":%s},' "$running" "$total"
+  printf '"items":['
+  local first=1 line name svc state health health_disp
+  for line in "${ctrs[@]}"; do
+    IFS='|' read -r name svc state health <<<"$line"
+    ((first)) || printf ","
+    first=0
+    health_disp="${health:-}"
+    [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp="-"
+    local health_icon="!"
+    if [[ "$health_disp" == "healthy" ]]; then
+      health_icon="✓"
+    elif [[ "$health_disp" == "unhealthy" ]]; then
+      health_icon="×"
+    fi
+    printf '{'
+    printf '"name":"%s",' "$(_json_escape "$name")"
+    printf '"service":"%s",' "$(_json_escape "$svc")"
+    printf '"state":"%s",' "$(_json_escape "$state")"
+    printf '"health":"%s",' "$(_json_escape "$health_disp")"
+    printf '"health_icon":"%s"' "$(_json_escape "$health_icon")"
+    printf '}'
+  done
+  printf ']}'
+}
+
+_status_json_containers_merged() {
+  local stats_svc="${1:-}"
+  local core_json top_consumers_json stats_json
+
+  core_json="$(_status_json_containers_core 2>/dev/null || printf '{"summary":{"running":0,"total":0},"items":[]}')"
+  top_consumers_json="$(_status_json_top_consumers 2>/dev/null || printf '{"all":[],"by_mem":[],"by_cpu":[]}')"
+  stats_json="$(_status_json_stats "$stats_svc" 2>/dev/null || printf '{"service_filter":"","items":[]}')"
+
+  printf '{'
+  printf '"core":%s,' "$core_json"
+  printf '"top_consumers":%s,' "$top_consumers_json"
+  printf '"stats":%s' "$stats_json"
+  printf '}'
+}
+
 _status_json_disk() {
   local -a rows=()
   mapfile -t rows < <(
@@ -2283,14 +2349,13 @@ _status_json_checks() {
 _status_full_json() {
   local stats_svc="${1:-}"
   local generated_at core_json
-  local problems_json top_consumers_json stats_json disk_json volumes_json
+  local problems_json containers_json disk_json volumes_json
   local networks_json probes_json recent_errors_json drift_json checks_json
 
   generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
   core_json="$(_status_core 1 0 2>/dev/null || printf '{}')"
   problems_json="$(_status_json_problems 2>/dev/null || printf '{"count":0,"items":[]}')"
-  top_consumers_json="$(_status_json_top_consumers 2>/dev/null || printf '{"all":[],"by_mem":[],"by_cpu":[]}')"
-  stats_json="$(_status_json_stats "$stats_svc" 2>/dev/null || printf '{"service_filter":"","items":[]}')"
+  containers_json="$(_status_json_containers_merged "$stats_svc" 2>/dev/null || printf '{"core":{"summary":{"running":0,"total":0},"items":[]},"top_consumers":{"all":[],"by_mem":[],"by_cpu":[]},"stats":{"service_filter":"","items":[]}}')"
   disk_json="$(_status_json_disk 2>/dev/null || printf '{"items":[]}')"
   volumes_json="$(_status_json_volumes 2>/dev/null || printf '{"size_table_available":false,"items":[]}')"
   networks_json="$(_status_json_networks 2>/dev/null || printf '{"networks":[],"container_ips":[],"matrix":{"columns":[],"rows":[]}}')"
@@ -2305,8 +2370,7 @@ _status_full_json() {
   printf '"core":%s,' "${core_json}"
   printf '"sections":{'
   printf '"problems":%s,' "${problems_json}"
-  printf '"top_consumers":%s,' "${top_consumers_json}"
-  printf '"stats":%s,' "${stats_json}"
+  printf '"containers":%s,' "${containers_json}"
   printf '"disk":%s,' "${disk_json}"
   printf '"volumes":%s,' "${volumes_json}"
   printf '"networks":%s,' "${networks_json}"
@@ -2413,26 +2477,8 @@ _status_core() {
     printf "\"profiles\":\"%s\"," "$(_json_escape "$profiles")"
     printf "\"summary\":{\"running\":%s,\"total\":%s}," "$running" "$total"
 
-    printf "\"containers\":["
-    local first=1 line name svc state health
-    for line in "${ctrs[@]}"; do
-      IFS='|' read -r name svc state health <<<"$line"
-      ((first)) || printf ","
-      first=0
-      local health_disp="${health:-}"
-      [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp="-"
-      printf "{"
-      printf "\"name\":\"%s\"," "$(_json_escape "$name")"
-      printf "\"service\":\"%s\"," "$(_json_escape "$svc")"
-      printf "\"state\":\"%s\"," "$(_json_escape "$state")"
-      printf "\"health\":\"%s\"," "$(_json_escape "$health_disp")"
-      printf "\"health_icon\":\"%s\"" "$(_json_escape "$(_health_icon "$health_disp")")"
-      printf "}"
-    done
-    printf "],"
-
     printf "\"ports\":["
-    first=1
+    local first=1
     local p
     for p in "${port_summary[@]}"; do
       [[ -n "$p" ]] || continue
@@ -2579,10 +2625,11 @@ cmd_status() {
   printf "\n%bProblems:%b\n" "$CYAN" "$NC"
   _status_show_problems || true
 
-  printf "\n%bTop consumers:%b\n" "$CYAN" "$NC"
+  printf "\n%bContainer runtime:%b\n" "$CYAN" "$NC"
+  printf "  %bTop consumers:%b\n" "$BOLD" "$NC"
   _status_show_top_consumers || true
 
-  printf "\n%bStats:%b\n" "$CYAN" "$NC"
+  printf "\n  %bStats:%b\n" "$BOLD" "$NC"
   _status_show_stats "${1:-}" || true
 
   printf "\n%bDisk:%b\n" "$CYAN" "$NC"

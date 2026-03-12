@@ -469,6 +469,17 @@ body.ap-page {
   color: var(--ap-muted);
 }
 
+.ap-kpi-capsules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ap-kpi-capsules .ap-badge {
+  font-size: 10px;
+  padding: 3px 8px;
+}
+
 .ap-kpi-trend {
   margin-right: 4px;
 }
@@ -543,6 +554,22 @@ body.ap-page {
   padding: 14px 16px;
 }
 
+.ap-url-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ap-url-visit {
+  color: var(--ap-muted);
+  text-decoration: none;
+  line-height: 1;
+}
+
+.ap-url-visit:hover {
+  color: var(--ap-primary);
+}
+
 .ap-badge {
   display: inline-flex;
   align-items: center;
@@ -600,6 +627,128 @@ body.ap-page {
   padding: 2px 2px 2px 2px;
 }
 
+.ap-port-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ap-port-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+  padding: 4px 8px;
+  border: 1px solid var(--ap-border);
+  white-space: nowrap;
+  margin: 2px 4px 2px 0;
+}
+
+.ap-port-badge-internal {
+  color: var(--ap-primary);
+  background: var(--ap-primary-soft);
+}
+
+.ap-port-badge-exposed {
+  color: var(--ap-success);
+  background: var(--ap-success-soft);
+}
+
+.ap-port-badge-mapped {
+  color: var(--ap-warning);
+  background: var(--ap-warning-soft);
+}
+
+.ap-port-empty {
+  font-size: 12px;
+  color: var(--ap-muted);
+}
+
+.ap-flag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ap-flag-chip {
+  gap: 3px;
+}
+
+.ap-flag-chip-kv {
+  color: var(--ap-primary);
+  background: var(--ap-primary-soft);
+}
+
+.ap-flag-chip-key {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  opacity: 0.9;
+}
+
+.ap-flag-chip-sep {
+  opacity: 0.65;
+}
+
+.ap-flag-chip-val {
+  font-weight: 800;
+}
+
+.ap-system-test-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.ap-title-with-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ap-title-state-icon,
+.ap-check-state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: help;
+}
+
+.ap-system-test-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ap-system-detail-chip {
+  color: var(--ap-primary);
+  background: var(--ap-primary-soft);
+}
+
+.ap-system-detail-chip-label {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  opacity: 0.9;
+}
+
+.ap-system-detail-chip-sep {
+  opacity: 0.65;
+}
+
+.ap-system-detail-chip-val {
+  font-weight: 800;
+}
+
+.ap-system-detail-text {
+  font-size: 12px;
+  color: var(--ap-muted);
+}
+
 .ap-live-raw {
   margin: 0;
   max-height: 380px;
@@ -631,6 +780,74 @@ body.ap-page {
   font-size: 10px;
   letter-spacing: normal;
   text-transform: none;
+}
+
+.ap-matrix-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ap-matrix-name {
+  display: block;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.ap-matrix-service {
+  display: block;
+  color: var(--ap-muted);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.ap-matrix-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ap-matrix-ports {
+  display: grid;
+  gap: 4px;
+}
+
+.ap-matrix-port-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ap-matrix-port-values {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ap-state-icon,
+.ap-health-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: help;
+}
+
+.ap-state-icon-spin {
+  animation: ap-spin 0.9s linear infinite;
+}
+
+.ap-health-icon-pulse {
+  animation: ap-health-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ap-health-pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.7; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 .ap-spin {

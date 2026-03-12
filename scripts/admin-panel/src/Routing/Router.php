@@ -25,9 +25,9 @@ final class Router
     {
         return new self(
             [
-                'dashboard' => ['view' => 'dashboard', 'title' => 'Admin Panel'],
-                'logs' => ['view' => 'logs', 'title' => 'Logs - Admin Panel'],
-                'live-stats' => ['view' => 'live_stats', 'title' => 'Live Stats - Admin Panel'],
+                'dashboard' => ['view' => 'dashboard', 'title' => 'Operations Overview | Admin Panel'],
+                'logs' => ['view' => 'logs', 'title' => 'Log Streams | Admin Panel'],
+                'live-stats' => ['view' => 'live_stats', 'title' => 'Live Stack Telemetry | Admin Panel'],
             ],
             [
                 'live_stats' => 'live-stats',

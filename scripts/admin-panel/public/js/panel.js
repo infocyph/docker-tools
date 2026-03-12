@@ -19,6 +19,7 @@
   var LIVE_SECTIONS_KEY = "ap_live_sections_collapsed";
   var LIVE_COMPACT_KEY = "ap_live_compact";
   var LIVE_STATS_SERIES_KEY = "ap_live_stats_series";
+  var LIVE_REFRESH_INTERVAL_MS = 30000;
   var desktopMql = window.matchMedia("(min-width: 992px)");
 
   var basePath = (body && body.getAttribute("data-ap-base")) || "";
@@ -28,7 +29,12 @@
   var liveStatsApiUrl = basePath + "/api/live-stats";
 
   var livePayload = null;
-  var liveTimer = null;
+  var livePollTimer = null;
+  var liveCountdownTimer = null;
+  var liveNextRefreshAt = 0;
+  var liveRefreshIntervalMs = LIVE_REFRESH_INTERVAL_MS;
+  var liveLastGeneratedAt = "";
+  var liveFetchInFlight = false;
   var charts = [];
   var liveMatrixDetailMap = {};
 
@@ -222,15 +228,126 @@
   }
 
   function setLiveLoading(isLoading) {
+    liveFetchInFlight = !!isLoading;
     var btn = doc.getElementById("apLiveRefreshBtn");
-    if (!btn) {
+    if (btn) {
+      btn.disabled = !!isLoading;
+      var icon = btn.querySelector("i");
+      if (icon) {
+        icon.className = isLoading ? "bi bi-arrow-repeat ap-spin me-1" : "bi bi-arrow-repeat me-1";
+      }
+    }
+    updateLiveRefreshMeta();
+  }
+
+  function padTwo(value) {
+    var n = Math.max(0, Number(value) || 0);
+    return n < 10 ? "0" + String(n) : String(n);
+  }
+
+  function formatCountdown(valueMs) {
+    var totalSeconds = Math.max(0, Math.ceil((Number(valueMs) || 0) / 1000));
+    var minutes = Math.floor(totalSeconds / 60);
+    var seconds = totalSeconds % 60;
+    return padTwo(minutes) + ":" + padTwo(seconds);
+  }
+
+  function formatLiveUpdatedAt(value) {
+    var raw = String(value || "").trim();
+    if (!raw) {
+      return "-";
+    }
+    var parsed = new Date(raw);
+    if (!parsed || !isFinite(parsed.getTime())) {
+      return raw;
+    }
+    try {
+      return parsed.toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false
+      });
+    } catch (e) {
+      return parsed.toISOString();
+    }
+  }
+
+  function clearNextLiveFetch() {
+    if (livePollTimer) {
+      window.clearTimeout(livePollTimer);
+      livePollTimer = null;
+    }
+  }
+
+  function scheduleNextLiveFetch(delayMs) {
+    clearNextLiveFetch();
+    var wait = Math.max(0, Number(delayMs) || 0);
+    liveRefreshIntervalMs = wait > 0 ? wait : LIVE_REFRESH_INTERVAL_MS;
+    liveNextRefreshAt = wait > 0 ? Date.now() + wait : 0;
+    updateLiveRefreshMeta();
+    if (wait > 0) {
+      livePollTimer = window.setTimeout(fetchLiveStats, wait);
+    }
+  }
+
+  function ensureLiveCountdownTicker() {
+    if (liveCountdownTimer) {
       return;
     }
-    btn.disabled = !!isLoading;
-    var icon = btn.querySelector("i");
-    if (icon) {
-      icon.className = isLoading ? "bi bi-arrow-repeat ap-spin me-1" : "bi bi-arrow-repeat me-1";
+    liveCountdownTimer = window.setInterval(updateLiveRefreshMeta, 250);
+  }
+
+  function updateLiveRefreshMeta() {
+    var statusEl = doc.getElementById("apLiveUpdatedAt");
+    if (!statusEl) {
+      return;
     }
+
+    var wrap = doc.getElementById("apLiveRefreshMeta");
+    var barEl = doc.getElementById("apLiveCountdownBar");
+    var lastEl = doc.getElementById("apLiveLastUpdated");
+    var hasNextRefresh = liveNextRefreshAt > 0;
+    var remainingMs = hasNextRefresh ? Math.max(0, liveNextRefreshAt - Date.now()) : 0;
+
+    if (liveFetchInFlight) {
+      statusEl.textContent = "Refreshing live stats...";
+    } else if (hasNextRefresh) {
+      statusEl.textContent = "Next refresh in " + formatCountdown(remainingMs);
+    } else {
+      statusEl.textContent = "Next refresh in --:--";
+    }
+
+    if (lastEl) {
+      lastEl.textContent = liveLastGeneratedAt
+        ? "Last update " + formatLiveUpdatedAt(liveLastGeneratedAt)
+        : (liveFetchInFlight ? "Waiting for response..." : "Waiting for first snapshot...");
+    }
+
+    if (wrap) {
+      wrap.classList.toggle("is-loading", liveFetchInFlight);
+    }
+
+    if (!barEl) {
+      return;
+    }
+
+    if (liveFetchInFlight) {
+      barEl.style.width = "38%";
+      return;
+    }
+
+    if (!hasNextRefresh || liveRefreshIntervalMs <= 0) {
+      barEl.style.width = "0%";
+      return;
+    }
+
+    var elapsedMs = liveRefreshIntervalMs - remainingMs;
+    var percent = Math.max(0, Math.min(100, (elapsedMs / liveRefreshIntervalMs) * 100));
+    barEl.style.width = percent.toFixed(2) + "%";
   }
 
   function updateLiveStickyOffsets() {
@@ -704,10 +821,9 @@
     return '<div class="ap-flag-chips">' + tokens.map(function (token) {
       if (token.type === "kv") {
         return ""
-          + '<span class="ap-badge ap-flag-chip ap-flag-chip-kv">'
-          + '  <span class="ap-flag-chip-key">' + escapeHtml(token.key || "-") + "</span>"
-          + '  <span class="ap-flag-chip-sep">=</span>'
-          + '  <span class="ap-flag-chip-val">' + escapeHtml(token.value || "-") + "</span>"
+          + '<span class="ap-kv-group ap-flag-chip-kv">'
+          + '  <span class="ap-kv-group-key">' + escapeHtml(token.key || "-") + "</span>"
+          + '  <span class="ap-kv-group-val">' + escapeHtml(token.value || "-") + "</span>"
           + "</span>";
       }
       return '<span class="ap-badge ap-flag-chip ' + mountFlagWordBadgeClass(token.value) + '">' + escapeHtml(token.value || "-") + "</span>";
@@ -721,10 +837,9 @@
       return '<span class="ap-badge ' + cls + '">' + safeValue + "</span>";
     }
     return ""
-      + '<span class="ap-badge ' + cls + '">'
-      + '  <span class="ap-system-detail-chip-label">' + escapeHtml(String(label)) + "</span>"
-      + '  <span class="ap-system-detail-chip-sep">=</span>'
-      + '  <span class="ap-system-detail-chip-val">' + safeValue + "</span>"
+      + '<span class="ap-kv-group ' + cls + '">'
+      + '  <span class="ap-kv-group-key">' + escapeHtml(String(label)) + "</span>"
+      + '  <span class="ap-kv-group-val">' + safeValue + "</span>"
       + "</span>";
   }
 
@@ -770,8 +885,9 @@
       }
     } else if (k === "egress_ip") {
       detailText = String(test.value || test.detail || "").trim();
+      detailText = detailText.replace(/^ip\s*=\s*/i, "");
       if (detailText) {
-        chips.push(renderSystemDetailChip("ip", detailText, "ap-system-detail-chip"));
+        chips.push(renderSystemDetailChip("", detailText, "ap-system-detail-chip"));
         detailText = "";
       }
     } else if (k === "memory") {
@@ -863,6 +979,38 @@
         return p ? (p.charAt(0).toUpperCase() + p.slice(1)) : "";
       })
       .join(" ");
+  }
+
+  function formatMountLabel(key) {
+    var raw = String(key || "").trim().toLowerCase();
+    if (!raw) {
+      return "-";
+    }
+
+    var tokens = raw.split("_").filter(function (part) { return part !== ""; });
+    var special = {
+      nginx: "Nginx",
+      apache: "Apache",
+      fpm: "FPM",
+      ssl: "SSL",
+      tls: "TLS",
+      dns: "DNS",
+      ip: "IP",
+      http: "HTTP",
+      https: "HTTPS",
+      ca: "CA",
+      rootca: "RootCA"
+    };
+
+    return tokens.map(function (part, index) {
+      if (part in special) {
+        return special[part];
+      }
+      if (index === 0) {
+        return part.charAt(0).toUpperCase() + part.slice(1);
+      }
+      return part;
+    }).join(" ");
   }
 
   function isSafeHttpUrl(url) {
@@ -970,7 +1118,7 @@
     rows.push({
       key: "labeled_volumes",
       state: "pass",
-      detail: renderSystemValueChips(labeled, "ap-live-state-no-health", "ap-live-state-no-health"),
+      detail: renderSystemValueChips(labeled, "ap-live-state-info", "ap-live-state-info"),
       detailText: labeled.join(" ")
     });
 
@@ -1144,7 +1292,7 @@
         value = numberFmt(item.entry_count);
       }
 
-      return '<li class="ap-live-item"><span>' + escapeHtml(item.key || "-") + '</span><span class="ap-live-item-value">' + escapeHtml(value) + "</span></li>";
+      return '<li class="ap-live-item"><span>' + escapeHtml(formatMountLabel(item.key || "-")) + '</span><span class="ap-live-item-value">' + escapeHtml(value) + "</span></li>";
     }).join("");
   }
 
@@ -1526,34 +1674,70 @@
       return;
     }
 
+    function probeStatusMeta(statusRaw) {
+      var raw = String(statusRaw || "").trim();
+      var statusNum = Number(raw);
+      if (!raw || raw === "-") {
+        return {
+          tone: "ap-live-state-no-health",
+          meaning: "No probe result has been reported yet."
+        };
+      }
+
+      if (isFinite(statusNum)) {
+        if (statusNum === 0) {
+          return {
+            tone: "ap-live-state-unhealthy",
+            meaning: "No HTTP response. Usually connection, DNS, TLS, or timeout failure."
+          };
+        }
+        if (statusNum >= 200 && statusNum < 300) {
+          return {
+            tone: "ap-live-state-running",
+            meaning: "Success response from endpoint."
+          };
+        }
+        if (statusNum >= 300 && statusNum < 400) {
+          return {
+            tone: "ap-live-state-info",
+            meaning: "Redirect response. Endpoint is reachable."
+          };
+        }
+        if (statusNum >= 400 && statusNum < 500) {
+          return {
+            tone: "ap-live-state-starting",
+            meaning: "Client-side HTTP error response."
+          };
+        }
+        if (statusNum >= 500) {
+          return {
+            tone: "ap-live-state-unhealthy",
+            meaning: "Server-side HTTP error response."
+          };
+        }
+      }
+
+      return {
+        tone: "ap-live-state-no-health",
+        meaning: "Non-numeric probe status."
+      };
+    }
+
     rowsEl.innerHTML = orderedUrls.map(function (url) {
       var probe = probeByUrl[url.toLowerCase()] || {};
       var statusRaw = String(probe.status_code || probe.status || "").trim();
       var timeRaw = String(probe.time_seconds || probe.time || "").trim();
       var statusText = statusRaw || "-";
       var timeText = timeRaw || "-";
-      var statusNum = Number(statusRaw);
-      var statusClass = "ap-live-state-no-health";
+      var meta = probeStatusMeta(statusRaw);
       var visitHtml = isSafeHttpUrl(url)
         ? ('<a class="ap-url-visit" href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer" title="Visit URL" aria-label="Visit URL"><i class="bi bi-box-arrow-up-right"></i></a>')
         : "";
 
-      if (isFinite(statusNum)) {
-        if (statusNum >= 200 && statusNum < 400) {
-          statusClass = "ap-live-state-running";
-        } else if (statusNum >= 400) {
-          statusClass = "ap-live-state-unhealthy";
-        } else {
-          statusClass = "ap-live-state-starting";
-        }
-      } else if (statusRaw === "-") {
-        statusClass = "ap-live-state-no-health";
-      }
-
       return ""
         + "<tr>"
         + '  <td><span class="ap-url-cell">' + escapeHtml(url) + visitHtml + "</span></td>"
-        + '  <td class="text-end"><span class="ap-badge ' + statusClass + '">' + escapeHtml(statusText) + "</span></td>"
+        + '  <td class="text-end"><span class="ap-badge ap-probe-status ' + meta.tone + '" title="' + escapeHtml(meta.meaning) + '" aria-label="' + escapeHtml(meta.meaning) + '">' + escapeHtml(statusText) + "</span></td>"
         + '  <td class="text-end">' + escapeHtml(timeText) + "</td>"
         + "</tr>";
     }).join("");
@@ -1623,7 +1807,10 @@
     }
     renderCheckCountCapsules("apLiveSystemChecksCaps", systemChecks);
     renderCheckCountCapsules("apLiveProjectChecksCaps", projectChecks);
-    setText("apLiveUpdatedAt", generatedAt ? "Updated: " + generatedAt : "Updated: -");
+    if (generatedAt) {
+      liveLastGeneratedAt = generatedAt;
+    }
+    updateLiveRefreshMeta();
 
     renderUrlProbeTable(payload);
     renderIssueFeed(payload);
@@ -2258,6 +2445,11 @@
       return;
     }
 
+    if (liveFetchInFlight) {
+      return;
+    }
+
+    clearNextLiveFetch();
     setLiveLoading(true);
     setLiveError("");
 
@@ -2286,6 +2478,7 @@
       })
       .finally(function () {
         setLiveLoading(false);
+        scheduleNextLiveFetch(LIVE_REFRESH_INTERVAL_MS);
       });
   }
 
@@ -2398,18 +2591,17 @@
     initStatsSeriesControls();
     updateLiveStickyOffsets();
     window.addEventListener("resize", updateLiveStickyOffsets);
+    ensureLiveCountdownTicker();
+    updateLiveRefreshMeta();
 
     var refreshBtn = doc.getElementById("apLiveRefreshBtn");
     if (refreshBtn) {
-      refreshBtn.addEventListener("click", fetchLiveStats);
+      refreshBtn.addEventListener("click", function () {
+        fetchLiveStats();
+      });
     }
 
     fetchLiveStats();
-
-    if (liveTimer) {
-      window.clearInterval(liveTimer);
-    }
-    liveTimer = window.setInterval(fetchLiveStats, 30000);
   }
 
   initTheme();

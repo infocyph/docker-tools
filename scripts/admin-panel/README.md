@@ -12,7 +12,9 @@ https://vue-demo.tailadmin.com/
 - `app/index.php` app kernel entry
 - `app/pages/*` layout and dashboard view
 - `src/*` namespaced routing/http/kernel classes
+- `public/css/core.css` minified compiled core stylesheet (TailAdmin baseline)
 - `public/css/panel.css` theme and component styles
+- `public/js/core.js` minified compiled core script bundle (TailAdmin baseline)
 - `public/js/panel.js` UI interactions (theme, sidebar, meters)
 
 ## Run locally

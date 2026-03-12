@@ -3,9 +3,21 @@ declare(strict_types=1);
 /** @var string $activePage */
 /** @var string $pageTitle */
 
-$assetVer = (int)@filemtime(__DIR__ . '/../../public/css/panel.css');
-if ($assetVer <= 0) {
-    $assetVer = time();
+$panelCssVer = (int)@filemtime(__DIR__ . '/../../public/css/panel.css');
+if ($panelCssVer <= 0) {
+    $panelCssVer = time();
+}
+$coreCssVer = (int)@filemtime(__DIR__ . '/../../public/css/core.css');
+if ($coreCssVer <= 0) {
+    $coreCssVer = $panelCssVer;
+}
+$panelJsVer = (int)@filemtime(__DIR__ . '/../../public/js/panel.js');
+if ($panelJsVer <= 0) {
+    $panelJsVer = $panelCssVer;
+}
+$coreJsVer = (int)@filemtime(__DIR__ . '/../../public/js/core.js');
+if ($coreJsVer <= 0) {
+    $coreJsVer = $panelJsVer;
 }
 
 $copyrightYear = (string)date('Y');
@@ -23,6 +35,10 @@ $routeHref = static function (string $slug = '') use ($basePath): string {
     return ($basePath === '' ? '' : $basePath) . '/' . $clean;
 };
 $monitoringActive = in_array($activePage, ['logs', 'live-stats'], true);
+$topbarPageTitle = trim((string)preg_replace('/\s*\|\s*Admin Panel\s*$/i', '', $pageTitle));
+if ($topbarPageTitle === '') {
+    $topbarPageTitle = $pageTitle;
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -49,7 +65,8 @@ $monitoringActive = in_array($activePage, ['logs', 'live-stats'], true);
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <link href="<?= htmlspecialchars($assetPrefix . '/public/css/panel.css?v=' . $assetVer, ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
+  <link href="<?= htmlspecialchars($assetPrefix . '/public/css/core.css?v=' . $coreCssVer, ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
+  <link href="<?= htmlspecialchars($assetPrefix . '/public/css/panel.css?v=' . $panelCssVer, ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
 </head>
 <body class="ap-page" data-ap-base="<?= htmlspecialchars($basePath, ENT_QUOTES, 'UTF-8') ?>">
 <div class="ap-shell">
@@ -57,10 +74,10 @@ $monitoringActive = in_array($activePage, ['logs', 'live-stats'], true);
     <div class="ap-sidebar-head">
       <a class="ap-brand" href="<?= htmlspecialchars($routeHref('dashboard'), ENT_QUOTES, 'UTF-8') ?>" aria-label="Admin panel home">
         <span class="ap-brand-mark">
-          <i class="bi bi-grid-1x2-fill"></i>
+          <i class="bi bi-boxes"></i>
         </span>
         <span class="ap-brand-copy">
-          <span class="ap-brand-eyebrow">Local Dev Stack</span>
+          <span class="ap-brand-eyebrow">TailAdmin Sync</span>
           <strong class="ap-brand-title">Admin Panel</strong>
         </span>
       </a>
@@ -71,7 +88,7 @@ $monitoringActive = in_array($activePage, ['logs', 'live-stats'], true);
 
     <nav class="ap-nav" aria-label="Sidebar navigation">
       <div class="ap-nav-group">
-        <p class="ap-nav-group-title">LocalDevStack</p>
+        <p class="ap-nav-group-title">Main Menu</p>
         <a class="ap-nav-link <?= $activePage === 'dashboard' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('dashboard'), ENT_QUOTES, 'UTF-8') ?>">
           <i class="bi bi-speedometer2"></i>
           <span>Dashboard</span>
@@ -110,6 +127,17 @@ $monitoringActive = in_array($activePage, ['logs', 'live-stats'], true);
           <span class="ap-nav-chip">Soon</span>
         </button>
       </div>
+      <div class="ap-nav-group">
+        <p class="ap-nav-group-title">Support</p>
+        <button class="ap-nav-link ap-nav-link-muted" type="button" disabled>
+          <i class="bi bi-book-half"></i>
+          <span>Documentation</span>
+        </button>
+        <button class="ap-nav-link ap-nav-link-muted" type="button" disabled>
+          <i class="bi bi-shield-check"></i>
+          <span>Release Notes</span>
+        </button>
+      </div>
 
     </nav>
 
@@ -134,16 +162,24 @@ $monitoringActive = in_array($activePage, ['logs', 'live-stats'], true);
           <button id="apSidebarDesktopToggleTop" class="btn ap-icon-btn d-none d-lg-inline-flex" type="button" aria-label="Collapse sidebar">
             <i class="bi bi-layout-sidebar-inset"></i>
           </button>
+          <div class="ap-topbar-page d-none d-xl-block">
+            <p class="ap-topbar-label mb-0">Workspace</p>
+            <strong class="ap-topbar-value"><?= htmlspecialchars($topbarPageTitle, ENT_QUOTES, 'UTF-8') ?></strong>
+          </div>
           <div class="ap-search d-none d-md-flex">
             <i class="bi bi-search"></i>
             <input type="text" class="form-control" placeholder="Search modules, containers, domains..." aria-label="Search"/>
+            <kbd class="ap-search-kbd">Ctrl K</kbd>
           </div>
         </div>
 
-        <div class="d-flex align-items-center gap-2">
+        <div class="d-flex align-items-center gap-2 ap-topbar-actions">
           <button class="btn ap-icon-btn position-relative" type="button" aria-label="Notifications" disabled>
             <i class="bi bi-bell"></i>
             <span class="ap-dot"></span>
+          </button>
+          <button class="btn ap-icon-btn position-relative d-none d-md-inline-grid" type="button" aria-label="Messages" disabled>
+            <i class="bi bi-chat-left-text"></i>
           </button>
 
           <div class="dropdown">
@@ -160,7 +196,10 @@ $monitoringActive = in_array($activePage, ['logs', 'live-stats'], true);
           <div class="dropdown">
             <button class="btn ap-user-pill" type="button" data-bs-toggle="dropdown" aria-expanded="false">
               <span class="ap-user-avatar">AD</span>
-              <span class="d-none d-md-inline">Admin</span>
+              <span class="d-none d-md-grid ap-user-meta">
+                <span class="ap-user-name">Admin</span>
+                <span class="ap-user-role">Super Admin</span>
+              </span>
             </button>
             <ul class="dropdown-menu dropdown-menu-end ap-menu">
               <li><button class="dropdown-item" type="button" disabled>Profile</button></li>

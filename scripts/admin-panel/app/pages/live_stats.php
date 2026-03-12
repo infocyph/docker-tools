@@ -14,9 +14,17 @@ declare(strict_types=1);
     </div>
     <button id="apLiveCompactToggleBtn" class="btn ap-ghost-btn" type="button" aria-pressed="false"><i class="bi bi-layout-text-sidebar-reverse me-1"></i> Compact</button>
     <button id="apLiveRefreshBtn" class="btn ap-ghost-btn" type="button"><i class="bi bi-arrow-repeat me-1"></i> Refresh</button>
-    <span id="apLiveUpdatedAt" class="ap-live-meta">Loading...</span>
+    <div id="apLiveRefreshMeta" class="ap-live-refresh-meta" aria-live="polite">
+      <span id="apLiveUpdatedAt" class="ap-live-meta">Next refresh in --:--</span>
+      <span class="ap-live-countdown-track" aria-hidden="true">
+        <span id="apLiveCountdownBar" class="ap-live-countdown-bar"></span>
+      </span>
+      <small id="apLiveLastUpdated" class="ap-live-meta-sub">Waiting for first snapshot...</small>
+    </div>
   </div>
 </section>
+
+<div id="apLiveError" class="ap-live-error d-none mb-2" role="status" aria-live="polite"></div>
 
 <section class="row g-3 mt-1 ap-kpi-row" id="apLiveStatsPage">
   <div class="col-12 col-md-6 col-xl-3 ap-kpi-col">
@@ -92,8 +100,8 @@ declare(strict_types=1);
       </header>
       <div id="apLiveUrlsBody" data-collapsible-body="urls">
         <div class="card-body">
-          <div class="table-responsive">
-            <table class="table ap-table mb-0">
+          <div class="table-responsive ap-endpoint-scroll">
+            <table class="table ap-table ap-table-sticky mb-0">
               <thead><tr><th>URL</th><th class="text-end">Status</th><th class="text-end">Time</th></tr></thead>
               <tbody id="apLiveUrlProbeRows">
               <tr><td colspan="3" class="text-center ap-page-sub py-4">Loading...</td></tr>
@@ -133,7 +141,7 @@ declare(strict_types=1);
       <header class="card-header ap-card-head ap-card-head-wrap">
         <div>
           <h4 class="ap-card-title mb-1">Stats</h4>
-          <p class="ap-card-sub mb-0">Grouped CPU, memory, net I/O, block I/O by container (normalized for readability)</p>
+          <p class="ap-card-sub mb-0">Grouped CPU, memory, net I/O, block I/O by container <span class="ap-card-sub-accent">normalized for readability</span></p>
         </div>
         <div class="ap-head-tools">
           <div id="apLiveStatsSeriesControls" class="ap-quick-chips" role="group" aria-label="Stats datasets">
@@ -164,7 +172,7 @@ declare(strict_types=1);
       <header class="card-header ap-card-head">
         <div>
           <h4 class="ap-card-title mb-1">Disk</h4>
-          <p class="ap-card-sub mb-0">Docker disk usage distribution (<code>sections.disk.items</code>)</p>
+          <p class="ap-card-sub mb-0">Docker disk usage distribution</p>
         </div>
         <button class="btn ap-ghost-btn ap-card-collapse-toggle" type="button" data-target="apLiveDiskBody" aria-expanded="true" title="Collapse section">
           <i class="bi bi-chevron-up"></i>
@@ -184,7 +192,7 @@ declare(strict_types=1);
       <header class="card-header ap-card-head">
         <div>
           <h4 class="ap-card-title mb-1">Volumes</h4>
-          <p class="ap-card-sub mb-0">Largest named volumes (<code>sections.volumes.items</code>)</p>
+          <p class="ap-card-sub mb-0">Largest named volumes</p>
         </div>
         <button class="btn ap-ghost-btn ap-card-collapse-toggle" type="button" data-target="apLiveVolumesBody" aria-expanded="true" title="Collapse section">
           <i class="bi bi-chevron-up"></i>
@@ -217,15 +225,17 @@ declare(strict_types=1);
         <div class="card-body">
           <div class="row g-3">
             <div class="col-12">
-              <h5 class="ap-card-title mb-2 ap-title-with-state"><span>System Tests</span><span id="apLiveSystemTestsStateIcon"></span></h5>
-              <div class="ap-section-tools mb-2">
-                <div id="apLiveChecksFilter" class="ap-quick-chips" role="group" aria-label="Checks filter">
-                  <button type="button" class="btn ap-chip-btn is-active" data-check-state="all">All</button>
-                  <button type="button" class="btn ap-chip-btn" data-check-state="pass">Pass</button>
-                  <button type="button" class="btn ap-chip-btn" data-check-state="warn">Warn</button>
-                  <button type="button" class="btn ap-chip-btn" data-check-state="fail">Fail</button>
+              <div class="ap-system-tests-head mb-2">
+                <h5 class="ap-card-title mb-0 ap-title-with-state"><span>System Tests</span><span id="apLiveSystemTestsStateIcon"></span></h5>
+                <div class="ap-live-matrix-tools ap-system-tests-tools">
+                  <div id="apLiveChecksFilter" class="ap-quick-chips" role="group" aria-label="Checks filter">
+                    <button type="button" class="btn ap-chip-btn is-active" data-check-state="all">All</button>
+                    <button type="button" class="btn ap-chip-btn" data-check-state="pass">Pass</button>
+                    <button type="button" class="btn ap-chip-btn" data-check-state="warn">Warn</button>
+                    <button type="button" class="btn ap-chip-btn" data-check-state="fail">Fail</button>
+                  </div>
+                  <input id="apLiveChecksSearch" class="form-control form-control-sm ap-live-tool-input" type="search" placeholder="Search tests or details">
                 </div>
-                <input id="apLiveChecksSearch" class="form-control form-control-sm ap-live-tool-input" type="search" placeholder="Search tests or details">
               </div>
               <div class="table-responsive ap-local-sticky">
                 <table class="table ap-table ap-table-sticky ap-table-emphasis mb-0">
@@ -298,8 +308,6 @@ declare(strict_types=1);
     </article>
   </div>
 </section>
-
-<div id="apLiveError" class="ap-live-error d-none mt-3"></div>
 
 <div class="modal fade" id="apLiveContainerDetailsModal" tabindex="-1" aria-labelledby="apLiveContainerDetailsTitle" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">

@@ -7,6 +7,18 @@ $panelCssVer = (int)@filemtime(__DIR__ . '/../../public/css/panel.css');
 if ($panelCssVer <= 0) {
     $panelCssVer = time();
 }
+$bootstrapCssVer = (int)@filemtime(__DIR__ . '/../../public/vendor/bootstrap/css/bootstrap.min.css');
+if ($bootstrapCssVer <= 0) {
+    $bootstrapCssVer = $panelCssVer;
+}
+$bootstrapIconsCssVer = (int)@filemtime(__DIR__ . '/../../public/vendor/bootstrap-icons/bootstrap-icons.min.css');
+if ($bootstrapIconsCssVer <= 0) {
+    $bootstrapIconsCssVer = $panelCssVer;
+}
+$fontAwesomeCssVer = (int)@filemtime(__DIR__ . '/../../public/vendor/fontawesome/css/all.min.css');
+if ($fontAwesomeCssVer <= 0) {
+    $fontAwesomeCssVer = $panelCssVer;
+}
 $coreCssVer = (int)@filemtime(__DIR__ . '/../../public/css/core.css');
 if ($coreCssVer <= 0) {
     $coreCssVer = $panelCssVer;
@@ -14,6 +26,14 @@ if ($coreCssVer <= 0) {
 $panelJsVer = (int)@filemtime(__DIR__ . '/../../public/js/panel.js');
 if ($panelJsVer <= 0) {
     $panelJsVer = $panelCssVer;
+}
+$bootstrapJsVer = (int)@filemtime(__DIR__ . '/../../public/vendor/bootstrap/js/bootstrap.bundle.min.js');
+if ($bootstrapJsVer <= 0) {
+    $bootstrapJsVer = $panelJsVer;
+}
+$chartJsVer = (int)@filemtime(__DIR__ . '/../../public/vendor/chart.js/chart.umd.min.js');
+if ($chartJsVer <= 0) {
+    $chartJsVer = $panelJsVer;
 }
 $coreJsVer = (int)@filemtime(__DIR__ . '/../../public/js/core.js');
 if ($coreJsVer <= 0) {
@@ -63,8 +83,9 @@ if ($topbarPageTitle === '') {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="<?= htmlspecialchars($assetPrefix . '/public/vendor/bootstrap/css/bootstrap.min.css?v=' . $bootstrapCssVer, ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
+  <link href="<?= htmlspecialchars($assetPrefix . '/public/vendor/bootstrap-icons/bootstrap-icons.min.css?v=' . $bootstrapIconsCssVer, ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
+  <link href="<?= htmlspecialchars($assetPrefix . '/public/vendor/fontawesome/css/all.min.css?v=' . $fontAwesomeCssVer, ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
   <link href="<?= htmlspecialchars($assetPrefix . '/public/css/core.css?v=' . $coreCssVer, ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
   <link href="<?= htmlspecialchars($assetPrefix . '/public/css/panel.css?v=' . $panelCssVer, ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
 </head>

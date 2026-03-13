@@ -1641,3 +1641,1058 @@ body.ap-live-compact .ap-live-item {
     display: none;
   }
 }
+
+.ap-logv-stage {
+  margin-top: 10px;
+  min-height: 620px;
+  height: calc(100dvh - var(--ap-topbar-height) - 34px);
+  max-height: calc(100dvh - var(--ap-topbar-height) - 34px);
+  display: flex;
+}
+
+.ap-logv-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  border-radius: 18px;
+  border: 1px solid var(--ap-border);
+  overflow: hidden;
+  box-shadow: var(--ap-shadow-card-hover);
+  background:
+    radial-gradient(780px 280px at -10% -30%, color-mix(in srgb, var(--ap-primary) 12%, transparent), transparent 70%),
+    radial-gradient(620px 260px at 108% 130%, color-mix(in srgb, #22d3ee 14%, transparent), transparent 72%),
+    var(--ap-surface);
+}
+
+.ap-logv-layout {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.ap-logv-files {
+  border-right: 1px solid var(--ap-border);
+  background: linear-gradient(180deg, var(--ap-surface-2) 0%, var(--ap-surface-3) 100%);
+  padding: 14px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ap-logv-side-head {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding-inline: 8px;
+}
+
+.ap-logv-service-wrap {
+  width: 100%;
+  min-width: 0;
+}
+
+.ap-logv-service-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.ap-logv-domain-wrap {
+  width: 100%;
+  min-width: 0;
+}
+
+.ap-logv-domain-wrap.is-hidden {
+  display: none;
+}
+
+.ap-logv-service-label {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ap-muted);
+}
+
+.ap-logv-service-head .ap-logv-service-label {
+  margin: 0;
+}
+
+.ap-logv-filter-wrap {
+  position: relative;
+}
+
+.ap-logv-filter-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--ap-border);
+  background: var(--ap-surface);
+  color: var(--ap-muted);
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  box-shadow: var(--ap-shadow-soft);
+}
+
+.ap-logv-filter-btn:hover {
+  color: var(--ap-text);
+  background: var(--ap-surface-2);
+}
+
+.ap-logv-filter-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 35;
+  width: min(280px, 80vw);
+  border: 1px solid var(--ap-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ap-surface) 96%, var(--ap-surface-2));
+  box-shadow: 0 12px 30px color-mix(in srgb, #000 18%, transparent);
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.ap-logv-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border-radius: 6px;
+  padding: 6px;
+  color: var(--ap-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ap-logv-filter-item:hover {
+  background: color-mix(in srgb, var(--ap-primary-soft) 42%, transparent);
+}
+
+.ap-logv-filter-item input {
+  margin: 0;
+}
+
+.ap-logv-filter-date {
+  padding: 4px 6px;
+}
+
+.ap-logv-filter-date-label {
+  display: block;
+  margin: 0 0 4px;
+  color: var(--ap-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ap-logv-filter-date-input {
+  font-size: 12px;
+}
+
+.ap-logv-filter-date-help {
+  padding: 0 6px;
+  color: var(--ap-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ap-logv-filter-clear {
+  justify-content: center;
+  border: 1px solid var(--ap-border);
+  border-radius: 8px;
+  background: var(--ap-surface-2);
+  color: var(--ap-muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+}
+
+.ap-logv-filter-clear:hover {
+  color: var(--ap-text);
+  background: var(--ap-surface-3);
+}
+
+.ap-logv-service-select-wrap {
+  position: relative;
+}
+
+.ap-logv-service-select {
+  border: 1px solid var(--ap-border);
+  border-radius: 8px;
+  background: var(--ap-surface);
+  color: var(--ap-text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 9px 34px 9px 12px;
+  box-shadow: var(--ap-shadow-soft);
+  appearance: none;
+}
+
+.ap-logv-service-select:disabled {
+  opacity: 1;
+}
+
+.ap-logv-service-caret {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ap-muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.ap-logv-domain-native {
+  display: none;
+}
+
+.ap-logv-multi {
+  position: relative;
+}
+
+.ap-logv-multi-trigger {
+  width: 100%;
+  border: 1px solid var(--ap-border);
+  border-radius: 8px;
+  background: var(--ap-surface);
+  color: var(--ap-text);
+  box-shadow: var(--ap-shadow-soft);
+  padding: 8px 11px;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+}
+
+.ap-logv-multi-value {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--ap-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-logv-multi-caret {
+  color: var(--ap-muted);
+  font-size: 12px;
+  transition: transform 0.18s ease;
+}
+
+.ap-logv-multi.is-open .ap-logv-multi-caret {
+  transform: rotate(180deg);
+}
+
+.ap-logv-multi-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 25;
+  display: grid;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--ap-border);
+  border-radius: 10px;
+  background: var(--ap-surface);
+  box-shadow: 0 14px 24px color-mix(in srgb, var(--ap-text) 12%, transparent);
+  padding: 8px;
+}
+
+.ap-logv-multi-option {
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ap-text);
+  padding: 7px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+}
+
+.ap-logv-multi-option span {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-logv-multi-option strong {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--ap-muted);
+}
+
+.ap-logv-multi-option:hover {
+  background: color-mix(in srgb, var(--ap-primary-soft) 40%, var(--ap-surface));
+}
+
+.ap-logv-multi-option.is-active {
+  background: color-mix(in srgb, var(--ap-primary-soft) 70%, var(--ap-surface));
+}
+
+.ap-logv-multi.is-disabled .ap-logv-multi-trigger {
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.ap-logv-file-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
+  gap: 6px;
+  padding: 0 8px 0 8px;
+  scrollbar-gutter: stable;
+}
+
+.ap-logv-file-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "top"
+    "meta";
+  align-items: center;
+  row-gap: 4px;
+  border: 0;
+  border-radius: 8px;
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--ap-surface) 82%, transparent) 0%, color-mix(in srgb, var(--ap-surface-2) 68%, transparent) 100%);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--ap-text) 4%, transparent);
+  text-align: left;
+  padding: 8px 8px 8px 10px;
+  min-height: 52px;
+  width: 100%;
+  min-width: 0;
+  position: relative;
+  transition: background-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.ap-logv-file-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.ap-logv-file-item.is-active {
+  transform: translateX(1px);
+  box-shadow:
+    0 10px 24px color-mix(in srgb, var(--ap-primary) 18%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--ap-primary) 36%, transparent);
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--ap-primary-soft) 85%, var(--ap-surface)) 0%, color-mix(in srgb, var(--ap-surface-2) 94%, transparent) 100%);
+}
+
+.ap-logv-file-item.is-active::before {
+  background: var(--ap-primary);
+}
+
+.ap-logv-file-item.is-active .ap-logv-file-name {
+  color: color-mix(in srgb, var(--ap-primary) 56%, var(--ap-text));
+}
+
+.ap-logv-file-item:hover {
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--ap-primary-soft) 44%, var(--ap-surface)) 0%, color-mix(in srgb, var(--ap-surface-2) 84%, transparent) 100%);
+}
+
+.ap-logv-file-item.is-hidden {
+  display: none;
+}
+
+.ap-logv-file-top {
+  grid-area: top;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ap-logv-file-name {
+  min-width: 0;
+  color: var(--ap-text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-logv-file-size {
+  flex: 0 0 auto;
+  color: var(--ap-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.ap-logv-file-meta {
+  grid-area: meta;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ap-logv-file-mtime {
+  min-width: 0;
+  color: color-mix(in srgb, var(--ap-muted) 86%, var(--ap-text));
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-logv-file-service {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--ap-primary) 70%, var(--ap-text));
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.ap-logv-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.ap-logv-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ap-border);
+  background: color-mix(in srgb, var(--ap-surface-2) 76%, transparent);
+}
+
+.ap-logv-chip-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-left: 2px;
+}
+
+.ap-logv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 6px 10px;
+  opacity: 0.58;
+  filter: saturate(0.82);
+  color: #fff;
+  transition: opacity 0.16s ease, filter 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.ap-logv-chip.is-active {
+  opacity: 1;
+  filter: saturate(1);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.ap-logv-chip:hover {
+  opacity: 0.88;
+}
+
+.ap-logv-chip-all {
+  background: color-mix(in srgb, var(--ap-surface-3) 92%, transparent);
+  color: color-mix(in srgb, var(--ap-text) 86%, var(--ap-muted));
+  border-color: color-mix(in srgb, var(--ap-border) 86%, transparent);
+  box-shadow: none;
+}
+
+.ap-logv-chip strong {
+  font-weight: 800;
+}
+
+.ap-logv-chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.ap-logv-chip-debug {
+  background: #0f766e;
+}
+
+.ap-logv-chip-info {
+  background: #2563eb;
+}
+
+.ap-logv-chip-warning {
+  background: #d97706;
+}
+
+.ap-logv-chip-error {
+  background: #d9385d;
+}
+
+.ap-logv-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ap-logv-search {
+  width: min(360px, 42vw);
+  min-width: 220px;
+  border: 1px solid var(--ap-border);
+  background: var(--ap-surface-2);
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  box-shadow: var(--ap-shadow-soft);
+}
+
+.ap-logv-search.is-invalid {
+  border-color: color-mix(in srgb, #d64566 72%, var(--ap-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, #d64566 44%, transparent);
+}
+
+.ap-logv-search i {
+  color: var(--ap-muted);
+  font-size: 13px;
+}
+
+.ap-logv-search input {
+  width: 100%;
+  border: 0;
+  padding: 8px 0;
+  background: transparent;
+  color: var(--ap-text);
+  font-size: 13px;
+  outline: none;
+}
+
+.ap-logv-search input::placeholder {
+  color: color-mix(in srgb, var(--ap-muted) 86%, transparent);
+}
+
+.ap-logv-search input.is-invalid {
+  color: #d64566;
+}
+
+.ap-logv-icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--ap-border);
+  background: var(--ap-surface-2);
+  color: var(--ap-muted);
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+
+.ap-logv-icon-btn:hover {
+  color: var(--ap-text);
+  background: var(--ap-surface-3);
+}
+
+.ap-logv-icon-btn.is-loading i {
+  animation: ap-logv-spin 0.85s linear infinite;
+}
+
+@keyframes ap-logv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ap-logv-settings {
+  position: relative;
+}
+
+.ap-logv-settings-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  min-width: 184px;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--ap-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ap-surface) 95%, var(--ap-surface-2));
+  box-shadow: 0 12px 28px color-mix(in srgb, #000 20%, transparent);
+}
+
+.ap-logv-settings-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ap-text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ap-logv-settings-item:hover {
+  background: color-mix(in srgb, var(--ap-primary-soft) 42%, transparent);
+}
+
+.ap-logv-settings-item input {
+  margin: 0;
+}
+
+.ap-logv-main-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--ap-border);
+  background: color-mix(in srgb, var(--ap-surface) 92%, transparent);
+}
+
+.ap-logv-table-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  border-bottom: 1px solid var(--ap-border);
+  min-height: 40px;
+}
+
+.ap-logv-current-strip {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--ap-border);
+  color: color-mix(in srgb, var(--ap-primary) 60%, var(--ap-text));
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: color-mix(in srgb, var(--ap-primary-soft) 38%, transparent);
+}
+
+.ap-logv-head-left {
+  display: grid;
+  grid-template-columns: 108px 152px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 0 16px;
+  color: var(--ap-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ap-logv-table-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ap-logv-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px;
+  min-height: 36px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ap-border) 84%, transparent);
+}
+
+.ap-logv-row:hover {
+  background: color-mix(in srgb, var(--ap-primary-soft) 42%, transparent);
+}
+
+.ap-logv-row-main {
+  display: grid;
+  grid-template-columns: 108px 152px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 0 16px;
+  color: var(--ap-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ap-logv-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ap-logv-level i {
+  font-size: 11px;
+}
+
+.ap-logv-lvl-error {
+  color: #d64566;
+}
+
+.ap-logv-lvl-warning {
+  color: #cf7f0b;
+}
+
+.ap-logv-lvl-info {
+  color: #2563eb;
+}
+
+.ap-logv-lvl-debug {
+  color: #0f766e;
+}
+
+.ap-logv-desc {
+  color: color-mix(in srgb, var(--ap-text) 82%, var(--ap-muted));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-logv-row-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 16px;
+  color: color-mix(in srgb, var(--ap-muted) 84%, var(--ap-text));
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid color-mix(in srgb, var(--ap-border) 72%, transparent);
+}
+
+.ap-logv-entry {
+  display: block;
+}
+
+.ap-logv-entry.is-hidden {
+  display: none;
+}
+
+.ap-logv-entry > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.ap-logv-entry > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ap-logv-row-caret {
+  font-size: 12px;
+  color: var(--ap-muted);
+  transition: transform 0.18s ease;
+}
+
+.ap-logv-entry[open] .ap-logv-row-caret {
+  transform: rotate(180deg);
+}
+
+.ap-logv-entry[open] .ap-logv-row {
+  background: color-mix(in srgb, var(--ap-primary-soft) 40%, transparent);
+}
+
+.ap-logv-row-detail {
+  border-top: 1px dashed color-mix(in srgb, var(--ap-border) 80%, transparent);
+  background: color-mix(in srgb, var(--ap-surface-2) 62%, transparent);
+  padding: 10px 16px 12px;
+}
+
+.ap-logv-detail-meta {
+  color: var(--ap-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ap-logv-detail-label {
+  color: color-mix(in srgb, var(--ap-text) 62%, var(--ap-muted));
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ap-logv-detail-text {
+  color: var(--ap-text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.ap-logv-detail-code {
+  margin: 0;
+  max-height: 112px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--ap-border) 85%, transparent);
+  background: color-mix(in srgb, var(--ap-surface) 88%, var(--ap-surface-2));
+  color: color-mix(in srgb, var(--ap-text) 86%, var(--ap-muted));
+  font-size: 12px;
+  line-height: 1.35;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+}
+
+.ap-logv-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ap-border);
+  background: color-mix(in srgb, var(--ap-surface-2) 76%, transparent);
+}
+
+.ap-logv-foot-meta {
+  color: color-mix(in srgb, var(--ap-muted) 84%, var(--ap-text));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ap-logv-foot-meta span {
+  opacity: 0.4;
+  margin-inline: 5px;
+}
+
+.ap-logv-file-list::-webkit-scrollbar,
+.ap-logv-table-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.ap-logv-file-list::-webkit-scrollbar-thumb,
+.ap-logv-table-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ap-muted) 35%, transparent);
+}
+
+[data-bs-theme="dark"] .ap-logv-shell {
+  border-color: color-mix(in srgb, var(--ap-border) 88%, transparent);
+  background:
+    radial-gradient(800px 300px at -8% -28%, rgba(99, 102, 241, 0.22), transparent 70%),
+    radial-gradient(720px 260px at 108% 124%, rgba(45, 212, 191, 0.13), transparent 72%),
+    color-mix(in srgb, var(--ap-surface) 96%, #05080f);
+}
+
+[data-bs-theme="dark"] .ap-logv-files {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ap-surface-2) 94%, #0b1220) 0%, color-mix(in srgb, var(--ap-surface-3) 94%, #0b1220) 100%);
+}
+
+[data-bs-theme="dark"] .ap-logv-file-item {
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--ap-surface) 62%, transparent) 0%, color-mix(in srgb, var(--ap-surface-2) 48%, transparent) 100%);
+  box-shadow: 0 10px 20px rgba(2, 6, 23, 0.26);
+}
+
+[data-bs-theme="dark"] .ap-logv-file-item.is-active {
+  box-shadow:
+    0 14px 28px rgba(15, 23, 42, 0.5),
+    inset 0 0 0 1px color-mix(in srgb, var(--ap-primary) 48%, transparent);
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--ap-primary-soft) 52%, #0b1220) 0%, color-mix(in srgb, var(--ap-surface-2) 78%, #0b1220) 100%);
+}
+
+[data-bs-theme="dark"] .ap-logv-current-strip {
+  background: color-mix(in srgb, var(--ap-primary-soft) 24%, #0b1220);
+}
+
+[data-bs-theme="dark"] .ap-logv-chip-all {
+  background: color-mix(in srgb, var(--ap-surface-3) 72%, transparent);
+  color: color-mix(in srgb, var(--ap-text) 80%, var(--ap-muted));
+}
+
+[data-bs-theme="dark"] .ap-logv-chip-debug {
+  background: #198754;
+}
+
+[data-bs-theme="dark"] .ap-logv-chip-info {
+  background: #2563eb;
+}
+
+[data-bs-theme="dark"] .ap-logv-chip-warning {
+  background: #b86b05;
+}
+
+[data-bs-theme="dark"] .ap-logv-chip-error {
+  background: #b83355;
+}
+
+[data-bs-theme="dark"] .ap-logv-main-content {
+  background: color-mix(in srgb, var(--ap-surface) 96%, #070b13);
+}
+
+[data-bs-theme="dark"] .ap-logv-row:hover {
+  background: color-mix(in srgb, var(--ap-primary-soft) 48%, transparent);
+}
+
+[data-bs-theme="dark"] .ap-logv-entry[open] .ap-logv-row {
+  background: color-mix(in srgb, var(--ap-primary-soft) 52%, transparent);
+}
+
+@media (max-width: 1400px) {
+  .ap-logv-layout {
+    grid-template-columns: 304px minmax(0, 1fr);
+  }
+
+  .ap-logv-head-left,
+  .ap-logv-row-main {
+    grid-template-columns: 92px 126px minmax(0, 1fr);
+    gap: 10px;
+  }
+}
+
+@media (max-width: 1199.98px) {
+  .ap-logv-stage {
+    min-height: 0;
+    height: auto;
+    max-height: none;
+    display: block;
+  }
+
+  .ap-logv-shell {
+    height: auto;
+  }
+
+  .ap-logv-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .ap-logv-files {
+    border-right: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+    padding-bottom: 12px;
+  }
+
+  .ap-logv-file-list {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    max-height: 240px;
+  }
+
+  .ap-logv-main {
+    padding: 10px 12px 12px;
+  }
+}
+
+@media (max-width: 991.98px) {
+  .ap-logv-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ap-logv-tools {
+    width: 100%;
+  }
+
+  .ap-logv-search {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ap-logv-table-head {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 8px 0;
+  }
+
+  .ap-logv-head-left {
+    padding: 0 12px;
+  }
+
+  .ap-logv-row {
+    grid-template-columns: 1fr;
+  }
+
+  .ap-logv-row-main {
+    padding: 0 12px;
+  }
+
+  .ap-logv-row-line {
+    justify-content: flex-end;
+    border-top: 1px solid color-mix(in srgb, var(--ap-border) 72%, transparent);
+    border-left: 0;
+    min-height: 28px;
+    padding: 0 12px;
+  }
+
+  .ap-logv-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 680px) {
+  .ap-logv-file-list {
+    grid-template-columns: 1fr;
+  }
+
+  .ap-logv-head-left,
+  .ap-logv-row-main {
+    grid-template-columns: 78px 118px minmax(0, 1fr);
+    gap: 8px;
+    font-size: 12px;
+  }
+}

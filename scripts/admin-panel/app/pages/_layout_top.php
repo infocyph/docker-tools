@@ -46,13 +46,13 @@ $basePath = str_replace('\\', '/', dirname($scriptName));
 if ($basePath === '.' || $basePath === '/') {
     $basePath = '';
 }
-$assetPrefix = $basePath === '' ? '' : $basePath;
+$assetPrefix = $basePath;
 $routeHref = static function (string $slug = '') use ($basePath): string {
     $clean = trim($slug, '/');
     if ($clean === '' || $clean === 'dashboard') {
         return $basePath === '' ? '/' : $basePath . '/';
     }
-    return ($basePath === '' ? '' : $basePath) . '/' . $clean;
+    return $basePath . '/' . $clean;
 };
 $monitoringActive = in_array($activePage, ['logs', 'live-stats'], true);
 $topbarPageTitle = trim((string)preg_replace('/\s*\|\s*Admin Panel\s*$/i', '', $pageTitle));
@@ -98,7 +98,7 @@ if ($topbarPageTitle === '') {
           <i class="bi bi-boxes"></i>
         </span>
         <span class="ap-brand-copy">
-          <span class="ap-brand-eyebrow">TailAdmin Sync</span>
+          <span class="ap-brand-eyebrow">LocalDevStack</span>
           <strong class="ap-brand-title">Admin Panel</strong>
         </span>
       </a>
@@ -109,7 +109,7 @@ if ($topbarPageTitle === '') {
 
     <nav class="ap-nav" aria-label="Sidebar navigation">
       <div class="ap-nav-group">
-        <p class="ap-nav-group-title">Main Menu</p>
+        <p class="ap-nav-group-title">System</p>
         <a class="ap-nav-link <?= $activePage === 'dashboard' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('dashboard'), ENT_QUOTES, 'UTF-8') ?>">
           <i class="bi bi-speedometer2"></i>
           <span>Dashboard</span>
@@ -149,7 +149,7 @@ if ($topbarPageTitle === '') {
         </button>
       </div>
       <div class="ap-nav-group">
-        <p class="ap-nav-group-title">Support</p>
+        <p class="ap-nav-group-title">Tools</p>
         <button class="ap-nav-link ap-nav-link-muted" type="button" disabled>
           <i class="bi bi-book-half"></i>
           <span>Documentation</span>

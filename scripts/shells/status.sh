@@ -419,7 +419,6 @@ _status_project_mount_checks_rows() {
     "sops_global|/etc/share/sops/global|dir"
     "sops_keys|/etc/share/sops/keys|dir"
     "sops_config|/etc/share/sops/config|dir"
-    "logviewer|/etc/share/logviewer|dir"
   )
 
   local spec key path kind exists entry_count file_count state flag

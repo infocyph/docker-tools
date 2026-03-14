@@ -154,7 +154,7 @@ RUN apk add --no-cache \
   && mkdir -p \
       /etc/mkcert \
       /etc/share/rootCA \
-      /etc/share/vhosts/node \
+      /etc/share/vhosts/docker-compose \
       /etc/share/vhosts/apache \
       /etc/share/vhosts/nginx \
       /etc/share/vhosts/sops \

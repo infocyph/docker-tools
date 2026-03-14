@@ -1,0 +1,46 @@
+name: {{COMPOSE_PROJECT_NAME}}
+services:
+  {{PHP_SERVICE}}:
+    container_name: {{PHP_CONTAINER_NAME}}
+    hostname: {{PHP_HOSTNAME}}
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-}
+    env_file:
+      - .env
+    volumes:
+      - "${PROJECT_DIR:-./../application}:/app"
+      - lds_ssl_roots:/etc/share/rootCA:ro
+      - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm
+      - lds_fpm_pools:/usr/local/etc/php-fpm.domains:ro
+      - ./docker/conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
+      - ./docker/conf/openssl.cnf:/etc/ssl/openssl.cnf
+      - ./configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
+      - "./configuration/ssh:/home/${USER}/.ssh:ro"
+      - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+      - ./logs/php-fpm:/var/log/php-fpm
+    networks:
+      frontend: {}
+      backend: {}
+      datastore: {}
+    healthcheck:
+      test: ["CMD-SHELL", "php-fpm -t || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - server-tools
+    build:
+      context: docker/dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-root}
+        USERNAME: ${USER}
+        PHP_EXT: ${PHP_EXT:-}
+        LINUX_PKG: ${LINUX_PKG:-}
+        WORKING_DIR: ${WORKING_DIR}
+        PHP_VERSION: {{PHP_VERSION}}
+        PHP_EXT_VERSIONED: ${PHP_EXT_{{PHP_KEY}}:-}
+        LINUX_PKG_VERSIONED: ${LINUX_PKG_{{PHP_KEY}}:-}
+    profiles: [php, {{PHP_PROFILE}}]

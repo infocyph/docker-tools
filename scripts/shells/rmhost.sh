@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# rmhost - remove vhost configs for domain(s) (nginx/apache/node)
+# rmhost - remove vhost configs for domain(s) (nginx/apache/docker-compose)
 #        - if no args: shows domain list from nginx and lets you select by numbers (1,2,6 / 1 2 6)
-#        - deletes relevant nginx/apache/node files
+#        - deletes relevant nginx/apache/docker-compose files
 #        - sets delete intents in ENV_STORE:
 #            APACHE_DELETE, DELETE_PHP_PROFILE, DELETE_NODE_PROFILE
 set -euo pipefail
@@ -32,7 +32,7 @@ declare -a REMOVED_DOMAINS=()
 VHOST_ROOT="${VHOST_ROOT:-/etc/share/vhosts}"
 NGINX_DIR="${NGINX_DIR:-${VHOST_ROOT}/nginx}"
 APACHE_DIR="${APACHE_DIR:-${VHOST_ROOT}/apache}"
-NODE_DIR="${NODE_DIR:-${VHOST_ROOT}/node}"
+COMPOSE_DIR="${COMPOSE_DIR:-${VHOST_ROOT}/docker-compose}"
 FPM_DIR="${FPM_DIR:-${VHOST_ROOT}/fpm}"
 ENV_STORE_JSON="${ENV_STORE_JSON:-/etc/share/state/env-store.json}"
 RMHOST_STATE_KEY="${RMHOST_STATE_KEY:-RMHOST_STATE}"
@@ -271,7 +271,7 @@ build_plan_for_domain() {
   local token; token="$(slugify "$domain")"
   local nginx_conf="${NGINX_DIR}/${domain}.conf"
   local apache_conf="${APACHE_DIR}/${domain}.conf"
-  local node_yaml="${NODE_DIR}/${token}.yaml"
+  local node_yaml="${COMPOSE_DIR}/${token}.yaml"
   local -a fpm_confs=()
   local f
   shopt -s nullglob

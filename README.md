@@ -161,7 +161,7 @@ This repo is designed so you can keep **all generated + persistent artifacts** i
 |---|---|---|
 | `./configuration/apache` | `/etc/share/vhosts/apache` | `mkhost`, `certify` |
 | `./configuration/nginx` | `/etc/share/vhosts/nginx` |`mkhost`, `certify` |
-| `./configuration/node` | `/etc/share/vhosts/node` | `mkhost`, `rmhost`, `status` checks |
+| `./configuration/docker-compose` | `/etc/share/vhosts/docker-compose` | `mkhost`, `rmhost`, `status` checks |
 | `./configuration/fpm` | `/etc/share/vhosts/fpm` | `mkhost`, `init-fpm-pool-dirs`, `status` checks |
 | `./configuration/ssl` | `/etc/mkcert` |  `certify`, `mkcert` |
 | `./configuration/certs` | `/etc/share/certs` | `certify` export dir, `status` checks |
@@ -183,7 +183,7 @@ services:
     volumes:
       - ./configuration/apache:/etc/share/vhosts/apache
       - ./configuration/nginx:/etc/share/vhosts/nginx
-      - ./configuration/node:/etc/share/vhosts/node
+      - ./configuration/docker-compose:/etc/share/vhosts/docker-compose
       - ./configuration/fpm:/etc/share/vhosts/fpm
 
       - ./configuration/ssl:/etc/mkcert
@@ -215,7 +215,7 @@ Use as:
 docker run --rm -it \
   -v "$(pwd)/configuration/apache:/etc/share/vhosts/apache" \
   -v "$(pwd)/configuration/nginx:/etc/share/vhosts/nginx" \
-  -v "$(pwd)/configuration/node:/etc/share/vhosts/node" \
+  -v "$(pwd)/configuration/docker-compose:/etc/share/vhosts/docker-compose" \
   -v "$(pwd)/configuration/fpm:/etc/share/vhosts/fpm" \
   -v "$(pwd)/configuration/ssl:/etc/mkcert" \
   -v "$(pwd)/configuration/certs:/etc/share/certs" \
@@ -268,7 +268,8 @@ All certs are written to `/etc/mkcert`.
 
 * Nginx vhost: `/etc/share/vhosts/nginx/<domain>.conf`
 * Apache vhost (only if you choose Apache): `/etc/share/vhosts/apache/<domain>.conf`
-* Node service yaml (only if you choose Node): `/etc/share/vhosts/node/<token>.yaml`
+* Node service yaml (only if you choose Node): `/etc/share/vhosts/docker-compose/<token>.yaml`
+* PHP service yaml (only if you choose PHP): `/etc/share/vhosts/docker-compose/phpXX.yaml`
 
 Run it:
 
@@ -325,7 +326,7 @@ mkhost --JSON
 
 * `/etc/share/vhosts/nginx/<domain>.conf`
 * `/etc/share/vhosts/apache/<domain>.conf`
-* `/etc/share/vhosts/node/<token>.yaml` (token is a safe slug of the domain)
+* `/etc/share/vhosts/docker-compose/<token>.yaml` (Node token is a safe slug of the domain)
 
 Run it:
 

@@ -22,7 +22,7 @@ readonly VHOST_FPM_DIR="${VHOST_FPM_DIR:-/etc/share/vhosts/fpm}"
 readonly FPM_TEMPLATE_DIR="${FPM_TEMPLATE_DIR:-/etc/fpm-templates}"
 readonly PHP_FPM_SOCK_DIR="${PHP_FPM_SOCK_DIR:-/home/${USERNAME}/.run/php-fpm}"
 readonly WEB_FPM_SOCK_DIR="${WEB_FPM_SOCK_DIR:-/run/php-fpm}"
-readonly VHOST_NODE_DIR="${VHOST_NODE_DIR:-/etc/share/vhosts/node}"
+readonly VHOST_DOCKER_COMPOSE_DIR="${VHOST_DOCKER_COMPOSE_DIR:-/etc/share/vhosts/docker-compose}"
 readonly ENV_STORE_JSON="${ENV_STORE_JSON:-/etc/share/state/env-store.json}"
 readonly MKHOST_STATE_KEY="${MKHOST_STATE_KEY:-MKHOST_STATE}"
 readonly NODE_PORT="${NODE_PORT:-3000}"
@@ -70,6 +70,7 @@ required_tpls=(
   "apache:http.apache.conf"
   "apache:https.apache.conf"
   "node:node.compose.yaml"
+  "php:php.compose.yaml"
 )
 
 preflight_templates() {
@@ -80,7 +81,7 @@ preflight_templates() {
     case "$kind" in
       nginx)  dir="$NGINX_TEMPLATE_DIR" ;;
       apache) dir="$APACHE_TEMPLATE_DIR" ;;
-      node)   dir="$DOCKER_TEMPLATE_DIRECTORY" ;;
+      node|php) dir="$DOCKER_TEMPLATE_DIRECTORY" ;;
       *) err "Error: invalid template kind: $kind"; exit 1 ;;
     esac
     [[ -r "$dir/$f" ]] || { err "Error: missing template: $f"; exit 1; }
@@ -454,6 +455,14 @@ render_template() {
   : "${ENABLE_CLIENT_VERIFICATION:=ssl_verify_client off;}"
   : "${NODE_CONTAINER:=}"
   : "${NODE_PORT:=3000}"
+  : "${NODE_ACCESS_LOG_FILE:=}"
+  : "${NODE_ERROR_LOG_FILE:=}"
+  : "${PHP_PROFILE:=}"
+  : "${PHP_SERVICE:=}"
+  : "${PHP_CONTAINER_NAME:=}"
+  : "${PHP_HOSTNAME:=}"
+  : "${PHP_KEY:=}"
+  : "${PHP_VERSION:=}"
 
   : "${PROXY_IP:=}"
   : "${PROXY_HOST:=}"
@@ -481,6 +490,8 @@ render_template() {
     '{{PHP_FCGI_PASS}}' '{{APACHE_PHP_HANDLER}}'
     '{{POOL_NAME}}' '{{SOCK_PATH}}' '{{ERROR_LOG}}' '{{ACCESS_LOG}}' '{{FPM_USER}}' '{{FPM_GROUP}}'
     '{{NODE_PROFILE}}' '{{NODE_VERSION}}' '{{NODE_KEY}}' '{{NODE_CMD_LINE}}'
+    '{{NODE_ACCESS_LOG_FILE}}' '{{NODE_ERROR_LOG_FILE}}'
+    '{{PHP_PROFILE}}' '{{PHP_SERVICE}}' '{{PHP_CONTAINER_NAME}}' '{{PHP_HOSTNAME}}' '{{PHP_KEY}}' '{{PHP_VERSION}}'
   )
 
   local -a _tpl_values=(
@@ -496,6 +507,8 @@ render_template() {
     "$PHP_FCGI_PASS" "$APACHE_PHP_HANDLER"
     "$FPM_POOL_NAME" "$FPM_SOCK_PATH" "$FPM_ERROR_LOG" "$FPM_ACCESS_LOG" "$FPM_USER" "$FPM_GROUP"
     "${NODE_PROFILE:-}" "${NODE_VERSION:-}" "${NODE_KEY:-}" "${NODE_CMD_LINE:-}"
+    "${NODE_ACCESS_LOG_FILE:-}" "${NODE_ERROR_LOG_FILE:-}"
+    "${PHP_PROFILE:-}" "${PHP_SERVICE:-}" "${PHP_CONTAINER_NAME:-}" "${PHP_HOSTNAME:-}" "${PHP_KEY:-}" "${PHP_VERSION:-}"
   )
 
   # Sanity check: prevent silent template corruption
@@ -579,11 +592,44 @@ prepend_header_if_missing() {
 }
 
 ###############################################################################
-# 9) Node compose generator
+# 9) Compose generators (Node per-domain, PHP per-version)
 ###############################################################################
 
+compose_on_exists_mode() {
+  local mode="${COMPOSE_FILE_ON_EXISTS:-replace}"
+  mode="${mode,,}"
+  case "$mode" in
+    replace|overwrite) echo "replace" ;;
+    skip) echo "skip" ;;
+    *)
+      warn "Invalid COMPOSE_FILE_ON_EXISTS='${mode}'; using 'replace'"
+      echo "replace"
+      ;;
+  esac
+}
+
+write_compose_template() {
+  # write_compose_template <template> <out>
+  # return codes:
+  #   0  -> created
+  #   10 -> skipped (exists + mode=skip)
+  #   11 -> replaced (exists + mode=replace)
+  local tpl="$1" outPath="$2"
+  local existed=0 mode=""
+  [[ -e "$outPath" ]] && existed=1
+  mode="$(compose_on_exists_mode)"
+  if (( existed )) && [[ "$mode" == "skip" ]]; then
+    return 10
+  fi
+  render_template "$tpl" "$outPath"
+  if (( existed )); then
+    return 11
+  fi
+  return 0
+}
+
 create_node_compose() {
-  mkdir -p "$VHOST_NODE_DIR"
+  mkdir -p "$VHOST_DOCKER_COMPOSE_DIR"
 
   local domain_token token svc cname profile node_key
   domain_token="$(slugify "$DOMAIN_NAME")"
@@ -599,12 +645,14 @@ create_node_compose() {
 
   node_key="$(to_env_key "$NODE_VERSION")"
 
-  local outPath="${VHOST_NODE_DIR}/${token}.yaml"
+  local outPath="${VHOST_DOCKER_COMPOSE_DIR}/${token}.yaml"
 
   # Prepare compose templating vars
   NODE_CONTAINER_NAME="$cname"
   NODE_HOSTNAME="$svc"
   NODE_KEY="$node_key"
+  NODE_ACCESS_LOG_FILE="${DOMAIN_NAME}.access.log"
+  NODE_ERROR_LOG_FILE="${DOMAIN_NAME}.error.log"
 
   if [[ -n "${NODE_CMD:-}" ]]; then
     # Preserve one-line command (no newlines) and keep YAML safe.
@@ -619,10 +667,48 @@ create_node_compose() {
   fi
 
   local tpl="${DOCKER_TEMPLATE_DIRECTORY}/node.compose.yaml"
-  render_template "$tpl" "$outPath"
+  local compose_rc=0
+  write_compose_template "$tpl" "$outPath" || compose_rc=$?
+  case "$compose_rc" in
+    0)  NODE_COMPOSE_ACTION="created" ;;
+    10) NODE_COMPOSE_ACTION="skipped" ;;
+    11) NODE_COMPOSE_ACTION="replaced" ;;
+    *)  return "$compose_rc" ;;
+  esac
 
   env_set "ACTIVE_NODE_PROFILE" "$profile"
   NODE_COMPOSE_FILE_BASENAME="$(basename "$outPath")"
+}
+
+create_php_compose() {
+  mkdir -p "$VHOST_DOCKER_COMPOSE_DIR"
+
+  local profile php_key svc cname host outPath tpl
+  profile="${PHP_CONTAINER_PROFILE}"
+  php_key="$(to_env_key "$PHP_VERSION")"
+  svc="$profile"
+  cname="PHP_${PHP_VERSION}"
+  host="php-${php_key}"
+
+  PHP_PROFILE="$profile"
+  PHP_SERVICE="$svc"
+  PHP_CONTAINER_NAME="$cname"
+  PHP_HOSTNAME="$host"
+  PHP_KEY="$php_key"
+
+  outPath="${VHOST_DOCKER_COMPOSE_DIR}/${profile}.yaml"
+  tpl="${DOCKER_TEMPLATE_DIRECTORY}/php.compose.yaml"
+
+  local compose_rc=0
+  write_compose_template "$tpl" "$outPath" || compose_rc=$?
+  case "$compose_rc" in
+    0)  PHP_COMPOSE_ACTION="created" ;;
+    10) PHP_COMPOSE_ACTION="skipped" ;;
+    11) PHP_COMPOSE_ACTION="replaced" ;;
+    *)  return "$compose_rc" ;;
+  esac
+
+  PHP_COMPOSE_FILE_BASENAME="$(basename "$outPath")"
 }
 
 ###############################################################################
@@ -787,7 +873,8 @@ cleanup_vars() {
     DOC_ROOT CLIENT_MAX_BODY_SIZE CLIENT_MAX_BODY_SIZE_APACHE ENABLE_STREAMING PROXY_STREAMING_INCLUDE \
     FASTCGI_STREAMING_INCLUDE APACHE_STREAMING_INCLUDE ENABLE_CLIENT_VERIFICATION CLIENT_VERIF \
     PHP_VERSION PHP_CONTAINER_PROFILE PHP_CONTAINER PHP_APACHE_CONTAINER_PROFILE PHP_APACHE_CONTAINER \
-    NODE_VERSION NODE_CMD PHP_UPSTREAM_MODE PHP_FPM_SOCKET PHP_FPM_TEMPLATE PHP_FCGI_PASS APACHE_PHP_HANDLER FPM_POOL_NAME FPM_SOCK_PATH FPM_ERROR_LOG FPM_ACCESS_LOG NODE_PROFILE NODE_SERVICE NODE_CONTAINER NODE_COMPOSE_FILE_BASENAME \
+    NODE_VERSION NODE_CMD NODE_ACCESS_LOG_FILE NODE_ERROR_LOG_FILE PHP_UPSTREAM_MODE PHP_FPM_SOCKET PHP_FPM_TEMPLATE PHP_FCGI_PASS APACHE_PHP_HANDLER FPM_POOL_NAME FPM_SOCK_PATH FPM_ERROR_LOG FPM_ACCESS_LOG NODE_PROFILE NODE_SERVICE NODE_CONTAINER NODE_COMPOSE_FILE_BASENAME NODE_COMPOSE_ACTION \
+    PHP_PROFILE PHP_SERVICE PHP_CONTAINER_NAME PHP_HOSTNAME PHP_KEY PHP_COMPOSE_FILE_BASENAME PHP_COMPOSE_ACTION \
     NODE_DIR_TOKEN GENERATED_NGINX_CONF_BASENAME GENERATED_APACHE_CONF_BASENAME \
     PROXY_HOST PROXY_IP PROXY_HTTP_PORT PROXY_HTTPS_PORT PROXY_COOKIE_EXACT_INCLUDE PROXY_COOKIE_PARENT_INCLUDE PROXY_REDIRECT_INCLUDE \
     PROXY_WS_INCLUDE PROXY_SUBFILTER_INCLUDE PROXY_CSP_INCLUDE PROXY_REWRITE_YN PARENT_COOKIE_DOMAIN || true
@@ -1208,6 +1295,12 @@ prompt_mtls() {
 }
 
 generate_all_domains() {
+  if [[ "$APP_TYPE" == "php" ]]; then
+    create_php_compose
+    ok "  ✔ PHP compose ${PHP_COMPOSE_ACTION}"
+    say "    ${DIM}file:${NC} ${BOLD}${PHP_COMPOSE_FILE_BASENAME}${NC}  ${DIM}profile:${NC} ${BOLD}${PHP_CONTAINER_PROFILE}${NC}"
+  fi
+
   local d
   for d in "${DOMAINS[@]}"; do
     DOMAIN_NAME="$d"
@@ -1216,7 +1309,7 @@ generate_all_domains() {
 
     if [[ "$APP_TYPE" == "node" ]]; then
       create_node_compose
-      ok "  ✔ Node compose generated"
+      ok "  ✔ Node compose ${NODE_COMPOSE_ACTION}"
       say "    ${DIM}service:${NC} ${BOLD}${NODE_SERVICE}${NC}  ${DIM}profile:${NC} ${BOLD}${NODE_PROFILE}${NC}  ${DIM}port:${NC} ${BOLD}${NODE_PORT}${NC}"
     fi
 

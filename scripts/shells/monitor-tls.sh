@@ -47,6 +47,65 @@ _infer_project() {
   fi
 }
 
+_tcp_reachable() {
+  local host="${1:-}" port="${2:-443}"
+  [[ -n "$host" ]] || return 1
+  if _has timeout; then
+    timeout 2 bash -lc "cat < /dev/null > /dev/tcp/${host}/${port}" >/dev/null 2>&1
+    return $?
+  fi
+  bash -lc "cat < /dev/null > /dev/tcp/${host}/${port}" >/dev/null 2>&1
+}
+
+_detect_tls_target() {
+  local project="${1:-}"
+  if [[ -n "${TLS_MONITOR_TARGET:-}" ]]; then
+    printf '%s' "$TLS_MONITOR_TARGET"
+    return 0
+  fi
+
+  local -a candidates=()
+  local n
+  if _has docker; then
+    if [[ -n "$project" && "$project" != "unknown" ]]; then
+      while IFS= read -r n; do
+        [[ -n "$n" ]] || continue
+        candidates+=("$n")
+      done < <(
+        docker ps --filter "label=com.docker.compose.project=${project}" --filter 'label=com.docker.compose.service=nginx' --format '{{.Names}}' 2>/dev/null |
+          sed '/^[[:space:]]*$/d'
+      )
+    fi
+    if ((${#candidates[@]} == 0)); then
+      while IFS= read -r n; do
+        [[ -n "$n" ]] || continue
+        candidates+=("$n")
+      done < <(
+        docker ps --filter 'label=com.docker.compose.service=nginx' --format '{{.Names}}' 2>/dev/null |
+          sed '/^[[:space:]]*$/d'
+      )
+    fi
+  fi
+
+  candidates+=("NGINX" "nginx" "127.0.0.1")
+  mapfile -t candidates < <(printf '%s\n' "${candidates[@]}" | awk '!seen[$0]++')
+
+  local c
+  for c in "${candidates[@]}"; do
+    [[ -n "$c" ]] || continue
+    if [[ "$c" == "127.0.0.1" ]]; then
+      printf '%s' "$c"
+      return 0
+    fi
+    if _tcp_reachable "$c" 443; then
+      printf '%s' "$c"
+      return 0
+    fi
+  done
+
+  printf '127.0.0.1'
+}
+
 _collect_domains() {
   local f d n
   local -a local_domains=() tool_domains=()
@@ -83,10 +142,11 @@ _collect_domains() {
 }
 
 _extract_leaf_cert() {
-  local domain="${1:-}"
-  local extra_args="${2:-}"
+  local target="${1:-127.0.0.1}"
+  local domain="${2:-}"
+  local extra_args="${3:-}"
   # shellcheck disable=SC2086
-  echo | openssl s_client -connect 127.0.0.1:443 -servername "$domain" -showcerts $extra_args 2>/dev/null |
+  echo | openssl s_client -connect "${target}:443" -servername "$domain" -showcerts $extra_args 2>/dev/null |
     awk '/-----BEGIN CERTIFICATE-----/{f=1} f{print} /-----END CERTIFICATE-----/{exit}' || true
 }
 
@@ -159,6 +219,8 @@ main() {
 
   local project
   project="$(_infer_project)"
+  local tls_target
+  tls_target="$(_detect_tls_target "$project")"
 
   if ! _has openssl || ! _has curl; then
     printf '{"ok":false,"error":"dependency_missing","message":"openssl and curl are required.","generated_at":"%s","project":"%s"}\n' \
@@ -193,7 +255,7 @@ main() {
   local san_block verify_out verify_code chain_ok chain_checked san_ok expiry_ok expiry_warn mtls_mode
   local curl_no_rc curl_no_code curl_mtls_rc curl_mtls_code mtls_ok no_client_ok note state
   for d in "${domains[@]}"; do
-    cert="$(_extract_leaf_cert "$d")"
+    cert="$(_extract_leaf_cert "$tls_target" "$d")"
     subject="-"
     expires_at="-"
     days_left=-1
@@ -259,13 +321,13 @@ main() {
 
     if ((rootca_available)); then
       chain_checked=1
-      verify_out="$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$d" -CAfile "$rootca" -verify_return_error 2>&1 || true)"
+      verify_out="$(echo | openssl s_client -connect "${tls_target}:443" -servername "$d" -CAfile "$rootca" -verify_return_error 2>&1 || true)"
       verify_code="$(printf '%s\n' "$verify_out" | sed -n 's/.*Verify return code: \([0-9][0-9]* ([^)]*)\).*/\1/p' | tail -n1)"
       if [[ "$verify_out" == *"Verify return code: 0 (ok)"* ]]; then
         chain_ok=1
         verify_code="0 (ok)"
       elif ((has_client)); then
-        verify_out="$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$d" -CAfile "$rootca" -verify_return_error -cert "$client_cert" -key "$client_key" 2>&1 || true)"
+        verify_out="$(echo | openssl s_client -connect "${tls_target}:443" -servername "$d" -CAfile "$rootca" -verify_return_error -cert "$client_cert" -key "$client_key" 2>&1 || true)"
         verify_code="$(printf '%s\n' "$verify_out" | sed -n 's/.*Verify return code: \([0-9][0-9]* ([^)]*)\).*/\1/p' | tail -n1)"
         if [[ "$verify_out" == *"Verify return code: 0 (ok)"* ]]; then
           chain_ok=1
@@ -279,7 +341,7 @@ main() {
     fi
 
     set +e
-    curl_no_code="$(curl -ksS --max-time "$timeout_sec" --resolve "${d}:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://${d}/" 2>/dev/null)"
+    curl_no_code="$(curl -ksS --max-time "$timeout_sec" --connect-to "${d}:443:${tls_target}:443" -o /dev/null -w '%{http_code}' "https://${d}/" 2>/dev/null)"
     curl_no_rc=$?
     set -e
     [[ "$curl_no_code" =~ ^[0-9]{3}$ ]] || curl_no_code="000"
@@ -291,7 +353,7 @@ main() {
     mtls_ok=0
     if ((has_client)); then
       set +e
-      curl_mtls_code="$(curl -ksS --max-time "$timeout_sec" --resolve "${d}:443:127.0.0.1" --cert "$client_cert" --key "$client_key" -o /dev/null -w '%{http_code}' "https://${d}/" 2>/dev/null)"
+      curl_mtls_code="$(curl -ksS --max-time "$timeout_sec" --connect-to "${d}:443:${tls_target}:443" --cert "$client_cert" --key "$client_key" -o /dev/null -w '%{http_code}' "https://${d}/" 2>/dev/null)"
       curl_mtls_rc=$?
       set -e
       [[ "$curl_mtls_code" =~ ^[0-9]{3}$ ]] || curl_mtls_code="000"
@@ -364,7 +426,7 @@ main() {
   printf '"ok":true,'
   printf '"generated_at":"%s",' "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
   printf '"project":"%s",' "$(_json_escape "$project")"
-  printf '"filters":{"domain":"%s","timeout":%s},' "$(_json_escape "$domain_filter")" "$timeout_sec"
+  printf '"filters":{"domain":"%s","timeout":%s,"target":"%s"},' "$(_json_escape "$domain_filter")" "$timeout_sec" "$(_json_escape "$tls_target")"
   printf '"summary":{"hosts":%d,"pass":%d,"warn":%d,"fail":%d,"mtls_required":%d,"mtls_broken":%d,"expiring_14d":%d,"expired":%d,"chain_unverified":%d},' \
     "$total" "$pass" "$warn" "$fail" "$mtls_required" "$mtls_broken" "$expiring" "$expired" "$chain_unverified"
   printf '"items":['

@@ -104,6 +104,7 @@ declare(strict_types=1);
     var nextRefreshAt = 0;
     var lastGeneratedAt = "";
     var activeProject = "-";
+    var activeTarget = "-";
     var loading = false;
 
     function esc(value) {
@@ -228,7 +229,7 @@ declare(strict_types=1);
       }
       if (lastUpdatedEl) {
         if (lastGeneratedAt) {
-          lastUpdatedEl.textContent = "Last update " + formatUpdatedAt(lastGeneratedAt) + " | Project " + activeProject;
+          lastUpdatedEl.textContent = "Last update " + formatUpdatedAt(lastGeneratedAt) + " | Project " + activeProject + " | Target " + activeTarget;
         } else if (loading) {
           lastUpdatedEl.textContent = "Waiting for response...";
         } else {
@@ -368,8 +369,9 @@ declare(strict_types=1);
           renderRows(payload);
           lastGeneratedAt = String(payload.generated_at || "");
           activeProject = String(payload.project || "-");
+          activeTarget = String(payload && payload.filters && payload.filters.target || "-");
           if (metaEl) {
-            metaEl.textContent = "Project: " + activeProject + " | Hosts: " + String((payload.summary && payload.summary.hosts) || 0);
+            metaEl.textContent = "Project: " + activeProject + " | Hosts: " + String((payload.summary && payload.summary.hosts) || 0) + " | Target: " + activeTarget;
           }
         })
         .catch(function (err) {

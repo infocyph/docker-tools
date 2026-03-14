@@ -27,9 +27,11 @@ final class Router
             [
                 'dashboard' => ['view' => 'dashboard', 'title' => 'Operations Overview | Admin Panel'],
                 'logs' => ['view' => 'logs', 'title' => 'Log Streams | Admin Panel'],
+                'docker-logs' => ['view' => 'docker_logs', 'title' => 'Docker Logs | Admin Panel'],
                 'live-stats' => ['view' => 'live_stats', 'title' => 'Live Stack Telemetry | Admin Panel'],
             ],
             [
+                'docker_logs' => 'docker-logs',
                 'live_stats' => 'live-stats',
             ],
         );

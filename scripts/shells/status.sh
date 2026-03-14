@@ -2600,16 +2600,199 @@ _status_core() {
   fi
 }
 
+_status_docker_logs_json() {
+  local svc_filter="${1:-}" since="${2:-}" grep_pat="${3:-}" tail="${4:-80}"
+  local project project_display
+  project="$(lds_project)"
+  project_display="${__STATUS_PROJECT_DISPLAY:-$project}"
+
+  [[ "$tail" =~ ^[0-9]+$ ]] || tail=80
+  ((tail < 1)) && tail=1
+  ((tail > 500)) && tail=500
+
+  svc_filter="$(normalize_service "$svc_filter")"
+  if [[ "$svc_filter" == "all" ]]; then
+    svc_filter=""
+  fi
+
+  _json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf "%s" "$s"
+  }
+
+  local -a cids=() ctrs=()
+  mapfile -t cids < <(_status_project_cids)
+  if ((${#cids[@]})); then
+    mapfile -t ctrs < <(
+      docker inspect -f '{{.Name}}|{{ index .Config.Labels "com.docker.compose.service" }}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+        "${cids[@]}" 2>/dev/null |
+        sed 's#^/##' |
+        sed '/^[[:space:]]*$/d' |
+        sort
+    )
+  fi
+
+  declare -A svc_seen=()
+  local -a services=()
+  local line n s st h
+  for line in "${ctrs[@]}"; do
+    IFS='|' read -r n s st h <<<"$line"
+    s="$(normalize_service "$s")"
+    [[ -n "$s" ]] || continue
+    if [[ -z "${svc_seen[$s]+x}" ]]; then
+      svc_seen["$s"]=1
+      services+=("$s")
+    fi
+  done
+  if ((${#services[@]})); then
+    mapfile -t services < <(printf '%s\n' "${services[@]}" | sort -u)
+  fi
+
+  local generated_at
+  generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
+
+  printf '{'
+  printf '"ok":true,'
+  printf '"generated_at":"%s",' "$(_json_escape "$generated_at")"
+  printf '"project":"%s",' "$(_json_escape "$project_display")"
+  printf '"filters":{"service":"%s","since":"%s","grep":"%s","tail":%s},' \
+    "$(_json_escape "$svc_filter")" "$(_json_escape "$since")" "$(_json_escape "$grep_pat")" "$tail"
+
+  printf '"services_available":['
+  local sf=1 svc
+  for svc in "${services[@]}"; do
+    ((sf)) || printf ","
+    sf=0
+    printf '"%s"' "$(_json_escape "$svc")"
+  done
+  printf '],'
+
+  printf '"groups":['
+  local gf=1
+  for svc in "${services[@]}"; do
+    [[ -n "$svc_filter" && "$svc" != "$svc_filter" ]] && continue
+
+    local -a svc_rows=()
+    for line in "${ctrs[@]}"; do
+      IFS='|' read -r n s st h <<<"$line"
+      s="$(normalize_service "$s")"
+      [[ "$s" == "$svc" ]] || continue
+      svc_rows+=("$n|$st|$h")
+    done
+    ((${#svc_rows[@]})) || continue
+
+    ((gf)) || printf ","
+    gf=0
+
+    printf '{'
+    printf '"service":"%s",' "$(_json_escape "$svc")"
+
+    printf '"containers":['
+    local cf=1 row cn cst ch
+    for row in "${svc_rows[@]}"; do
+      IFS='|' read -r cn cst ch <<<"$row"
+      [[ -n "$ch" && "$ch" != "null" ]] || ch="-"
+      ((cf)) || printf ","
+      cf=0
+      printf '{"name":"%s","state":"%s","health":"%s"}' \
+        "$(_json_escape "$cn")" "$(_json_escape "${cst:--}")" "$(_json_escape "$ch")"
+    done
+    printf '],'
+
+    local -a all_lines=()
+    for row in "${svc_rows[@]}"; do
+      IFS='|' read -r cn cst ch <<<"$row"
+      local -a cmd=(docker logs --timestamps --tail "$tail")
+      [[ -n "$since" ]] && cmd+=(--since "$since")
+      cmd+=("$cn")
+
+      local -a raw_lines=()
+      mapfile -t raw_lines < <("${cmd[@]}" 2>&1 || true)
+
+      local ln
+      for ln in "${raw_lines[@]}"; do
+        [[ -n "$ln" ]] || continue
+        if [[ -n "$grep_pat" ]]; then
+          shopt -s nocasematch
+          [[ "$ln" == *"$grep_pat"* ]] || {
+            shopt -u nocasematch
+            continue
+          }
+          shopt -u nocasematch
+        fi
+        all_lines+=("[$cn] $ln")
+      done
+    done
+
+    printf '"lines":['
+    local lf=1 ln
+    for ln in "${all_lines[@]}"; do
+      ((lf)) || printf ","
+      lf=0
+      printf '"%s"' "$(_json_escape "$ln")"
+    done
+    printf '],'
+    printf '"line_count":%s' "${#all_lines[@]}"
+    printf '}'
+  done
+  printf ']'
+  printf '}\n'
+}
+
 cmd_status() {
-  local json=0 quiet=0
+  local json=0 quiet=0 docker_logs_json=0
+  local logs_service="" logs_since="" logs_grep="" logs_tail="80"
   while [[ "${1:-}" ]]; do
     case "$1" in
       --json) json=1; shift ;;
+      --docker-logs-json) docker_logs_json=1; shift ;;
+      --service)
+        if ((docker_logs_json)); then
+          logs_service="${2:-}"
+          shift 2
+        else
+          break
+        fi
+        ;;
+      --since)
+        if ((docker_logs_json)); then
+          logs_since="${2:-}"
+          shift 2
+        else
+          break
+        fi
+        ;;
+      --grep)
+        if ((docker_logs_json)); then
+          logs_grep="${2:-}"
+          shift 2
+        else
+          break
+        fi
+        ;;
+      --tail)
+        if ((docker_logs_json)); then
+          logs_tail="${2:-}"
+          shift 2
+        else
+          break
+        fi
+        ;;
       --quiet|-q) quiet=1; shift ;;
       -h|--help) usage; return 0 ;;
       *) break ;;
     esac
   done
+
+  if ((docker_logs_json)); then
+    _status_docker_logs_json "$logs_service" "$logs_since" "$logs_grep" "$logs_tail"
+    return 0
+  fi
 
   if ((json)); then
     _status_full_json "${1:-}"
@@ -2657,10 +2840,12 @@ usage() {
   cat <<'EOF'
 Usage:
   status [--json] [--quiet] [service]
+  status --docker-logs-json [--service <svc>] [--since <dur>] [--grep <text>] [--tail <n>]
 
 Examples:
   status
   status --json
+  status --docker-logs-json --since 30m --tail 120
   status php82
   STATUS_PROJECT=LocalDevStack status
 EOF

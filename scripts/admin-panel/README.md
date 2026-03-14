@@ -31,12 +31,14 @@ Open:
 Additional routes:
 
 - `http://localhost:9920/logs`
+- `http://localhost:9920/docker-logs`
 - `http://localhost:9920/live-stats`
 
 AJAX data endpoint:
 
 - `http://localhost:9920/api/live-stats` (powered by full `status --json` payload)
   - Includes `core`, `sections`, `checks`, and derived summary fields.
+- `http://localhost:9920/api/docker-logs` (service-grouped container logs; supports `service`, `since`, `grep`, `tail`)
 
 ## Notes
 

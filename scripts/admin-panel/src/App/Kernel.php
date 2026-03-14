@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace AdminPanel\App;
 
+use AdminPanel\Api\DockerLogsEndpoint;
 use AdminPanel\Api\LogsEntriesEndpoint;
 use AdminPanel\Api\LogsFilesEndpoint;
 use AdminPanel\Api\LiveStatsEndpoint;
@@ -18,6 +19,7 @@ final class Kernel
     private Router $router;
     private AjaxResponder $ajaxResponder;
     private LiveStatsEndpoint $liveStatsEndpoint;
+    private DockerLogsEndpoint $dockerLogsEndpoint;
     private LogsFilesEndpoint $logsFilesEndpoint;
     private LogsEntriesEndpoint $logsEntriesEndpoint;
 
@@ -26,6 +28,7 @@ final class Kernel
         ?Router $router = null,
         ?AjaxResponder $ajaxResponder = null,
         ?LiveStatsEndpoint $liveStatsEndpoint = null,
+        ?DockerLogsEndpoint $dockerLogsEndpoint = null,
         ?LogsFilesEndpoint $logsFilesEndpoint = null,
         ?LogsEntriesEndpoint $logsEntriesEndpoint = null
     )
@@ -36,6 +39,7 @@ final class Kernel
         $this->router = $router ?? Router::defaults();
         $this->ajaxResponder = $ajaxResponder ?? new AjaxResponder();
         $this->liveStatsEndpoint = $liveStatsEndpoint ?? new LiveStatsEndpoint();
+        $this->dockerLogsEndpoint = $dockerLogsEndpoint ?? new DockerLogsEndpoint();
         $this->logsFilesEndpoint = $logsFilesEndpoint ?? new LogsFilesEndpoint();
         $this->logsEntriesEndpoint = $logsEntriesEndpoint ?? new LogsEntriesEndpoint();
     }
@@ -49,6 +53,10 @@ final class Kernel
         $path = $this->normalizePath($server);
         if ($path === '/api/live-stats') {
             $this->liveStatsEndpoint->handle();
+            return;
+        }
+        if ($path === '/api/docker-logs') {
+            $this->dockerLogsEndpoint->handle($query);
             return;
         }
         if ($path === '/api/logs/files') {

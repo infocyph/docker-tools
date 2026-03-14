@@ -2696,3 +2696,130 @@ body.ap-live-compact .ap-live-item {
     font-size: 12px;
   }
 }
+
+.ap-state-chip {
+  font-weight: 600;
+}
+
+.ap-docker-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 31px;
+  padding: 4px 11px;
+}
+
+.ap-docker-summary-lines {
+  display: grid;
+  gap: 8px;
+}
+
+.ap-docker-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--ap-border) 70%, transparent);
+  background: color-mix(in srgb, var(--ap-surface-2) 72%, transparent);
+}
+
+.ap-docker-summary-row .ap-kv-group,
+.ap-docker-summary-row .ap-badge {
+  flex: 0 0 auto;
+}
+
+.ap-docker-status-badge {
+  gap: 6px;
+  padding: 4px 10px;
+}
+
+.ap-docker-status-badge .ap-state-icon,
+.ap-docker-status-badge .ap-health-icon {
+  width: 14px;
+  height: 14px;
+  font-size: 11px;
+  cursor: default;
+}
+
+.ap-docker-status-label {
+  line-height: 1;
+}
+
+.ap-docker-logs-pre {
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px;
+  margin: 0;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--ap-border) 70%, transparent);
+  background: color-mix(in srgb, var(--ap-surface-2) 84%, transparent);
+  color: var(--ap-text);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ap-docker-tabs-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--ap-border) 70%, transparent);
+  background: color-mix(in srgb, var(--ap-surface-2) 22%, transparent);
+  padding: 0 10px;
+}
+
+.ap-docker-tabs {
+  flex-wrap: nowrap;
+  min-width: max-content;
+  border-bottom-color: color-mix(in srgb, var(--ap-border) 76%, transparent);
+}
+
+.ap-docker-tabs .nav-link {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--ap-muted);
+  background: transparent;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.ap-docker-tabs .nav-link:hover {
+  color: var(--ap-text);
+  border-bottom-color: color-mix(in srgb, var(--ap-accent) 42%, transparent);
+}
+
+.ap-docker-tabs .nav-link.active {
+  color: var(--ap-text);
+  background: transparent;
+  border-bottom-color: var(--ap-accent);
+}
+
+.ap-docker-services-pane {
+  display: grid;
+  gap: 8px;
+}
+
+.ap-docker-tool-select {
+  min-width: 132px;
+  width: 132px;
+  flex: 0 0 132px;
+}
+
+.ap-docker-auto-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  flex: 0 0 auto;
+}
+
+.ap-docker-auto-btn.is-active {
+  background: var(--ap-primary-soft);
+  color: var(--ap-primary);
+  border-color: color-mix(in srgb, var(--ap-primary) 45%, var(--ap-border));
+}

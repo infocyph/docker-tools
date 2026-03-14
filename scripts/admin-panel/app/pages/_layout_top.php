@@ -54,7 +54,7 @@ $routeHref = static function (string $slug = '') use ($basePath): string {
     }
     return $basePath . '/' . $clean;
 };
-$monitoringActive = in_array($activePage, ['logs', 'live-stats'], true);
+$monitoringActive = in_array($activePage, ['logs', 'docker-logs', 'live-stats'], true);
 $topbarPageTitle = trim((string)preg_replace('/\s*\|\s*Admin Panel\s*$/i', '', $pageTitle));
 if ($topbarPageTitle === '') {
     $topbarPageTitle = $pageTitle;
@@ -127,9 +127,13 @@ if ($topbarPageTitle === '') {
             <i class="bi bi-chevron-down ap-nav-caret" aria-hidden="true"></i>
           </button>
           <div id="apNavMonitoringSubmenu" class="ap-nav-submenu <?= $monitoringActive ? 'is-open' : '' ?>" aria-label="Monitoring submenu">
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'docker-logs' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('docker-logs'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-terminal-split"></i>
+              <span>Docker Logs</span>
+            </a>
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'logs' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('logs'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-file-earmark-text"></i>
-              <span>Logs</span>
+              <span>File Logs</span>
             </a>
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'live-stats' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('live-stats'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-activity"></i>

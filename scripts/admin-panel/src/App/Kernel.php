@@ -4,9 +4,19 @@ declare(strict_types=1);
 namespace AdminPanel\App;
 
 use AdminPanel\Api\DockerLogsEndpoint;
+use AdminPanel\Api\DbHealthEndpoint;
+use AdminPanel\Api\DriftMonitorEndpoint;
+use AdminPanel\Api\AlertsEndpoint;
+use AdminPanel\Api\LogHeatmapEndpoint;
 use AdminPanel\Api\LogsEntriesEndpoint;
 use AdminPanel\Api\LogsFilesEndpoint;
 use AdminPanel\Api\LiveStatsEndpoint;
+use AdminPanel\Api\QueueHealthEndpoint;
+use AdminPanel\Api\RuntimeWatchEndpoint;
+use AdminPanel\Api\SloViewEndpoint;
+use AdminPanel\Api\SyntheticFlowsEndpoint;
+use AdminPanel\Api\TlsMonitorEndpoint;
+use AdminPanel\Api\VolumeMonitorEndpoint;
 use AdminPanel\Http\AjaxResponder;
 use AdminPanel\Http\RequestContext;
 use AdminPanel\Routing\Router;
@@ -20,6 +30,16 @@ final class Kernel
     private AjaxResponder $ajaxResponder;
     private LiveStatsEndpoint $liveStatsEndpoint;
     private DockerLogsEndpoint $dockerLogsEndpoint;
+    private DbHealthEndpoint $dbHealthEndpoint;
+    private QueueHealthEndpoint $queueHealthEndpoint;
+    private SloViewEndpoint $sloViewEndpoint;
+    private LogHeatmapEndpoint $logHeatmapEndpoint;
+    private DriftMonitorEndpoint $driftMonitorEndpoint;
+    private AlertsEndpoint $alertsEndpoint;
+    private SyntheticFlowsEndpoint $syntheticFlowsEndpoint;
+    private RuntimeWatchEndpoint $runtimeWatchEndpoint;
+    private TlsMonitorEndpoint $tlsMonitorEndpoint;
+    private VolumeMonitorEndpoint $volumeMonitorEndpoint;
     private LogsFilesEndpoint $logsFilesEndpoint;
     private LogsEntriesEndpoint $logsEntriesEndpoint;
 
@@ -29,6 +49,16 @@ final class Kernel
         ?AjaxResponder $ajaxResponder = null,
         ?LiveStatsEndpoint $liveStatsEndpoint = null,
         ?DockerLogsEndpoint $dockerLogsEndpoint = null,
+        ?DbHealthEndpoint $dbHealthEndpoint = null,
+        ?QueueHealthEndpoint $queueHealthEndpoint = null,
+        ?SloViewEndpoint $sloViewEndpoint = null,
+        ?LogHeatmapEndpoint $logHeatmapEndpoint = null,
+        ?DriftMonitorEndpoint $driftMonitorEndpoint = null,
+        ?AlertsEndpoint $alertsEndpoint = null,
+        ?SyntheticFlowsEndpoint $syntheticFlowsEndpoint = null,
+        ?RuntimeWatchEndpoint $runtimeWatchEndpoint = null,
+        ?TlsMonitorEndpoint $tlsMonitorEndpoint = null,
+        ?VolumeMonitorEndpoint $volumeMonitorEndpoint = null,
         ?LogsFilesEndpoint $logsFilesEndpoint = null,
         ?LogsEntriesEndpoint $logsEntriesEndpoint = null
     )
@@ -40,6 +70,16 @@ final class Kernel
         $this->ajaxResponder = $ajaxResponder ?? new AjaxResponder();
         $this->liveStatsEndpoint = $liveStatsEndpoint ?? new LiveStatsEndpoint();
         $this->dockerLogsEndpoint = $dockerLogsEndpoint ?? new DockerLogsEndpoint();
+        $this->dbHealthEndpoint = $dbHealthEndpoint ?? new DbHealthEndpoint();
+        $this->queueHealthEndpoint = $queueHealthEndpoint ?? new QueueHealthEndpoint();
+        $this->sloViewEndpoint = $sloViewEndpoint ?? new SloViewEndpoint();
+        $this->logHeatmapEndpoint = $logHeatmapEndpoint ?? new LogHeatmapEndpoint();
+        $this->driftMonitorEndpoint = $driftMonitorEndpoint ?? new DriftMonitorEndpoint();
+        $this->alertsEndpoint = $alertsEndpoint ?? new AlertsEndpoint();
+        $this->syntheticFlowsEndpoint = $syntheticFlowsEndpoint ?? new SyntheticFlowsEndpoint();
+        $this->runtimeWatchEndpoint = $runtimeWatchEndpoint ?? new RuntimeWatchEndpoint();
+        $this->tlsMonitorEndpoint = $tlsMonitorEndpoint ?? new TlsMonitorEndpoint();
+        $this->volumeMonitorEndpoint = $volumeMonitorEndpoint ?? new VolumeMonitorEndpoint();
         $this->logsFilesEndpoint = $logsFilesEndpoint ?? new LogsFilesEndpoint();
         $this->logsEntriesEndpoint = $logsEntriesEndpoint ?? new LogsEntriesEndpoint();
     }
@@ -57,6 +97,46 @@ final class Kernel
         }
         if ($path === '/api/docker-logs') {
             $this->dockerLogsEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/db-health') {
+            $this->dbHealthEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/queue-health') {
+            $this->queueHealthEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/slo-view') {
+            $this->sloViewEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/log-heatmap') {
+            $this->logHeatmapEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/drift-monitor') {
+            $this->driftMonitorEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/alerts') {
+            $this->alertsEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/synthetic-flows') {
+            $this->syntheticFlowsEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/runtime-watch') {
+            $this->runtimeWatchEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/tls-monitor') {
+            $this->tlsMonitorEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/volume-monitor') {
+            $this->volumeMonitorEndpoint->handle($query);
             return;
         }
         if ($path === '/api/logs/files') {

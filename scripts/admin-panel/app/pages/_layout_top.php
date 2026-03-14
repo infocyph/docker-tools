@@ -54,7 +54,7 @@ $routeHref = static function (string $slug = '') use ($basePath): string {
     }
     return $basePath . '/' . $clean;
 };
-$monitoringActive = in_array($activePage, ['logs', 'docker-logs', 'live-stats'], true);
+$monitoringActive = in_array($activePage, ['logs', 'docker-logs', 'db-health', 'queue-health', 'slo-view', 'log-heatmap', 'drift-monitor', 'alerts', 'synthetic-flows', 'tls-monitor', 'runtime-watch', 'volume-monitor', 'live-stats'], true);
 $topbarPageTitle = trim((string)preg_replace('/\s*\|\s*Admin Panel\s*$/i', '', $pageTitle));
 if ($topbarPageTitle === '') {
     $topbarPageTitle = $pageTitle;
@@ -131,9 +131,49 @@ if ($topbarPageTitle === '') {
               <i class="bi bi-terminal-split"></i>
               <span>Docker Logs</span>
             </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'db-health' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('db-health'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-database-check"></i>
+              <span>DB / Redis Health</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'queue-health' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('queue-health'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-list-task"></i>
+              <span>Queue / Cron</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'slo-view' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('slo-view'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-speedometer"></i>
+              <span>Error Budget / SLO</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'log-heatmap' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('log-heatmap'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-grid-3x3-gap"></i>
+              <span>Log Error Heatmap</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'drift-monitor' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('drift-monitor'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-sliders"></i>
+              <span>Config Drift</span>
+            </a>
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'logs' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('logs'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-file-earmark-text"></i>
               <span>File Logs</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'synthetic-flows' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('synthetic-flows'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-diagram-3"></i>
+              <span>Synthetic Flows</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'tls-monitor' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('tls-monitor'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-shield-lock"></i>
+              <span>TLS / mTLS</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'runtime-watch' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('runtime-watch'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-heart-pulse"></i>
+              <span>Runtime Watch</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'volume-monitor' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('volume-monitor'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-hdd-stack"></i>
+              <span>Volume Growth</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'alerts' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('alerts'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-bell"></i>
+              <span>Alert Rules</span>
             </a>
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'live-stats' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('live-stats'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-activity"></i>

@@ -185,6 +185,16 @@ COPY scripts/shells/notify.sh /usr/local/bin/notify
 COPY scripts/shells/senv.sh /usr/local/bin/senv
 COPY scripts/shells/domain-which.sh /usr/local/bin/domain-which
 COPY scripts/shells/status.sh /usr/local/bin/status
+COPY scripts/shells/monitor-flows.sh /usr/local/bin/monitor-flows
+COPY scripts/shells/monitor-runtime.sh /usr/local/bin/monitor-runtime
+COPY scripts/shells/monitor-tls.sh /usr/local/bin/monitor-tls
+COPY scripts/shells/monitor-db.sh /usr/local/bin/monitor-db
+COPY scripts/shells/monitor-volumes.sh /usr/local/bin/monitor-volumes
+COPY scripts/shells/monitor-queue.sh /usr/local/bin/monitor-queue
+COPY scripts/shells/monitor-slo.sh /usr/local/bin/monitor-slo
+COPY scripts/shells/monitor-log-heatmap.sh /usr/local/bin/monitor-log-heatmap
+COPY scripts/shells/monitor-drift.sh /usr/local/bin/monitor-drift
+COPY scripts/shells/monitor-alerts.sh /usr/local/bin/monitor-alerts
 COPY scripts/shells/env-store.sh /usr/local/bin/env-store
 COPY scripts/shells/profile-chooser.sh /usr/local/bin/profile-chooser
 COPY scripts/shells/init-fpm-pool-dirs.sh /usr/local/bin/init-fpm-pool-dirs
@@ -218,6 +228,16 @@ RUN chmod +x \
       /usr/local/bin/senv \
       /usr/local/bin/domain-which \
       /usr/local/bin/status \
+      /usr/local/bin/monitor-flows \
+      /usr/local/bin/monitor-runtime \
+      /usr/local/bin/monitor-tls \
+      /usr/local/bin/monitor-db \
+      /usr/local/bin/monitor-volumes \
+      /usr/local/bin/monitor-queue \
+      /usr/local/bin/monitor-slo \
+      /usr/local/bin/monitor-log-heatmap \
+      /usr/local/bin/monitor-drift \
+      /usr/local/bin/monitor-alerts \
       /usr/local/bin/env-store \
       /usr/local/bin/profile-chooser \
       /usr/local/bin/init-fpm-pool-dirs \

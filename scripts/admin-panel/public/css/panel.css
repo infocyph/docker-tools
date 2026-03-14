@@ -213,7 +213,7 @@ body.ap-page {
 }
 
 .ap-nav-submenu.is-open {
-  max-height: 180px;
+  max-height: 560px;
   opacity: 1;
   margin: 0 0 6px;
 }
@@ -2822,4 +2822,10 @@ body.ap-live-compact .ap-live-item {
   background: var(--ap-primary-soft);
   color: var(--ap-primary);
   border-color: color-mix(in srgb, var(--ap-primary) 45%, var(--ap-border));
+}
+
+.ap-monitor-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }

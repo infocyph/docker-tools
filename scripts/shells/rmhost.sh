@@ -2,8 +2,7 @@
 # rmhost - remove vhost configs for domain(s) (nginx/apache/docker-compose)
 #        - if no args: shows domain list from nginx and lets you select by numbers (1,2,6 / 1 2 6)
 #        - deletes relevant nginx/apache/docker-compose files
-#        - sets delete intents in ENV_STORE:
-#            APACHE_DELETE, DELETE_PHP_PROFILE, DELETE_NODE_PROFILE
+#        - sets delete intents in ENV_STORE: APACHE_DELETE
 set -euo pipefail
 
 ###############################################################################
@@ -61,10 +60,8 @@ env_set_json() {
 }
 
 rmhost_sync_state() {
-  local ts php_del node_del apache_del domains_json state_json
+  local ts apache_del domains_json state_json
   ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
-  php_del="$(env_get "DELETE_PHP_PROFILE")"
-  node_del="$(env_get "DELETE_NODE_PROFILE")"
   apache_del="$(env_get "APACHE_DELETE")"
   domains_json='[]'
 
@@ -76,16 +73,12 @@ rmhost_sync_state() {
 
   state_json="$(jq -cn \
     --arg ts "$ts" \
-    --arg php_del "$php_del" \
-    --arg node_del "$node_del" \
     --arg apache_del "$apache_del" \
     --argjson domains "$domains_json" \
     '{
       version: 1,
       updated_at: $ts,
       state: {
-        delete_php_profile: $php_del,
-        delete_node_profile: $node_del,
         apache_delete: $apache_del
       },
       deleted_domains: $domains
@@ -96,27 +89,6 @@ rmhost_sync_state() {
 
 rmhost_get_state_json() {
   env_store_exec get-json "$RMHOST_STATE_KEY" --default-json '{}' || printf '{}\n'
-}
-
-env_add_csv_unique() {
-  # env_add_csv_unique KEY VALUE  => append VALUE to KEY as comma-list (unique)
-  local key="$1" value="$2"
-  value="$(trim "$value")"
-  [[ -n "$value" ]] || return 0
-
-  local cur; cur="$(trim "$(env_get "$key")")"
-  if [[ -z "$cur" ]]; then
-    env_set "$key" "$value"
-    return 0
-  fi
-
-  local IFS=',' x
-  for x in $cur; do
-    x="$(trim "$x")"
-    [[ "$x" == "$value" ]] && return 0
-  done
-
-  env_set "$key" "${cur},${value}"
 }
 
 ###############################################################################
@@ -232,38 +204,23 @@ pick_domains_interactive() {
 }
 
 ###############################################################################
-# PHP profile inference + reference scan
+# Apache presence scan
 ###############################################################################
-extract_php_version_from_file() {
-  local f="$1"
-  [[ -r "$f" ]] || return 0
-  grep -Eo 'PHP_[0-9]+\.[0-9]+' "$f" 2>/dev/null | head -n1 | sed -E 's/^PHP_//' || true
-}
-
-php_profile_from_version() {
-  local v="$1"
-  [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]] || { echo ""; return 0; }
-  echo "php${v//./}"
-}
-
-any_vhost_references_php_version() {
-  local ver="$1"
-  [[ -n "$ver" ]] || return 1
-  local pat="PHP_${ver}"
-  [[ -d "$NGINX_DIR"  ]] && grep -R -n -F "$pat" "$NGINX_DIR"  >/dev/null 2>&1 && return 0
-  [[ -d "$APACHE_DIR" ]] && grep -R -n -F "$pat" "$APACHE_DIR" >/dev/null 2>&1 && return 0
-  return 1
-}
-
 apache_has_any_vhosts() {
   [[ -d "$APACHE_DIR" ]] || return 1
   find "$APACHE_DIR" -maxdepth 1 -type f -name '*.conf' -print -quit 2>/dev/null | grep -q .
 }
 
+php_profile_has_any_fpm_confs() {
+  local profile="$1"
+  [[ -n "$profile" ]] || return 1
+  find "${FPM_DIR}/${profile}" -maxdepth 1 -type f -name '*.conf' -print -quit 2>/dev/null | grep -q .
+}
+
 ###############################################################################
 # Plan build + execution
 ###############################################################################
-# Plan rows: domain<TAB>token<TAB>nginx_conf<TAB>apache_conf<TAB>node_yaml<TAB>php_ver<TAB>del_nginx<TAB>del_apache<TAB>del_node
+# Plan rows: domain<TAB>token<TAB>nginx_conf<TAB>apache_conf<TAB>node_yaml<TAB>fpm_conf<TAB>del_nginx<TAB>del_apache<TAB>del_node<TAB>del_fpm
 build_plan_for_domain() {
   local domain="$1"
   validate_domain "$domain" || { warn "Skipping invalid domain: $domain"; return 3; }
@@ -290,25 +247,21 @@ build_plan_for_domain() {
   [[ -e "$nginx_conf"  ]] && del_nginx="y"
   [[ -e "$apache_conf" ]] && del_apache="y"
   [[ -e "$node_yaml"   ]] && del_node="y"
-  [[ -e "$fpm_conf"   ]] && del_fpm="y"
+  ((${#fpm_confs[@]} > 0)) && del_fpm="y"
 
   if [[ "$del_nginx$del_apache$del_node$del_fpm" == "nnnn" ]]; then
     warn "Nothing to delete for ${domain}"
     return 2
   fi
 
-  local php_ver=""
-  [[ "$del_nginx" == "y"  ]] && php_ver="$(extract_php_version_from_file "$nginx_conf"  || true)"
-  [[ -z "$php_ver" && "$del_apache" == "y" ]] && php_ver="$(extract_php_version_from_file "$apache_conf" || true)"
-
-  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-    "$domain" "$token" "$nginx_conf" "$apache_conf" "$node_yaml" "$fpm_conf" "$php_ver" "$del_nginx" "$del_apache" "$del_node" "$del_fpm"
+  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+    "$domain" "$token" "$nginx_conf" "$apache_conf" "$node_yaml" "$fpm_conf" "$del_nginx" "$del_apache" "$del_node" "$del_fpm"
 }
 
 print_plan() {
   local plan="$1"
   say "${CYAN}${BOLD}Planned deletions:${NC}"
-  while IFS=$'\t' read -r domain token nginx_conf apache_conf node_yaml fpm_conf php_ver del_nginx del_apache del_node del_fpm; do
+  while IFS=$'\t' read -r domain token nginx_conf apache_conf node_yaml fpm_conf del_nginx del_apache del_node del_fpm; do
     say "${YELLOW}- ${domain}${NC} ${DIM}(token=${token})${NC}"
     [[ "$del_nginx"  == "y" ]] && say "   ${DIM}- ${nginx_conf}${NC}"
     [[ "$del_apache" == "y" ]] && say "   ${DIM}- ${apache_conf}${NC}"
@@ -325,14 +278,14 @@ print_plan() {
 
 execute_plan() {
   local plan="$1"
+  local -a touched_php_profiles=()
+  local touched_seen="|"
   REMOVED_DOMAINS=()
 
-  # Clear delete envs for this run
+  # Clear apache delete intent for this run
   env_set "APACHE_DELETE" ""
-  env_set "DELETE_PHP_PROFILE" ""
-  env_set "DELETE_NODE_PROFILE" ""
 
-  while IFS=$'\t' read -r domain token nginx_conf apache_conf node_yaml fpm_conf php_ver del_nginx del_apache del_node del_fpm; do
+  while IFS=$'\t' read -r domain token nginx_conf apache_conf node_yaml fpm_conf del_nginx del_apache del_node del_fpm; do
     say "${CYAN}${BOLD}Deleting:${NC} ${BOLD}${domain}${NC}"
 
     if [[ "$del_nginx" == "y" ]]; then
@@ -346,23 +299,39 @@ execute_plan() {
 
     if [[ "$del_node" == "y" ]]; then
       rm -f -- "$node_yaml"
-      env_add_csv_unique "DELETE_NODE_PROFILE" "node_${token}"
     fi
 
     if [[ "$del_fpm" == "y" ]]; then
-      rm -f -- "$fpm_conf"
+      IFS=',' read -r -a _fpm_list <<<"$fpm_conf"
+      local _f _prof
+      for _f in "${_fpm_list[@]}"; do
+        [[ -n "$_f" ]] || continue
+        rm -f -- "$_f"
+        _prof="$(basename "$(dirname "$_f")")"
+        if [[ "$_prof" =~ ^php[0-9]+$ ]] && [[ "$touched_seen" != *"|${_prof}|"* ]]; then
+          touched_seen="${touched_seen}${_prof}|"
+          touched_php_profiles+=("$_prof")
+        fi
+      done
     fi
 
-    if [[ -n "$php_ver" ]]; then
-      local php_profile; php_profile="$(php_profile_from_version "$php_ver")"
-      if [[ -n "$php_profile" ]] && ! any_vhost_references_php_version "$php_ver"; then
-        env_add_csv_unique "DELETE_PHP_PROFILE" "$php_profile"
-      fi
-    fi
     REMOVED_DOMAINS+=("$domain")
 
     echo
   done <"$plan"
+
+  # Remove per-version PHP compose files when no domain FPM pools remain for that version.
+  local profile compose_yaml
+  for profile in "${touched_php_profiles[@]}"; do
+    [[ -n "$profile" ]] || continue
+    if ! php_profile_has_any_fpm_confs "$profile"; then
+      compose_yaml="${COMPOSE_DIR}/${profile}.yaml"
+      if [[ -e "$compose_yaml" ]]; then
+        rm -f -- "$compose_yaml"
+        ok "  ✔ Removed unused PHP compose: ${compose_yaml}"
+      fi
+    fi
+  done
 
   # If there is no apache vhost conf left -> request removing apache profile.
   if ! apache_has_any_vhosts; then
@@ -380,13 +349,9 @@ execute_plan() {
 case "${1:-}" in
 --RESET)
   env_set "APACHE_DELETE" ""
-  env_set "DELETE_PHP_PROFILE" ""
-  env_set "DELETE_NODE_PROFILE" ""
   REMOVED_DOMAINS=()
   rmhost_sync_state
   ;;
---DELETE_PHP_PROFILE)  env_get "DELETE_PHP_PROFILE" ;;
---DELETE_NODE_PROFILE) env_get "DELETE_NODE_PROFILE" ;;
 --APACHE_DELETE)       env_get "APACHE_DELETE" ;;
 --JSON|--STATE_JSON)   rmhost_get_state_json ;;
 *)

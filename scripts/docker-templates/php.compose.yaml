@@ -43,4 +43,3 @@ services:
         PHP_VERSION: {{PHP_VERSION}}
         PHP_EXT_VERSIONED: ${PHP_EXT_{{PHP_KEY}}:-}
         LINUX_PKG_VERSIONED: ${LINUX_PKG_{{PHP_KEY}}:-}
-    profiles: [php, {{PHP_PROFILE}}]

@@ -43,7 +43,7 @@ A lightweight, multi-tool Docker image for:
 - `mkhost` generates Nginx/Apache vhost configs using predefined templates
 - Uses runtime-versions DB baked during build:
   - `/etc/share/runtime-versions.json` (override via `RUNTIME_VERSIONS_DB`)
-- Stores runtime state in `env-store` (JSON), including helper query/reset flags (`ACTIVE_PHP_PROFILE`, `ACTIVE_NODE_PROFILE`, `APACHE_ACTIVE`)
+- Stores runtime state in `env-store` (JSON), including helper query/reset flags (`APACHE_ACTIVE`)
 
 ### 3) SOPS/Age encrypted env workflow (Model B)
 - `age` + `sops` installed
@@ -291,7 +291,7 @@ It runs a guided 9-step flow (slightly different for PHP vs Node):
 * Client body size
 * Runtime version selection:
 
-    * PHP: choose PHP version/profile
+    * PHP: choose PHP version
     * Node: choose Node version + optional run command
 * If HTTPS: optional client certificate verification (mutual TLS)
 
@@ -301,20 +301,16 @@ If you enable HTTPS, `mkhost` triggers `certify` automatically so the required c
 
 ### Helpful flags
 
-`mkhost` stores the “active selections” in `env-store` (used by your `server` wrapper to enable compose profiles).
+`mkhost` stores state in `env-store`.
 You can query/reset these values:
 
 ```bash
 mkhost --RESET
-mkhost --ACTIVE_PHP_PROFILE
-mkhost --ACTIVE_NODE_PROFILE
 mkhost --APACHE_ACTIVE
 mkhost --JSON
 ```
 
-* `--RESET` clears all active selections.
-* `--ACTIVE_PHP_PROFILE` prints the chosen PHP profile (if PHP was selected).
-* `--ACTIVE_NODE_PROFILE` prints the chosen Node profile (if Node was selected).
+* `--RESET` clears mkhost state.
 * `--APACHE_ACTIVE` prints `apache` when Apache mode was selected.
 * `--JSON` prints structured state from key `MKHOST_STATE`.
 
@@ -357,8 +353,6 @@ State/query flags:
 
 ```bash
 rmhost --RESET
-rmhost --DELETE_PHP_PROFILE
-rmhost --DELETE_NODE_PROFILE
 rmhost --APACHE_DELETE
 rmhost --JSON
 ```
@@ -464,11 +458,8 @@ Common structured keys used by bundled scripts:
 Examples:
 
 ```bash
-env-store set ACTIVE_PHP_PROFILE php84
-env-store get ACTIVE_PHP_PROFILE
 env-store set-json STACK_META '{"name":"LocalDevStack","ports":[80,443],"flags":{"probe":true}}'
 env-store get-json STACK_META
-env-store unset ACTIVE_PHP_PROFILE
 env-store list
 env-store json | jq .
 ```

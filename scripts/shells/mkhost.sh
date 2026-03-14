@@ -223,24 +223,18 @@ env_set_json() {
 }
 
 mkhost_sync_state() {
-  local state_json ts apache_active active_php active_node
+  local state_json ts apache_active
   ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
   apache_active="$(env_get "APACHE_ACTIVE")"
-  active_php="$(env_get "ACTIVE_PHP_PROFILE")"
-  active_node="$(env_get "ACTIVE_NODE_PROFILE")"
 
   state_json="$(jq -cn \
     --arg ts "$ts" \
     --arg apache_active "$apache_active" \
-    --arg active_php "$active_php" \
-    --arg active_node "$active_node" \
     '{
       version: 1,
       updated_at: $ts,
       state: {
-        apache_active: $apache_active,
-        active_php_profile: $active_php,
-        active_node_profile: $active_node
+        apache_active: $apache_active
       }
     }')"
 
@@ -457,7 +451,6 @@ render_template() {
   : "${NODE_PORT:=3000}"
   : "${NODE_ACCESS_LOG_FILE:=}"
   : "${NODE_ERROR_LOG_FILE:=}"
-  : "${PHP_PROFILE:=}"
   : "${PHP_SERVICE:=}"
   : "${PHP_CONTAINER_NAME:=}"
   : "${PHP_HOSTNAME:=}"
@@ -489,9 +482,9 @@ render_template() {
     '{{COMPOSE_PROJECT_NAME}}' '{{NODE_SERVICE}}' '{{NODE_CONTAINER_NAME}}' '{{NODE_HOSTNAME}}'
     '{{PHP_FCGI_PASS}}' '{{APACHE_PHP_HANDLER}}'
     '{{POOL_NAME}}' '{{SOCK_PATH}}' '{{ERROR_LOG}}' '{{ACCESS_LOG}}' '{{FPM_USER}}' '{{FPM_GROUP}}'
-    '{{NODE_PROFILE}}' '{{NODE_VERSION}}' '{{NODE_KEY}}' '{{NODE_CMD_LINE}}'
+    '{{NODE_VERSION}}' '{{NODE_KEY}}' '{{NODE_CMD_LINE}}'
     '{{NODE_ACCESS_LOG_FILE}}' '{{NODE_ERROR_LOG_FILE}}'
-    '{{PHP_PROFILE}}' '{{PHP_SERVICE}}' '{{PHP_CONTAINER_NAME}}' '{{PHP_HOSTNAME}}' '{{PHP_KEY}}' '{{PHP_VERSION}}'
+    '{{PHP_SERVICE}}' '{{PHP_CONTAINER_NAME}}' '{{PHP_HOSTNAME}}' '{{PHP_KEY}}' '{{PHP_VERSION}}'
   )
 
   local -a _tpl_values=(
@@ -506,9 +499,9 @@ render_template() {
     "${COMPOSE_PROJECT_NAME:-}" "${NODE_SERVICE:-}" "${NODE_CONTAINER_NAME:-}" "${NODE_HOSTNAME:-}"
     "$PHP_FCGI_PASS" "$APACHE_PHP_HANDLER"
     "$FPM_POOL_NAME" "$FPM_SOCK_PATH" "$FPM_ERROR_LOG" "$FPM_ACCESS_LOG" "$FPM_USER" "$FPM_GROUP"
-    "${NODE_PROFILE:-}" "${NODE_VERSION:-}" "${NODE_KEY:-}" "${NODE_CMD_LINE:-}"
+    "${NODE_VERSION:-}" "${NODE_KEY:-}" "${NODE_CMD_LINE:-}"
     "${NODE_ACCESS_LOG_FILE:-}" "${NODE_ERROR_LOG_FILE:-}"
-    "${PHP_PROFILE:-}" "${PHP_SERVICE:-}" "${PHP_CONTAINER_NAME:-}" "${PHP_HOSTNAME:-}" "${PHP_KEY:-}" "${PHP_VERSION:-}"
+    "${PHP_SERVICE:-}" "${PHP_CONTAINER_NAME:-}" "${PHP_HOSTNAME:-}" "${PHP_KEY:-}" "${PHP_VERSION:-}"
   )
 
   # Sanity check: prevent silent template corruption
@@ -548,7 +541,6 @@ meta_header_nginx() {
   _meta_kv "docroot" "${DOC_ROOT:-}"
   if [[ "${APP_TYPE:-}" == "php" ]]; then
     _meta_kv "php_version" "${PHP_VERSION:-}"
-    _meta_kv "php_profile" "${PHP_CONTAINER_PROFILE:-}"
     _meta_kv "php_container" "${PHP_CONTAINER:-}"
     _meta_kv "fpm_pool" "${VHOST_FPM_DIR}/${PHP_CONTAINER_PROFILE}/${domain}.conf"
     _meta_kv "fpm_mode" "${PHP_UPSTREAM_MODE:-tcp}"
@@ -561,7 +553,6 @@ meta_header_nginx() {
     fi
   elif [[ "${APP_TYPE:-}" == "node" ]]; then
     _meta_kv "node_version" "${NODE_VERSION:-}"
-    _meta_kv "node_profile" "${NODE_PROFILE:-}"
     _meta_kv "node_service" "${NODE_SERVICE:-}"
     _meta_kv "node_container" "${NODE_CONTAINER_NAME:-}"
     _meta_kv "node_port" "${NODE_PORT:-}"
@@ -631,17 +622,15 @@ write_compose_template() {
 create_node_compose() {
   mkdir -p "$VHOST_DOCKER_COMPOSE_DIR"
 
-  local domain_token token svc cname profile node_key
+  local domain_token token svc cname node_key
   domain_token="$(slugify "$DOMAIN_NAME")"
   token="${NODE_DIR_TOKEN:-$domain_token}"
 
   svc="node_${token}"
   cname="NODE_${token^^}"
-  profile="node_${token}"
 
   NODE_SERVICE="$svc"
   NODE_CONTAINER="$svc"
-  NODE_PROFILE="$profile"
 
   node_key="$(to_env_key "$NODE_VERSION")"
 
@@ -676,27 +665,25 @@ create_node_compose() {
     *)  return "$compose_rc" ;;
   esac
 
-  env_set "ACTIVE_NODE_PROFILE" "$profile"
   NODE_COMPOSE_FILE_BASENAME="$(basename "$outPath")"
 }
 
 create_php_compose() {
   mkdir -p "$VHOST_DOCKER_COMPOSE_DIR"
 
-  local profile php_key svc cname host outPath tpl
-  profile="${PHP_CONTAINER_PROFILE}"
+  local php_compose_key php_key svc cname host outPath tpl
+  php_compose_key="${PHP_CONTAINER_PROFILE}"
   php_key="$(to_env_key "$PHP_VERSION")"
-  svc="$profile"
+  svc="$php_compose_key"
   cname="PHP_${PHP_VERSION}"
   host="php-${php_key}"
 
-  PHP_PROFILE="$profile"
   PHP_SERVICE="$svc"
   PHP_CONTAINER_NAME="$cname"
   PHP_HOSTNAME="$host"
   PHP_KEY="$php_key"
 
-  outPath="${VHOST_DOCKER_COMPOSE_DIR}/${profile}.yaml"
+  outPath="${VHOST_DOCKER_COMPOSE_DIR}/${php_compose_key}.yaml"
   tpl="${DOCKER_TEMPLATE_DIRECTORY}/php.compose.yaml"
 
   local compose_rc=0
@@ -784,6 +771,7 @@ create_configuration() {
   # NGINX (PHP/Node/ProxyIP) and Apache (PHP only)
   # ---------------------------------------------------------------------------
   if [[ "$SERVER_TYPE" == "Nginx" ]]; then
+    env_set "APACHE_ACTIVE" ""
     # Nginx-only: php via fastcgi, node via proxy, proxyip via pinned upstream proxy
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then
       render_template "${NGINX_TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
@@ -843,18 +831,6 @@ create_configuration() {
     return 1
   fi
 
-  # Active profiles bookkeeping
-  if [[ "$APP_TYPE" == "php" ]]; then
-    env_set "ACTIVE_PHP_PROFILE" "${PHP_CONTAINER_PROFILE}"
-    env_set "ACTIVE_NODE_PROFILE" ""
-  elif [[ "$APP_TYPE" == "node" ]]; then
-    env_set "ACTIVE_PHP_PROFILE" ""
-    # ACTIVE_NODE_PROFILE already set by create_node_compose
-  else
-    # proxyip
-    env_set "ACTIVE_PHP_PROFILE" ""
-    env_set "ACTIVE_NODE_PROFILE" ""
-  fi
   mkhost_sync_state
 
 
@@ -873,8 +849,8 @@ cleanup_vars() {
     DOC_ROOT CLIENT_MAX_BODY_SIZE CLIENT_MAX_BODY_SIZE_APACHE ENABLE_STREAMING PROXY_STREAMING_INCLUDE \
     FASTCGI_STREAMING_INCLUDE APACHE_STREAMING_INCLUDE ENABLE_CLIENT_VERIFICATION CLIENT_VERIF \
     PHP_VERSION PHP_CONTAINER_PROFILE PHP_CONTAINER PHP_APACHE_CONTAINER_PROFILE PHP_APACHE_CONTAINER \
-    NODE_VERSION NODE_CMD NODE_ACCESS_LOG_FILE NODE_ERROR_LOG_FILE PHP_UPSTREAM_MODE PHP_FPM_SOCKET PHP_FPM_TEMPLATE PHP_FCGI_PASS APACHE_PHP_HANDLER FPM_POOL_NAME FPM_SOCK_PATH FPM_ERROR_LOG FPM_ACCESS_LOG NODE_PROFILE NODE_SERVICE NODE_CONTAINER NODE_COMPOSE_FILE_BASENAME NODE_COMPOSE_ACTION \
-    PHP_PROFILE PHP_SERVICE PHP_CONTAINER_NAME PHP_HOSTNAME PHP_KEY PHP_COMPOSE_FILE_BASENAME PHP_COMPOSE_ACTION \
+    NODE_VERSION NODE_CMD NODE_ACCESS_LOG_FILE NODE_ERROR_LOG_FILE PHP_UPSTREAM_MODE PHP_FPM_SOCKET PHP_FPM_TEMPLATE PHP_FCGI_PASS APACHE_PHP_HANDLER FPM_POOL_NAME FPM_SOCK_PATH FPM_ERROR_LOG FPM_ACCESS_LOG NODE_SERVICE NODE_CONTAINER NODE_COMPOSE_FILE_BASENAME NODE_COMPOSE_ACTION \
+    PHP_SERVICE PHP_CONTAINER_NAME PHP_HOSTNAME PHP_KEY PHP_COMPOSE_FILE_BASENAME PHP_COMPOSE_ACTION \
     NODE_DIR_TOKEN GENERATED_NGINX_CONF_BASENAME GENERATED_APACHE_CONF_BASENAME \
     PROXY_HOST PROXY_IP PROXY_HTTP_PORT PROXY_HTTPS_PORT PROXY_COOKIE_EXACT_INCLUDE PROXY_COOKIE_PARENT_INCLUDE PROXY_REDIRECT_INCLUDE \
     PROXY_WS_INCLUDE PROXY_SUBFILTER_INCLUDE PROXY_CSP_INCLUDE PROXY_REWRITE_YN PARENT_COOKIE_DOMAIN || true
@@ -1199,7 +1175,7 @@ print_summary() {
   esac
 
   if [[ "$APP_TYPE" == "php" ]]; then
-    say "${key}PHP version:${NC}          ${BOLD}${PHP_VERSION}${NC} ${DIM}(profile: ${PHP_CONTAINER_PROFILE})${NC}"
+    say "${key}PHP version:${NC}          ${BOLD}${PHP_VERSION}${NC}"
     say "${key}Server type:${NC}          ${BOLD}${SERVER_TYPE}${NC}"
     say "${key}Doc root:${NC}             ${BOLD}${DOC_ROOT}${NC}"
   # PHP-FPM mode (kept concise in summary)
@@ -1298,7 +1274,7 @@ generate_all_domains() {
   if [[ "$APP_TYPE" == "php" ]]; then
     create_php_compose
     ok "  ✔ PHP compose ${PHP_COMPOSE_ACTION}"
-    say "    ${DIM}file:${NC} ${BOLD}${PHP_COMPOSE_FILE_BASENAME}${NC}  ${DIM}profile:${NC} ${BOLD}${PHP_CONTAINER_PROFILE}${NC}"
+    say "    ${DIM}file:${NC} ${BOLD}${PHP_COMPOSE_FILE_BASENAME}${NC}"
   fi
 
   local d
@@ -1310,7 +1286,7 @@ generate_all_domains() {
     if [[ "$APP_TYPE" == "node" ]]; then
       create_node_compose
       ok "  ✔ Node compose ${NODE_COMPOSE_ACTION}"
-      say "    ${DIM}service:${NC} ${BOLD}${NODE_SERVICE}${NC}  ${DIM}profile:${NC} ${BOLD}${NODE_PROFILE}${NC}  ${DIM}port:${NC} ${BOLD}${NODE_PORT}${NC}"
+      say "    ${DIM}service:${NC} ${BOLD}${NODE_SERVICE}${NC}  ${DIM}port:${NC} ${BOLD}${NODE_PORT}${NC}"
     fi
 
     create_configuration
@@ -1636,12 +1612,8 @@ configure_server() {
 case "${1:-}" in
 --RESET)
   env_set "APACHE_ACTIVE" ""
-  env_set "ACTIVE_PHP_PROFILE" ""
-  env_set "ACTIVE_NODE_PROFILE" ""
   mkhost_sync_state
   ;;
---ACTIVE_PHP_PROFILE)  env_get "ACTIVE_PHP_PROFILE" ;;
---ACTIVE_NODE_PROFILE) env_get "ACTIVE_NODE_PROFILE" ;;
 --APACHE_ACTIVE)       env_get "APACHE_ACTIVE" ;;
 --JSON|--STATE_JSON)   mkhost_get_state_json ;;
 *)

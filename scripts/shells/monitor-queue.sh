@@ -70,6 +70,12 @@ _to_epoch() {
   printf '0'
 }
 
+_docker_exec_pref_shell() {
+  local container="${1:-}" script="${2:-}"
+  [[ -n "$container" ]] || return 0
+  docker exec "$container" bash -c "$script" 2>/dev/null || docker exec "$container" sh -c "$script" 2>/dev/null || true
+}
+
 _find_redis_container() {
   local raw name service image state
   raw="$(docker ps -a --format '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.State}}' 2>/dev/null || true)"
@@ -89,13 +95,13 @@ _scan_laravel_failed_jobs() {
     return 0
   }
   local out n
-  out="$(docker exec "$container" sh -lc '[ -f /app/artisan ] && php /app/artisan queue:failed --json 2>/dev/null || true' 2>/dev/null || true)"
+  out="$(_docker_exec_pref_shell "$container" '[ -f /app/artisan ] && php /app/artisan queue:failed --json 2>/dev/null || true')"
   if [[ -n "$out" && "$out" == \[*\] ]]; then
     n="$(printf '%s' "$out" | grep -o '{' | wc -l | awk '{print $1}')"
     printf '%s' "$(_num_or_default "$n" -1)"
     return 0
   fi
-  out="$(docker exec "$container" sh -lc '[ -f /app/artisan ] && php /app/artisan queue:failed 2>/dev/null || true' 2>/dev/null || true)"
+  out="$(_docker_exec_pref_shell "$container" '[ -f /app/artisan ] && php /app/artisan queue:failed 2>/dev/null || true')"
   if [[ -n "$out" ]]; then
     n="$(printf '%s\n' "$out" | sed -n '/^+[-+]\+$/,$p' | grep -E '^[|]' | wc -l | awk '{print $1}')"
     if [[ "$n" =~ ^[0-9]+$ && "$n" -gt 0 ]]; then
@@ -172,14 +178,14 @@ main() {
     redis_note="ok"
     if [[ "$redis_state" == "running" ]]; then
       local keys key llen zc zline zscore zepoch zage max_age
-      mapfile -t keys < <(docker exec "$redis_container" sh -lc "redis-cli --scan --pattern 'queues:*' 2>/dev/null || true" 2>/dev/null | sed '/^[[:space:]]*$/d')
+      mapfile -t keys < <(_docker_exec_pref_shell "$redis_container" "redis-cli --scan --pattern 'queues:*' 2>/dev/null || true" | sed '/^[[:space:]]*$/d')
       max_age=-1
       for key in "${keys[@]}"; do
         if [[ "$key" == *":delayed" ]]; then
-          zc="$(docker exec "$redis_container" sh -lc "redis-cli ZCARD \"$key\" 2>/dev/null || true" 2>/dev/null)"
+          zc="$(_docker_exec_pref_shell "$redis_container" "redis-cli ZCARD \"$key\" 2>/dev/null || true")"
           zc="$(_num_or_default "$zc" 0)"
           queue_delayed=$((queue_delayed + zc))
-          zline="$(docker exec "$redis_container" sh -lc "redis-cli ZRANGE \"$key\" 0 0 WITHSCORES 2>/dev/null || true" 2>/dev/null | tail -n1)"
+          zline="$(_docker_exec_pref_shell "$redis_container" "redis-cli ZRANGE \"$key\" 0 0 WITHSCORES 2>/dev/null || true" | tail -n1)"
           zscore="$(_num_or_default "$zline" 0)"
           if ((zscore > 0)); then
             zepoch="$zscore"
@@ -192,13 +198,13 @@ main() {
             fi
           fi
         elif [[ "$key" == *":reserved" ]]; then
-          zc="$(docker exec "$redis_container" sh -lc "redis-cli ZCARD \"$key\" 2>/dev/null || true" 2>/dev/null)"
+          zc="$(_docker_exec_pref_shell "$redis_container" "redis-cli ZCARD \"$key\" 2>/dev/null || true")"
           zc="$(_num_or_default "$zc" 0)"
           queue_reserved=$((queue_reserved + zc))
         elif [[ "$key" == *":notify" ]]; then
           :
         else
-          llen="$(docker exec "$redis_container" sh -lc "redis-cli LLEN \"$key\" 2>/dev/null || true" 2>/dev/null)"
+          llen="$(_docker_exec_pref_shell "$redis_container" "redis-cli LLEN \"$key\" 2>/dev/null || true")"
           llen="$(_num_or_default "$llen" 0)"
           queue_pending=$((queue_pending + llen))
         fi

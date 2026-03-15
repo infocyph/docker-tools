@@ -40,10 +40,16 @@ _infer_project() {
   fi
 }
 
+_docker_exec_pref_shell() {
+  local c="${1:-}" script="${2:-}"
+  [[ -n "$c" ]] || return 0
+  docker exec "$c" bash -c "$script" 2>/dev/null || docker exec "$c" sh -c "$script" 2>/dev/null || true
+}
+
 _container_sha() {
   local c="${1:-}" f="${2:-}"
   [[ -n "$c" && -n "$f" ]] || return 0
-  docker exec "$c" sh -lc "if [ -f \"$f\" ]; then sha256sum \"$f\" 2>/dev/null | awk '{print \$1}'; fi" 2>/dev/null || true
+  _docker_exec_pref_shell "$c" "if [ -f \"$f\" ]; then sha256sum \"$f\" 2>/dev/null | awk '{print \$1}'; fi"
 }
 
 _choose_dest_dir() {
@@ -52,7 +58,7 @@ _choose_dest_dir() {
   local d
   for d in "$@"; do
     [[ -n "$d" ]] || continue
-    if docker exec "$c" sh -lc "[ -d \"$d\" ]" >/dev/null 2>&1; then
+    if docker exec "$c" bash -c "[ -d \"$d\" ]" >/dev/null 2>&1 || docker exec "$c" sh -c "[ -d \"$d\" ]" >/dev/null 2>&1; then
       printf '%s' "$d"
       return 0
     fi
@@ -206,7 +212,7 @@ main() {
     tmp_src="$(mktemp)"
     tmp_dst="$(mktemp)"
     find "$src_dir" -type f -name "$find_glob" -exec basename {} \; 2>/dev/null | sort -u >"$tmp_src" || true
-    docker exec "$container" sh -lc "find \"$dest_dir\" -type f -name \"$find_glob\" -exec basename {} \\; 2>/dev/null" | sort -u >"$tmp_dst" || true
+    _docker_exec_pref_shell "$container" "find \"$dest_dir\" -type f -name \"$find_glob\" -exec basename {} \\; 2>/dev/null" | sort -u >"$tmp_dst" || true
     extra="$(comm -13 "$tmp_src" "$tmp_dst" 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | awk '{print $1}')"
     extra="${extra:-0}"
     rm -f "$tmp_src" "$tmp_dst" >/dev/null 2>&1 || true

@@ -19,19 +19,7 @@ final class VolumeMonitorEndpoint
      */
     public function handle(array $query = []): void
     {
-        $topRaw = isset($query['top']) ? (string)$query['top'] : '20';
-        $top = (int)$topRaw;
-        if ($top <= 0) {
-            $top = 20;
-        }
-
-        $inodeTopRaw = isset($query['inode_top']) ? (string)$query['inode_top'] : '8';
-        $inodeTop = (int)$inodeTopRaw;
-        if ($inodeTop < 0) {
-            $inodeTop = 8;
-        }
-
-        $payload = $this->service->collect($top, $inodeTop);
+        $payload = $this->service->collect();
 
         $status = (bool)($payload['ok'] ?? false) ? 200 : 500;
         if (!headers_sent()) {

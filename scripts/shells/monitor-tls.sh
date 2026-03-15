@@ -51,10 +51,10 @@ _tcp_reachable() {
   local host="${1:-}" port="${2:-443}"
   [[ -n "$host" ]] || return 1
   if _has timeout; then
-    timeout 2 bash -lc "cat < /dev/null > /dev/tcp/${host}/${port}" >/dev/null 2>&1
+    timeout 2 bash -c "cat < /dev/null > /dev/tcp/${host}/${port}" >/dev/null 2>&1
     return $?
   fi
-  bash -lc "cat < /dev/null > /dev/tcp/${host}/${port}" >/dev/null 2>&1
+  bash -c "cat < /dev/null > /dev/tcp/${host}/${port}" >/dev/null 2>&1
 }
 
 _detect_tls_target() {

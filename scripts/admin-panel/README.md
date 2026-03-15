@@ -57,7 +57,7 @@ AJAX data endpoint:
 - `http://localhost:9920/api/synthetic-flows` (synthetic route probes; supports `domain`, `paths`, `timeout`)
 - `http://localhost:9920/api/tls-monitor` (TLS/mTLS checks; supports `domain`, `timeout`)
 - `http://localhost:9920/api/runtime-watch` (restart/OOM/event monitor; supports `since`, `restart_threshold`, `event_limit`)
-- `http://localhost:9920/api/volume-monitor` (volume growth/inode monitor; supports `top`, `inode_top`)
+- `http://localhost:9920/api/volume-monitor` (volume growth/inode monitor; returns all project volumes, with backend safety cap)
 - `http://localhost:9920/api/alerts` (alert rules + quiet hours + dedupe + acknowledgement; supports `run`, `ack_rule`, `ack_fingerprint`)
 
 ## Notes

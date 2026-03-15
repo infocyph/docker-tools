@@ -38,23 +38,7 @@ declare(strict_types=1);
       <header class="card-header ap-card-head ap-card-head-wrap">
         <div>
           <h4 class="ap-card-title mb-1">Filters</h4>
-          <p id="apVolumeMeta" class="ap-card-sub mb-0">Largest volumes with growth and inode indicators.</p>
-        </div>
-        <div class="ap-head-tools">
-          <div class="ap-live-matrix-tools">
-            <select id="apVolumeTop" class="form-select form-select-sm ap-live-tool-select" aria-label="Top volumes">
-              <option value="10">Top: 10</option>
-              <option value="20" selected>Top: 20</option>
-              <option value="30">Top: 30</option>
-              <option value="50">Top: 50</option>
-            </select>
-            <select id="apVolumeInodeTop" class="form-select form-select-sm ap-live-tool-select" aria-label="Inode scan top">
-              <option value="0">Inodes: Off</option>
-              <option value="5">Inodes: top 5</option>
-              <option value="8" selected>Inodes: top 8</option>
-              <option value="12">Inodes: top 12</option>
-            </select>
-          </div>
+          <p id="apVolumeMeta" class="ap-card-sub mb-0">All project volumes with growth and inode indicators.</p>
         </div>
       </header>
       <div class="card-body">
@@ -69,14 +53,12 @@ declare(strict_types=1);
               <th class="text-end">Delta</th>
               <th class="text-end">Growth /h</th>
               <th class="text-end">ETA (h)</th>
-              <th class="text-end">Pressure %</th>
-              <th class="text-end">Inode %</th>
               <th class="text-end">Files</th>
               <th>State</th>
             </tr>
             </thead>
             <tbody id="apVolumeRows">
-            <tr><td colspan="10" class="text-center ap-page-sub py-4">Loading...</td></tr>
+            <tr><td colspan="8" class="text-center ap-page-sub py-4">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -100,8 +82,6 @@ declare(strict_types=1);
     }
     var apiUrl = basePath + "/api/volume-monitor";
 
-    var topEl = document.getElementById("apVolumeTop");
-    var inodeTopEl = document.getElementById("apVolumeInodeTop");
     var autoBtn = document.getElementById("apVolumeAuto");
     var refreshBtn = document.getElementById("apVolumeRefreshBtn");
     var metaEl = document.getElementById("apVolumeMeta");
@@ -146,6 +126,86 @@ declare(strict_types=1);
         return "-";
       }
       return String(Math.round(n));
+    }
+
+    function bytesText(value) {
+      var n = Number(value);
+      if (!isFinite(n) || n < 0) {
+        return "-";
+      }
+      var units = ["B", "KB", "MB", "GB", "TB", "PB"];
+      var idx = 0;
+      while (n >= 1024 && idx < units.length - 1) {
+        n = n / 1024;
+        idx += 1;
+      }
+      if (idx === 0) {
+        return String(Math.round(n)) + " " + units[idx];
+      }
+      return n.toFixed(2).replace(/\.00$/, "") + " " + units[idx];
+    }
+
+    function stateText(item) {
+      var note = String(item && item.note || "").toLowerCase();
+      if (note === "ok" || note === "") {
+        return "OK";
+      }
+      if (note === "growth_critical") {
+        return "Growth Critical";
+      }
+      if (note === "growth_fast") {
+        return "Growth Fast";
+      }
+      if (note === "capacity_critical") {
+        return "Capacity Critical";
+      }
+      if (note === "capacity_high") {
+        return "Capacity High";
+      }
+      if (note === "inode_critical") {
+        return "Inode Critical";
+      }
+      if (note === "inode_high") {
+        return "Inode High";
+      }
+      var level = String(item && item.level || "").toLowerCase();
+      if (level === "fail") {
+        return "Fail";
+      }
+      if (level === "warn") {
+        return "Warn";
+      }
+      return "OK";
+    }
+
+    function toServiceList(item) {
+      var list = item && Array.isArray(item.services_list) ? item.services_list : [];
+      if (list.length > 0) {
+        return list.filter(function (v) {
+          return String(v || "").trim() !== "";
+        });
+      }
+      var raw = String(item && item.services || "");
+      if (!raw || raw === "-") {
+        return [];
+      }
+      return raw.split(",").map(function (v) {
+        return String(v || "").trim();
+      }).filter(function (v) {
+        return v !== "" && v !== "-";
+      });
+    }
+
+    function renderServiceChips(item) {
+      var services = toServiceList(item);
+      if (services.length === 0) {
+        return '<span class="ap-port-empty">-</span>';
+      }
+      return '<div class="ap-port-badges">'
+        + services.map(function (svc) {
+          return '<span class="ap-port-badge ap-port-badge-internal">' + esc(svc) + "</span>";
+        }).join("")
+        + "</div>";
     }
 
     function showError(message) {
@@ -273,21 +333,6 @@ declare(strict_types=1);
       }
     }
 
-    function getFilters() {
-      var top = topEl ? Number(topEl.value || "20") : 20;
-      var inodeTop = inodeTopEl ? Number(inodeTopEl.value || "8") : 8;
-      if (!isFinite(top) || top <= 0) {
-        top = 20;
-      }
-      if (!isFinite(inodeTop) || inodeTop < 0) {
-        inodeTop = 8;
-      }
-      return {
-        top: Math.max(1, Math.min(200, Math.round(top))),
-        inodeTop: Math.max(0, Math.min(30, Math.round(inodeTop)))
-      };
-    }
-
     function isAutoRefreshEnabled() {
       return !!(autoBtn && autoBtn.checked);
     }
@@ -300,13 +345,13 @@ declare(strict_types=1);
         + '<span class="ap-kv-group ap-live-state-starting"><span class="ap-kv-group-key">Warn</span><span class="ap-kv-group-val">' + esc(String(data.warn || 0)) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-unhealthy"><span class="ap-kv-group-key">Fail</span><span class="ap-kv-group-val">' + esc(String(data.fail || 0)) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Inode Scanned</span><span class="ap-kv-group-val">' + esc(String(data.inode_scanned || 0)) + "</span></span>"
-        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Docker Free</span><span class="ap-kv-group-val">' + numberText(data.docker_root_free_bytes) + "</span></span>";
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Docker Free</span><span class="ap-kv-group-val">' + bytesText(data.docker_root_free_bytes) + "</span></span>";
     }
 
     function renderRows(payload) {
       var items = Array.isArray(payload && payload.items) ? payload.items : [];
       if (items.length === 0) {
-        rowsEl.innerHTML = '<tr><td colspan="10" class="text-center ap-page-sub py-4">No volume rows found.</td></tr>';
+        rowsEl.innerHTML = '<tr><td colspan="8" class="text-center ap-page-sub py-4">No volume rows found.</td></tr>';
         return;
       }
 
@@ -314,25 +359,19 @@ declare(strict_types=1);
         return ""
           + "<tr>"
           + "  <td>" + esc(String(item && item.volume || "-")) + "</td>"
-          + "  <td>" + esc(String(item && item.services || "-")) + "</td>"
+          + "  <td>" + renderServiceChips(item) + "</td>"
           + '  <td class="text-end">' + esc(String(item && item.size || "-")) + "</td>"
           + '  <td class="text-end">' + esc(String(item && item.delta_human || "-")) + "</td>"
           + '  <td class="text-end">' + esc(String(item && item.growth_human_per_hour || "-")) + "</td>"
-          + '  <td class="text-end">' + numberText(item && item.eta_hours) + "</td>"
-          + '  <td class="text-end">' + numberText(item && item.pressure_pct) + "</td>"
-          + '  <td class="text-end">' + numberText(item && item.inode_pct) + "</td>"
-          + '  <td class="text-end">' + numberText(item && item.file_count) + "</td>"
-          + '  <td><span class="ap-badge ' + esc(toneClass(item && item.level || "warn")) + '">' + esc(String(item && item.note || "-")) + "</span></td>"
+          + '  <td class="text-end">' + esc(String(item && item.eta_display || numberText(item && item.eta_hours))) + "</td>"
+          + '  <td class="text-end">' + esc(String(item && item.files_display || numberText(item && item.file_count))) + "</td>"
+          + '  <td><span class="ap-badge ' + esc(toneClass(item && item.level || "warn")) + '">' + esc(String(item && item.state_label || stateText(item))) + "</span></td>"
           + "</tr>";
       }).join("");
     }
 
     function buildUrl() {
-      var filters = getFilters();
-      var qp = new URLSearchParams();
-      qp.set("top", String(filters.top));
-      qp.set("inode_top", String(filters.inodeTop));
-      return apiUrl + "?" + qp.toString();
+      return apiUrl;
     }
 
     function refreshSnapshot() {
@@ -393,12 +432,6 @@ declare(strict_types=1);
 
     if (refreshBtn) {
       refreshBtn.addEventListener("click", refreshSnapshot);
-    }
-    if (topEl) {
-      topEl.addEventListener("change", refreshSnapshot);
-    }
-    if (inodeTopEl) {
-      inodeTopEl.addEventListener("change", refreshSnapshot);
     }
     if (autoBtn) {
       autoBtn.addEventListener("change", function () {

@@ -77,6 +77,12 @@ _num_or_default() {
   fi
 }
 
+_docker_exec_pref_shell() {
+  local name="${1:-}" script="${2:-}"
+  [[ -n "$name" ]] || return 0
+  docker exec "$name" bash -c "$script" 2>/dev/null || docker exec "$name" sh -c "$script" 2>/dev/null || true
+}
+
 _probe_defaults() {
   P_LEVEL="warn"
   P_NOTE="not_probed"
@@ -98,7 +104,7 @@ _probe_redis() {
   _probe_defaults
 
   local info
-  info="$(docker exec "$name" sh -lc 'redis-cli INFO 2>/dev/null || true' 2>/dev/null || true)"
+  info="$(_docker_exec_pref_shell "$name" 'redis-cli INFO 2>/dev/null || true')"
   if [[ -z "$info" ]]; then
     P_LEVEL="fail"
     P_NOTE="redis_cli_failed"
@@ -163,7 +169,17 @@ _probe_mysql() {
     docker exec \
       -e LDS_MYSQL_USER="$user" \
       -e LDS_MYSQL_PASS="$pass" \
-      "$name" sh -lc '
+      "$name" bash -c '
+        MYSQL_PWD="$LDS_MYSQL_PASS" mysql -Nse "
+          SHOW GLOBAL STATUS LIKE '\''Threads_connected'\'';
+          SHOW GLOBAL STATUS LIKE '\''Threads_running'\'';
+          SHOW GLOBAL STATUS LIKE '\''Slow_queries'\'';
+          SHOW VARIABLES LIKE '\''max_connections'\'';
+        " -u"$LDS_MYSQL_USER" 2>/dev/null
+      ' 2>/dev/null || docker exec \
+      -e LDS_MYSQL_USER="$user" \
+      -e LDS_MYSQL_PASS="$pass" \
+      "$name" sh -c '
         MYSQL_PWD="$LDS_MYSQL_PASS" mysql -Nse "
           SHOW GLOBAL STATUS LIKE '\''Threads_connected'\'';
           SHOW GLOBAL STATUS LIKE '\''Threads_running'\'';
@@ -221,7 +237,21 @@ _probe_postgres() {
       -e LDS_PG_USER="$user" \
       -e LDS_PG_DB="$db" \
       -e PGPASSWORD="$pass" \
-      "$name" sh -lc '
+      "$name" bash -c '
+        psql -U "$LDS_PG_USER" -d "$LDS_PG_DB" -At -F "|" -c "
+          SELECT
+            COALESCE((SELECT sum(numbackends) FROM pg_stat_database),0),
+            COALESCE((SELECT count(*) FROM pg_stat_activity WHERE state='\''active'\''),0),
+            COALESCE((SELECT setting::bigint FROM pg_settings WHERE name='\''max_connections'\''),0),
+            CASE WHEN pg_is_in_recovery() THEN '\''replica'\'' ELSE '\''primary'\'' END,
+            COALESCE(EXTRACT(EPOCH FROM now()-pg_last_xact_replay_timestamp())::bigint,0),
+            COALESCE((SELECT sum(xact_commit+xact_rollback) FROM pg_stat_database),0)
+        " 2>/dev/null
+      ' 2>/dev/null || docker exec \
+      -e LDS_PG_USER="$user" \
+      -e LDS_PG_DB="$db" \
+      -e PGPASSWORD="$pass" \
+      "$name" sh -c '
         psql -U "$LDS_PG_USER" -d "$LDS_PG_DB" -At -F "|" -c "
           SELECT
             COALESCE((SELECT sum(numbackends) FROM pg_stat_database),0),

@@ -8,13 +8,14 @@ final class TlsMonitorService
     /**
      * @return array<string,mixed>
      */
-    public function collect(string $domain = '', int $timeout = 4): array
+    public function collect(string $domain = '', int $timeout = 4, int $retries = 2): array
     {
         $domain = strtolower(trim($domain));
         $timeout = max(1, min(20, $timeout));
+        $retries = max(1, min(5, $retries));
 
         $binary = is_executable('/usr/local/bin/monitor-tls') ? '/usr/local/bin/monitor-tls' : 'monitor-tls';
-        $cmd = [$binary, '--json', '--timeout', (string)$timeout];
+        $cmd = [$binary, '--json', '--timeout', (string)$timeout, '--retries', (string)$retries];
         if ($domain !== '') {
             $cmd[] = '--domain';
             $cmd[] = $domain;
@@ -37,6 +38,7 @@ final class TlsMonitorService
                 'filters' => [
                     'domain' => $domain,
                     'timeout' => $timeout,
+                    'retries' => $retries,
                 ],
                 'summary' => [
                     'hosts' => 0,
@@ -47,7 +49,18 @@ final class TlsMonitorService
                     'mtls_broken' => 0,
                     'expiring_14d' => 0,
                     'expired' => 0,
+                    'chain_unverified' => 0,
+                    'policy_checked' => 0,
+                    'policy_drift' => 0,
+                    'tls_legacy' => 0,
+                    'ocsp_missing' => 0,
+                    'no_intermediate' => 0,
+                    'alerts' => 0,
+                    'state_changes' => 0,
+                    'expiring_crossed' => 0,
+                    'mtls_broken_crossed' => 0,
                 ],
+                'alerts' => [],
                 'items' => [],
             ];
         }
@@ -63,6 +76,7 @@ final class TlsMonitorService
                 'filters' => [
                     'domain' => $domain,
                     'timeout' => $timeout,
+                    'retries' => $retries,
                 ],
                 'summary' => [
                     'hosts' => 0,
@@ -73,7 +87,18 @@ final class TlsMonitorService
                     'mtls_broken' => 0,
                     'expiring_14d' => 0,
                     'expired' => 0,
+                    'chain_unverified' => 0,
+                    'policy_checked' => 0,
+                    'policy_drift' => 0,
+                    'tls_legacy' => 0,
+                    'ocsp_missing' => 0,
+                    'no_intermediate' => 0,
+                    'alerts' => 0,
+                    'state_changes' => 0,
+                    'expiring_crossed' => 0,
+                    'mtls_broken_crossed' => 0,
                 ],
+                'alerts' => [],
                 'items' => [],
             ];
         }

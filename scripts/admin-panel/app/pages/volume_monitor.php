@@ -6,7 +6,7 @@ declare(strict_types=1);
   <div>
     <p class="ap-breadcrumb mb-1">Home / Monitoring / Volume Growth</p>
     <h2 class="ap-page-title mb-1">Volume Growth / Inode Monitor</h2>
-    <p class="ap-page-sub mb-0">Per-volume size trend, growth rate, inode pressure, and exhaustion estimate.</p>
+    <p class="ap-page-sub mb-0">Per-volume size trend, growth rate, file count, and exhaustion estimate.</p>
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <div id="apVolumeRefreshMeta" class="ap-live-refresh-meta" aria-live="polite">

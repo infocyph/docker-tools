@@ -55,7 +55,7 @@ AJAX data endpoint:
 - `http://localhost:9920/api/log-heatmap` (error signatures by service/time bucket; supports `since`, `bucket_min`, `top`, `line_limit`)
 - `http://localhost:9920/api/drift-monitor` (generated vs active config drift)
 - `http://localhost:9920/api/synthetic-flows` (synthetic route probes; supports `domain`, `paths`, `timeout`)
-- `http://localhost:9920/api/tls-monitor` (TLS/mTLS checks; supports `domain`, `timeout`)
+- `http://localhost:9920/api/tls-monitor` (TLS/mTLS checks with policy/posture/trend; supports `domain` partial/wildcard, `timeout`, `retries`)
 - `http://localhost:9920/api/runtime-watch` (restart/OOM/event monitor; supports `since`, `restart_threshold`, `event_limit`)
 - `http://localhost:9920/api/volume-monitor` (volume growth/inode monitor; returns all project volumes, with backend safety cap)
 - `http://localhost:9920/api/alerts` (alert rules + quiet hours + dedupe + acknowledgement; supports `run`, `ack_rule`, `ack_fingerprint`)
@@ -66,3 +66,6 @@ AJAX data endpoint:
 - Live Stats page is wired to `status --json` via `/api/live-stats`.
 - Live Stats includes both structured widgets and a full raw JSON viewer.
 - Next step is wiring additional LDS sources such as `profile-chooser` and `env-store`.
+- TLS monitor policy sources:
+  - Nginx host config (`ssl_verify_client`) with optional markers: `ap_tls_expected_mtls`, `ap_tls_min_days`, `ap_tls_san_strict`.
+  - Optional policy file: `/etc/share/state/tls-monitor-policy.tsv` using `pattern|expected_mtls|min_days|san_strict`.

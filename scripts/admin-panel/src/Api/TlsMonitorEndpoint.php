@@ -24,10 +24,19 @@ final class TlsMonitorEndpoint
         if ($timeout <= 0) {
             $timeout = 4;
         }
+        $timeout = max(1, min(20, $timeout));
+
+        $retriesRaw = isset($query['retries']) ? (string)$query['retries'] : '2';
+        $retries = (int)$retriesRaw;
+        if ($retries <= 0) {
+            $retries = 2;
+        }
+        $retries = max(1, min(5, $retries));
 
         $payload = $this->service->collect(
             (string)($query['domain'] ?? ''),
-            $timeout
+            $timeout,
+            $retries
         );
 
         $status = (bool)($payload['ok'] ?? false) ? 200 : 500;

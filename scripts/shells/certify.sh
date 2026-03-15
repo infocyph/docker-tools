@@ -250,7 +250,7 @@ export_user_artifacts() {
   fi
 
   say " - ${DIM}Available in:${NC} $EXPORT_DIR"
-  (ls -la "$EXPORT_DIR" 2>/dev/null || true) | sed 's/^/   /' || true
+  (ls "$EXPORT_DIR" 2>/dev/null || true) | sed 's/^/   /' || true
 }
 
 generate_certificates() {

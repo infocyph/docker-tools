@@ -234,7 +234,7 @@
       btn.disabled = !!isLoading;
       var icon = btn.querySelector("i");
       if (icon) {
-        icon.className = isLoading ? "bi bi-arrow-repeat ap-spin me-1" : "bi bi-arrow-repeat me-1";
+        icon.className = isLoading ? "bi bi-arrow-repeat ap-spin" : "bi bi-arrow-repeat";
       }
     }
     updateLiveRefreshMeta();
@@ -280,6 +280,21 @@
     if (livePollTimer) {
       window.clearTimeout(livePollTimer);
       livePollTimer = null;
+    }
+    liveNextRefreshAt = 0;
+  }
+
+  function isLiveAutoRefreshEnabled() {
+    var autoToggle = doc.getElementById("apLiveAuto");
+    return !!(autoToggle && autoToggle.checked);
+  }
+
+  function rebindLiveAutoRefresh() {
+    if (isLiveAutoRefreshEnabled()) {
+      scheduleNextLiveFetch(LIVE_REFRESH_INTERVAL_MS);
+    } else {
+      clearNextLiveFetch();
+      updateLiveRefreshMeta();
     }
   }
 
@@ -569,8 +584,9 @@
     var btn = doc.getElementById("apLiveCompactToggleBtn");
     if (btn) {
       btn.setAttribute("aria-pressed", isEnabled ? "true" : "false");
-      var iconCls = isEnabled ? "bi-layout-text-sidebar" : "bi-layout-text-sidebar-reverse";
-      var label = isEnabled ? "Spacious" : "Compact";
+      btn.classList.toggle("is-active", isEnabled);
+      var iconCls = isEnabled ? "bi-layout-text-sidebar-reverse" : "bi-layout-text-sidebar";
+      var label = isEnabled ? "Compact" : "Spacious";
       btn.innerHTML = '<i class="bi ' + iconCls + ' me-1"></i> ' + label;
     }
     if (persist !== false) {
@@ -2478,7 +2494,12 @@
       })
       .finally(function () {
         setLiveLoading(false);
-        scheduleNextLiveFetch(LIVE_REFRESH_INTERVAL_MS);
+        if (isLiveAutoRefreshEnabled()) {
+          scheduleNextLiveFetch(LIVE_REFRESH_INTERVAL_MS);
+        } else {
+          clearNextLiveFetch();
+          updateLiveRefreshMeta();
+        }
       });
   }
 
@@ -2601,7 +2622,24 @@
       });
     }
 
-    fetchLiveStats();
+    var autoToggle = doc.getElementById("apLiveAuto");
+    if (autoToggle) {
+      autoToggle.addEventListener("change", function () {
+        var enabled = !!autoToggle.checked;
+        rebindLiveAutoRefresh();
+        if (enabled) {
+          fetchLiveStats();
+        } else {
+          updateLiveRefreshMeta();
+        }
+      });
+    }
+
+    if (document.readyState === "complete") {
+      window.setTimeout(fetchLiveStats, 0);
+    } else {
+      window.addEventListener("load", fetchLiveStats, { once: true });
+    }
   }
 
   initTheme();

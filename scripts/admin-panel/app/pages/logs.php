@@ -1,6 +1,28 @@
 <?php
 declare(strict_types=1);
 
+// Keep initial render fast: populate file list and entries via AJAX after shell paint.
+$apLogAjaxFirst = true;
+if ($apLogAjaxFirst) {
+    $services = [];
+    $logFiles = [];
+    $rows = [];
+    $activeFile = null;
+    $activeViewingTitle = 'Viewing: none';
+    $levelChips = [
+        ['label' => 'Debug', 'count' => '0', 'tone' => 'debug'],
+        ['label' => 'Info', 'count' => '0', 'tone' => 'info'],
+        ['label' => 'Warning', 'count' => '0', 'tone' => 'warning'],
+        ['label' => 'Error', 'count' => '0', 'tone' => 'error'],
+    ];
+    $levelUi = [
+        'Error' => ['icon' => 'bi-x-octagon-fill', 'class' => 'ap-logv-lvl-error'],
+        'Warning' => ['icon' => 'bi-exclamation-triangle-fill', 'class' => 'ap-logv-lvl-warning'],
+        'Info' => ['icon' => 'bi-info-circle-fill', 'class' => 'ap-logv-lvl-info'],
+        'Debug' => ['icon' => 'bi-bug-fill', 'class' => 'ap-logv-lvl-debug'],
+    ];
+    $serviceDomainsJson = '{}';
+} else {
 $findFiles = static function (string $dir, int $minDepth, int $maxDepth): array {
     $dir = rtrim($dir, DIRECTORY_SEPARATOR);
     if ($dir === '' || !is_dir($dir)) {
@@ -459,6 +481,7 @@ $levelUi = [
     'Info' => ['icon' => 'bi-info-circle-fill', 'class' => 'ap-logv-lvl-info'],
     'Debug' => ['icon' => 'bi-bug-fill', 'class' => 'ap-logv-lvl-debug'],
 ];
+}
 ?>
 
 <section class="ap-page-head">
@@ -596,8 +619,8 @@ $levelUi = [
                 <i class="bi bi-search"></i>
                 <input id="apLogSearchInput" type="search" value="" placeholder="Search... RegEx welcome!">
               </label>
-              <button id="apLogRefreshBtn" class="btn ap-logv-icon-btn" type="button" aria-label="Refresh" title="Refresh files and entries">
-                <i class="bi bi-arrow-repeat"></i>
+              <button id="apLogRefreshBtn" class="btn ap-ghost-btn ap-monitor-refresh-btn ap-logv-refresh-btn" type="button" aria-label="Refresh" title="Refresh files and entries">
+                <i class="bi bi-arrow-repeat me-1"></i> Refresh
               </button>
               <div id="apLogSettings" class="ap-logv-settings">
                 <button

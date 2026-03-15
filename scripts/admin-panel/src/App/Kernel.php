@@ -151,6 +151,7 @@ final class Kernel
         $route = $this->router->resolve($server);
         $activePage = $route->slug;
         $pageTitle = $route->title;
+        $request = RequestContext::fromGlobals($server, $query);
 
         $pageFile = $this->pagesDir . '/' . $route->view . '.php';
         if (!is_file($pageFile)) {
@@ -159,17 +160,23 @@ final class Kernel
             return;
         }
 
-        ob_start();
-        require $pageFile;
-        $pageContent = (string)ob_get_clean();
-
-        $request = RequestContext::fromGlobals($server, $query);
-        if ($this->ajaxResponder->send($request, $route, $pageContent)) {
-            return;
+        if ($request->isAjax) {
+            ob_start();
+            require $pageFile;
+            $pageContent = (string)ob_get_clean();
+            if ($this->ajaxResponder->send($request, $route, $pageContent)) {
+                return;
+            }
         }
 
         require $this->layoutTop;
-        echo $pageContent;
+        if (function_exists('ob_get_level') && ob_get_level() > 0 && function_exists('ob_flush')) {
+            @ob_flush();
+        }
+        if (function_exists('flush')) {
+            @flush();
+        }
+        require $pageFile;
         require $this->layoutBottom;
     }
 

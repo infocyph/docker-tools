@@ -10,7 +10,18 @@ declare(strict_types=1);
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <div id="apDbHealthRefreshMeta" class="ap-live-refresh-meta" aria-live="polite">
-      <span id="apDbHealthUpdatedAt" class="ap-live-meta">Next refresh in --:--</span>
+      <div class="ap-live-meta-row">
+        <span id="apDbHealthUpdatedAt" class="ap-live-meta">Next refresh in --:--</span>
+        <div class="ap-live-meta-controls">
+          <label class="ap-live-auto-switch" for="apDbHealthAuto">
+            <span class="ap-live-auto-switch-label">Auto</span>
+            <input id="apDbHealthAuto" type="checkbox" role="switch" aria-label="Auto refresh DB health">
+          </label>
+          <button id="apDbHealthRefreshBtn" class="btn ap-live-meta-refresh" type="button" aria-label="Refresh DB health" title="Refresh">
+            <i class="bi bi-arrow-repeat"></i>
+          </button>
+        </div>
+      </div>
       <span class="ap-live-countdown-track" aria-hidden="true">
         <span id="apDbHealthCountdownBar" class="ap-live-countdown-bar"></span>
       </span>
@@ -37,8 +48,6 @@ declare(strict_types=1);
               <option value="postgres">Engine: PostgreSQL</option>
               <option value="redis">Engine: Redis</option>
             </select>
-            <button id="apDbHealthAuto" class="btn ap-chip-btn" type="button" aria-pressed="false">Auto</button>
-            <button id="apDbHealthRefreshBtn" class="btn ap-ghost-btn" type="button"><i class="bi bi-arrow-repeat me-1"></i> Refresh</button>
           </div>
         </div>
       </header>
@@ -155,7 +164,7 @@ declare(strict_types=1);
         refreshBtn.disabled = loading;
         var icon = refreshBtn.querySelector("i");
         if (icon) {
-          icon.className = loading ? "bi bi-arrow-repeat ap-spin me-1" : "bi bi-arrow-repeat me-1";
+          icon.className = loading ? "bi bi-arrow-repeat ap-spin" : "bi bi-arrow-repeat";
         }
       }
       updateRefreshMeta();
@@ -267,7 +276,7 @@ declare(strict_types=1);
     }
 
     function isAutoRefreshEnabled() {
-      return !!(autoBtn && autoBtn.classList.contains("is-active"));
+      return !!(autoBtn && autoBtn.checked);
     }
 
     function renderSummary(summary) {
@@ -386,10 +395,8 @@ declare(strict_types=1);
       engineEl.addEventListener("change", refreshSnapshot);
     }
     if (autoBtn) {
-      autoBtn.addEventListener("click", function () {
-        var enabled = !autoBtn.classList.contains("is-active");
-        autoBtn.classList.toggle("is-active", enabled);
-        autoBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
+      autoBtn.addEventListener("change", function () {
+        var enabled = !!autoBtn.checked;
         rebindAutoRefresh();
         if (enabled) {
           refreshSnapshot();
@@ -399,8 +406,16 @@ declare(strict_types=1);
       });
     }
 
+    function startInitialLoad() {
+      refreshSnapshot();
+    }
+
     ensureCountdownTicker();
     rebindAutoRefresh();
-    refreshSnapshot();
+    if (document.readyState === "complete") {
+      window.setTimeout(startInitialLoad, 0);
+    } else {
+      window.addEventListener("load", startInitialLoad, { once: true });
+    }
   })();
 </script>

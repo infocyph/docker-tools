@@ -12,6 +12,7 @@
   --ap-muted: #667085;
 
   --ap-primary: #465fff;
+  --ap-accent: #465fff;
   --ap-primary-soft: rgba(70, 95, 255, 0.1);
   --ap-success: #12b76a;
   --ap-success-soft: rgba(18, 183, 106, 0.16);
@@ -41,6 +42,7 @@
   --ap-muted: #98a2b3;
 
   --ap-primary: #7c8fff;
+  --ap-accent: #7c8fff;
   --ap-primary-soft: rgba(124, 143, 255, 0.24);
   --ap-success: #32d583;
   --ap-success-soft: rgba(50, 213, 131, 0.22);
@@ -829,6 +831,20 @@ body.ap-page {
   font-weight: 600;
 }
 
+.ap-live-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ap-live-meta-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .ap-live-refresh-meta {
   min-width: min(340px, 78vw);
   display: grid;
@@ -838,6 +854,81 @@ body.ap-page {
   border: 1px solid var(--ap-border);
   background: color-mix(in srgb, var(--ap-surface) 92%, transparent);
   box-shadow: var(--ap-shadow-soft);
+}
+
+.ap-live-meta-refresh {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid var(--ap-border);
+  background: var(--ap-surface);
+  color: var(--ap-text);
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  box-shadow: var(--ap-shadow-soft);
+}
+
+.ap-live-meta-refresh:hover {
+  background: var(--ap-surface-2);
+  color: var(--ap-text);
+}
+
+.ap-live-meta-refresh i {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.ap-live-auto-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--ap-border);
+  border-radius: 999px;
+  padding: 4px 9px 4px 10px;
+  background: var(--ap-surface);
+  box-shadow: var(--ap-shadow-soft);
+}
+
+.ap-live-auto-switch-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--ap-text) 74%, var(--ap-muted));
+}
+
+.ap-live-auto-switch input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid var(--ap-border);
+  background: var(--ap-surface-3);
+  position: relative;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.ap-live-auto-switch input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.24);
+  transition: transform 0.15s ease;
+}
+
+.ap-live-auto-switch input[type="checkbox"]:checked {
+  background: var(--ap-primary);
+  border-color: var(--ap-primary);
+}
+
+.ap-live-auto-switch input[type="checkbox"]:checked::before {
+  transform: translateX(12px);
 }
 
 .ap-live-meta::before {
@@ -1538,6 +1629,15 @@ body.ap-live-compact .ap-live-item {
 
   .ap-live-refresh-meta {
     min-width: 100%;
+  }
+
+  .ap-live-meta-row {
+    flex-wrap: wrap;
+  }
+
+  .ap-live-meta-controls {
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .ap-head-tools,
@@ -2249,7 +2349,8 @@ body.ap-live-compact .ap-live-item {
   background: var(--ap-surface-3);
 }
 
-.ap-logv-icon-btn.is-loading i {
+.ap-logv-icon-btn.is-loading i,
+.ap-logv-refresh-btn.is-loading i {
   animation: ap-logv-spin 0.85s linear infinite;
 }
 
@@ -2645,6 +2746,7 @@ body.ap-live-compact .ap-live-item {
 
   .ap-logv-tools {
     width: 100%;
+    flex-wrap: wrap;
   }
 
   .ap-logv-search {
@@ -2701,12 +2803,14 @@ body.ap-live-compact .ap-live-item {
   font-weight: 600;
 }
 
-.ap-docker-refresh-btn {
+.ap-docker-refresh-btn,
+.ap-monitor-refresh-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 31px;
   padding: 4px 11px;
+  white-space: nowrap;
 }
 
 .ap-docker-summary-lines {
@@ -2810,15 +2914,19 @@ body.ap-live-compact .ap-live-item {
   flex: 0 0 132px;
 }
 
-.ap-docker-auto-btn {
+.ap-docker-auto-btn,
+.ap-monitor-auto-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 72px;
+  min-height: 31px;
   flex: 0 0 auto;
+  padding: 4px 11px;
 }
 
-.ap-docker-auto-btn.is-active {
+.ap-docker-auto-btn.is-active,
+.ap-monitor-auto-btn.is-active {
   background: var(--ap-primary-soft);
   color: var(--ap-primary);
   border-color: color-mix(in srgb, var(--ap-primary) 45%, var(--ap-border));

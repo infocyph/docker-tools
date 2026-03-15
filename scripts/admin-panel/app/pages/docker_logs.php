@@ -10,7 +10,18 @@ declare(strict_types=1);
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <div id="apDockerLogsRefreshMeta" class="ap-live-refresh-meta" aria-live="polite">
-      <span id="apDockerLogsUpdatedAt" class="ap-live-meta">Next refresh in --:--</span>
+      <div class="ap-live-meta-row">
+        <span id="apDockerLogsUpdatedAt" class="ap-live-meta">Next refresh in --:--</span>
+        <div class="ap-live-meta-controls">
+          <label class="ap-live-auto-switch" for="apDockerLogsAuto">
+            <span class="ap-live-auto-switch-label">Auto</span>
+            <input id="apDockerLogsAuto" type="checkbox" role="switch" aria-label="Auto refresh docker logs">
+          </label>
+          <button id="apDockerLogsRefreshBtn" class="btn ap-live-meta-refresh" type="button" aria-label="Refresh docker logs" title="Refresh">
+            <i class="bi bi-arrow-repeat"></i>
+          </button>
+        </div>
+      </div>
       <span class="ap-live-countdown-track" aria-hidden="true">
         <span id="apDockerLogsCountdownBar" class="ap-live-countdown-bar"></span>
       </span>
@@ -47,10 +58,6 @@ declare(strict_types=1);
               <option value="500">Tail: 500</option>
             </select>
             <input id="apDockerLogsGrep" class="form-control form-control-sm ap-live-tool-input" type="search" placeholder="Search lines (substring)" aria-label="Search">
-            <button id="apDockerLogsAuto" class="btn ap-chip-btn ap-docker-auto-btn" type="button" aria-pressed="false">Auto</button>
-            <button id="apDockerLogsRefreshBtn" class="btn ap-ghost-btn ap-docker-refresh-btn" type="button">
-              <i class="bi bi-arrow-repeat me-1"></i> Refresh
-            </button>
           </div>
         </div>
       </header>
@@ -206,7 +213,7 @@ declare(strict_types=1);
         refreshBtn.disabled = loading;
         var icon = refreshBtn.querySelector("i");
         if (icon) {
-          icon.className = loading ? "bi bi-arrow-repeat ap-spin me-1" : "bi bi-arrow-repeat me-1";
+          icon.className = loading ? "bi bi-arrow-repeat ap-spin" : "bi bi-arrow-repeat";
         }
       }
       updateRefreshMeta();
@@ -331,7 +338,7 @@ declare(strict_types=1);
     }
 
     function isAutoRefreshEnabled() {
-      return !!(autoBtn && autoBtn.classList.contains("is-active"));
+      return !!(autoBtn && autoBtn.checked);
     }
 
     function bindServiceTabs() {
@@ -536,10 +543,8 @@ declare(strict_types=1);
       });
     }
     if (autoBtn) {
-      autoBtn.addEventListener("click", function () {
-        var enabled = !autoBtn.classList.contains("is-active");
-        autoBtn.classList.toggle("is-active", enabled);
-        autoBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
+      autoBtn.addEventListener("change", function () {
+        var enabled = !!autoBtn.checked;
         rebindAutoRefresh();
         if (enabled) {
           refreshLogs();
@@ -549,8 +554,16 @@ declare(strict_types=1);
       });
     }
 
+    function startInitialLoad() {
+      refreshLogs();
+    }
+
     ensureCountdownTicker();
     rebindAutoRefresh();
-    refreshLogs();
+    if (document.readyState === "complete") {
+      window.setTimeout(startInitialLoad, 0);
+    } else {
+      window.addEventListener("load", startInitialLoad, { once: true });
+    }
   })();
 </script>

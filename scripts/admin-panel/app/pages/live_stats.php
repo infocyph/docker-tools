@@ -8,14 +8,24 @@ declare(strict_types=1);
     <h2 class="ap-page-title mb-1">Live Stack Telemetry</h2>
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
-    <div class="btn-group" role="group" aria-label="Section visibility">
-      <button id="apLiveCollapseAllBtn" class="btn ap-ghost-btn" type="button"><i class="bi bi-arrows-collapse me-1"></i> Collapse all</button>
-      <button id="apLiveExpandAllBtn" class="btn ap-ghost-btn" type="button"><i class="bi bi-arrows-expand me-1"></i> Expand all</button>
+    <div class="ap-live-matrix-tools" role="group" aria-label="Section visibility">
+      <button id="apLiveCollapseAllBtn" class="btn ap-ghost-btn ap-monitor-refresh-btn" type="button"><i class="bi bi-arrows-collapse me-1"></i> Collapse all</button>
+      <button id="apLiveExpandAllBtn" class="btn ap-ghost-btn ap-monitor-refresh-btn" type="button"><i class="bi bi-arrows-expand me-1"></i> Expand all</button>
     </div>
-    <button id="apLiveCompactToggleBtn" class="btn ap-ghost-btn" type="button" aria-pressed="false"><i class="bi bi-layout-text-sidebar-reverse me-1"></i> Compact</button>
-    <button id="apLiveRefreshBtn" class="btn ap-ghost-btn" type="button"><i class="bi bi-arrow-repeat me-1"></i> Refresh</button>
+    <button id="apLiveCompactToggleBtn" class="btn ap-chip-btn ap-monitor-auto-btn" type="button" aria-pressed="false"><i class="bi bi-layout-text-sidebar-reverse me-1"></i> Compact</button>
     <div id="apLiveRefreshMeta" class="ap-live-refresh-meta" aria-live="polite">
-      <span id="apLiveUpdatedAt" class="ap-live-meta">Next refresh in --:--</span>
+      <div class="ap-live-meta-row">
+        <span id="apLiveUpdatedAt" class="ap-live-meta">Next refresh in --:--</span>
+        <div class="ap-live-meta-controls">
+          <label class="ap-live-auto-switch" for="apLiveAuto">
+            <span class="ap-live-auto-switch-label">Auto</span>
+            <input id="apLiveAuto" type="checkbox" role="switch" aria-label="Auto refresh live stats">
+          </label>
+          <button id="apLiveRefreshBtn" class="btn ap-live-meta-refresh" type="button" aria-label="Refresh live stats" title="Refresh">
+            <i class="bi bi-arrow-repeat"></i>
+          </button>
+        </div>
+      </div>
       <span class="ap-live-countdown-track" aria-hidden="true">
         <span id="apLiveCountdownBar" class="ap-live-countdown-bar"></span>
       </span>

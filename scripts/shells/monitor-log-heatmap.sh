@@ -89,7 +89,7 @@ _line_is_error() {
 usage() {
   cat <<'EOF'
 Usage:
-  monitor-log-heatmap [--json] [--since <dur>] [--bucket-min <n>] [--top <n>] [--line-limit <n>]
+  monitor-log-heatmap [--json] [--source <both|docker|file>] [--since <dur>] [--bucket-min <n>] [--top <n>] [--line-limit <n>]
 
 Examples:
   monitor-log-heatmap --json
@@ -98,10 +98,11 @@ EOF
 }
 
 main() {
-  local json=0 since="24h" bucket_min=15 top_n=12 line_limit=1000
+  local json=0 source="both" since="24h" bucket_min=15 top_n=12 line_limit=1000
   while [[ "${1:-}" ]]; do
     case "$1" in
       --json) json=1; shift ;;
+      --source) source="${2:-both}"; shift 2 ;;
       --since) since="${2:-24h}"; shift 2 ;;
       --bucket-min) bucket_min="${2:-15}"; shift 2 ;;
       --top) top_n="${2:-12}"; shift 2 ;;
@@ -120,6 +121,11 @@ main() {
   ((top_n > 100)) && top_n=100
   ((line_limit < 100)) && line_limit=100
   ((line_limit > 5000)) && line_limit=5000
+  source="${source,,}"
+  case "$source" in
+    both|docker|file) ;;
+    *) source="both" ;;
+  esac
 
   if ! _has docker; then
     printf '{"ok":false,"error":"docker_missing","message":"docker command is required.","generated_at":"%s","project":"unknown"}\n' \
@@ -142,68 +148,72 @@ main() {
   trap 'rm -f "${tmp_records:-}"' EXIT
 
   # Docker logs source.
-  local -a cids=()
-  if [[ "$project" != "unknown" && -n "$project" ]]; then
-    mapfile -t cids < <(docker ps -aq --filter "label=com.docker.compose.project=${project}" 2>/dev/null | sed '/^[[:space:]]*$/d')
-  fi
-  if ((${#cids[@]} == 0)); then
-    mapfile -t cids < <(docker ps -aq 2>/dev/null | sed '/^[[:space:]]*$/d')
-  fi
+  if [[ "$source" == "both" || "$source" == "docker" ]]; then
+    local -a cids=()
+    if [[ "$project" != "unknown" && -n "$project" ]]; then
+      mapfile -t cids < <(docker ps -aq --filter "label=com.docker.compose.project=${project}" 2>/dev/null | sed '/^[[:space:]]*$/d')
+    fi
+    if ((${#cids[@]} == 0)); then
+      mapfile -t cids < <(docker ps -aq 2>/dev/null | sed '/^[[:space:]]*$/d')
+    fi
 
-  local inspect_raw row name service
-  inspect_raw=""
-  if ((${#cids[@]})); then
-    inspect_raw="$(docker inspect -f '{{.Name}}|{{index .Config.Labels "com.docker.compose.service"}}' "${cids[@]}" 2>/dev/null | sed 's#^/##')"
-  fi
-  while IFS='|' read -r name service; do
-    [[ -n "$name" ]] || continue
-    [[ -n "$service" ]] || service="unknown"
-    local logs line ts msg epoch bucket sig
-    logs="$(docker logs --timestamps --since "$since" --tail "$line_limit" "$name" 2>/dev/null || true)"
-    while IFS= read -r line; do
-      [[ -n "$line" ]] || continue
-      ts="${line%% *}"
-      msg="${line#* }"
-      _line_is_error "$msg" || continue
-      epoch="$(_to_epoch "$ts")"
-      ((epoch > 0)) || epoch="$now_epoch"
-      bucket=$((epoch - (epoch % bucket_sec)))
-      sig="$(_normalize_sig "$msg")"
-      [[ -n "$sig" ]] || sig="unknown error"
-      printf '%s|%s|%s\n' "$bucket" "$service" "$sig" >>"$tmp_records"
-    done <<<"$logs"
-  done <<<"$inspect_raw"
-
-  # File logs source.
-  local -a roots=("/global/log" "/app/logs")
-  local root f rel service_dir line ts msg epoch bucket sig
-  for root in "${roots[@]}"; do
-    [[ -d "$root" ]] || continue
-    while IFS= read -r f; do
-      [[ -f "$f" ]] || continue
-      rel="${f#$root/}"
-      service_dir="${rel%%/*}"
-      [[ -n "$service_dir" && "$service_dir" != "$rel" ]] || service_dir="file"
+    local inspect_raw row name service
+    inspect_raw=""
+    if ((${#cids[@]})); then
+      inspect_raw="$(docker inspect -f '{{.Name}}|{{index .Config.Labels "com.docker.compose.service"}}' "${cids[@]}" 2>/dev/null | sed 's#^/##')"
+    fi
+    while IFS='|' read -r name service; do
+      [[ -n "$name" ]] || continue
+      [[ -n "$service" ]] || service="unknown"
+      local logs line ts msg epoch bucket sig
+      logs="$(docker logs --timestamps --since "$since" --tail "$line_limit" "$name" 2>/dev/null || true)"
       while IFS= read -r line; do
         [[ -n "$line" ]] || continue
-        _line_is_error "$line" || continue
-
-        ts=""
-        if [[ "$line" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]T][0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
-          ts="${BASH_REMATCH[1]}"
-        elif [[ "$line" =~ \[([0-9]{2}/[A-Za-z]{3}/[0-9]{4}:[0-9]{2}:[0-9]{2}:[0-9]{2}[[:space:]][+-][0-9]{4})\] ]]; then
-          ts="${BASH_REMATCH[1]}"
-        fi
+        ts="${line%% *}"
+        msg="${line#* }"
+        _line_is_error "$msg" || continue
         epoch="$(_to_epoch "$ts")"
         ((epoch > 0)) || epoch="$now_epoch"
         bucket=$((epoch - (epoch % bucket_sec)))
-        msg="$line"
         sig="$(_normalize_sig "$msg")"
         [[ -n "$sig" ]] || sig="unknown error"
-        printf '%s|%s|%s\n' "$bucket" "$service_dir" "$sig" >>"$tmp_records"
-      done < <(tail -n "$line_limit" "$f" 2>/dev/null || true)
-    done < <(find "$root" -type f \( -name '*.log' -o -name '*.log.*' \) 2>/dev/null)
-  done
+        printf '%s|%s|%s\n' "$bucket" "$service" "$sig" >>"$tmp_records"
+      done <<<"$logs"
+    done <<<"$inspect_raw"
+  fi
+
+  # File logs source.
+  if [[ "$source" == "both" || "$source" == "file" ]]; then
+    local -a roots=("/global/log" "/app/logs")
+    local root f rel service_dir line ts msg epoch bucket sig
+    for root in "${roots[@]}"; do
+      [[ -d "$root" ]] || continue
+      while IFS= read -r f; do
+        [[ -f "$f" ]] || continue
+        rel="${f#$root/}"
+        service_dir="${rel%%/*}"
+        [[ -n "$service_dir" && "$service_dir" != "$rel" ]] || service_dir="file"
+        while IFS= read -r line; do
+          [[ -n "$line" ]] || continue
+          _line_is_error "$line" || continue
+
+          ts=""
+          if [[ "$line" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]T][0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
+            ts="${BASH_REMATCH[1]}"
+          elif [[ "$line" =~ \[([0-9]{2}/[A-Za-z]{3}/[0-9]{4}:[0-9]{2}:[0-9]{2}:[0-9]{2}[[:space:]][+-][0-9]{4})\] ]]; then
+            ts="${BASH_REMATCH[1]}"
+          fi
+          epoch="$(_to_epoch "$ts")"
+          ((epoch > 0)) || epoch="$now_epoch"
+          bucket=$((epoch - (epoch % bucket_sec)))
+          msg="$line"
+          sig="$(_normalize_sig "$msg")"
+          [[ -n "$sig" ]] || sig="unknown error"
+          printf '%s|%s|%s\n' "$bucket" "$service_dir" "$sig" >>"$tmp_records"
+        done < <(tail -n "$line_limit" "$f" 2>/dev/null || true)
+      done < <(find "$root" -type f \( -name '*.log' -o -name '*.log.*' \) 2>/dev/null)
+    done
+  fi
 
   local total_errors
   total_errors="$(wc -l <"$tmp_records" | awk '{print $1}')"
@@ -226,8 +236,8 @@ main() {
   printf '"ok":true,'
   printf '"generated_at":"%s",' "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
   printf '"project":"%s",' "$(_json_escape "$project")"
-  printf '"filters":{"since":"%s","bucket_min":%d,"top":%d,"line_limit":%d},' \
-    "$(_json_escape "$since")" "$bucket_min" "$top_n" "$line_limit"
+  printf '"filters":{"source":"%s","since":"%s","bucket_min":%d,"top":%d,"line_limit":%d},' \
+    "$(_json_escape "$source")" "$(_json_escape "$since")" "$bucket_min" "$top_n" "$line_limit"
   printf '"summary":{"errors":%s,"services":%d,"buckets":%d,"top_signatures":%d},' \
     "$(_json_escape "$total_errors")" "${#service_rows[@]}" "${#bucket_rows[@]}" "${#sig_rows[@]}"
 

@@ -37,7 +37,13 @@ final class LogHeatmapEndpoint
             $lineLimit = 1000;
         }
 
+        $source = strtolower(trim((string)($query['source'] ?? 'both')));
+        if (!in_array($source, ['both', 'docker', 'file'], true)) {
+            $source = 'both';
+        }
+
         $payload = $this->service->collect(
+            $source,
             (string)($query['since'] ?? '24h'),
             $bucketMin,
             $top,

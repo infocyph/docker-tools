@@ -494,6 +494,41 @@ $levelUi = [
   </div>
 </section>
 
+<section class="row g-3 mt-1">
+  <div class="col-12">
+    <article class="card ap-card h-100">
+      <header class="card-header ap-card-head ap-card-head-wrap">
+        <div>
+          <h4 class="ap-card-title mb-1">File Error Heatmap <span id="apFileHeatErrorCount" class="ap-badge ap-live-state-unhealthy">0</span></h4>
+          <p class="ap-card-sub mb-0">Top error signatures grouped by file-log service and time bucket.</p>
+        </div>
+        <button id="apFileHeatToggleBtn" class="btn ap-ghost-btn" type="button" aria-expanded="false" aria-controls="apFileHeatBody" title="Expand section">
+          <i id="apFileHeatToggleIcon" class="bi bi-chevron-down"></i>
+        </button>
+      </header>
+      <div id="apFileHeatBody" class="card-body d-none">
+        <div id="apFileHeatSummary" class="ap-monitor-summary mb-3"></div>
+        <div class="table-responsive ap-local-sticky mb-3">
+          <table class="table ap-table ap-table-sticky ap-table-emphasis mb-0">
+            <thead><tr><th>Signature</th><th class="text-end">Count</th></tr></thead>
+            <tbody id="apFileHeatSigRows">
+            <tr><td colspan="2" class="text-center ap-page-sub py-4">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-responsive ap-local-sticky">
+          <table class="table ap-table ap-table-sticky ap-table-emphasis mb-0">
+            <thead><tr><th>Service</th><th class="text-end">Count</th><th>Bucket Distribution</th></tr></thead>
+            <tbody id="apFileHeatServiceRows">
+            <tr><td colspan="3" class="text-center ap-page-sub py-4">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </article>
+  </div>
+</section>
+
 <section class="ap-logv-stage">
   <article class="ap-logv-shell">
     <div class="ap-logv-layout">
@@ -757,6 +792,7 @@ $levelUi = [
     }
     var logsFilesApiUrl = basePath + "/api/logs/files";
     var logsEntriesApiUrl = basePath + "/api/logs/entries";
+    var logHeatmapApiUrl = basePath + "/api/log-heatmap";
 
     var serviceSelect = document.getElementById("apLogService");
     var filterWrapEl = document.getElementById("apLogFilterWrap");
@@ -783,6 +819,13 @@ $levelUi = [
     var allCountEl = document.getElementById("apLogChipAllCount");
     var searchInputEl = document.getElementById("apLogSearchInput");
     var refreshBtnEl = document.getElementById("apLogRefreshBtn");
+    var fileHeatSummaryEl = document.getElementById("apFileHeatSummary");
+    var fileHeatSigRowsEl = document.getElementById("apFileHeatSigRows");
+    var fileHeatServiceRowsEl = document.getElementById("apFileHeatServiceRows");
+    var fileHeatErrorCountEl = document.getElementById("apFileHeatErrorCount");
+    var fileHeatBodyEl = document.getElementById("apFileHeatBody");
+    var fileHeatToggleBtn = document.getElementById("apFileHeatToggleBtn");
+    var fileHeatToggleIcon = document.getElementById("apFileHeatToggleIcon");
     var settingsWrapEl = document.getElementById("apLogSettings");
     var settingsBtnEl = document.getElementById("apLogSettingsBtn");
     var settingsMenuEl = document.getElementById("apLogSettingsMenu");
@@ -796,6 +839,7 @@ $levelUi = [
     var selectedLevelState = "all";
     var searchDebounceTimer = null;
     var refreshing = false;
+    var fileHeatLoading = false;
     var domainEnabledServices = {
       nginx: true,
       apache: true,
@@ -832,6 +876,94 @@ $levelUi = [
         return "0";
       }
       return String(Math.max(0, Math.round(n)).toLocaleString());
+    };
+    var renderFileHeatSummary = function (summary) {
+      if (!fileHeatSummaryEl) {
+        return;
+      }
+      var s = summary && typeof summary === "object" ? summary : {};
+      if (fileHeatErrorCountEl) {
+        fileHeatErrorCountEl.textContent = numberFmt(s.errors === "-" ? 0 : s.errors);
+      }
+      fileHeatSummaryEl.innerHTML = ""
+        + '<span class="ap-kv-group ap-live-state-unhealthy"><span class="ap-kv-group-key">Errors</span><span class="ap-kv-group-val">' + numberFmt(s.errors) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Services</span><span class="ap-kv-group-val">' + numberFmt(s.services) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Buckets</span><span class="ap-kv-group-val">' + numberFmt(s.buckets) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Top Signatures</span><span class="ap-kv-group-val">' + numberFmt(s.top_signatures) + "</span></span>";
+    };
+    var renderFileHeatSigRows = function (rows) {
+      if (!fileHeatSigRowsEl) {
+        return;
+      }
+      var items = Array.isArray(rows) ? rows : [];
+      fileHeatSigRowsEl.innerHTML = items.length === 0
+        ? '<tr><td colspan="2" class="text-center ap-page-sub py-4">No error signatures found.</td></tr>'
+        : items.map(function (row) {
+          return '<tr><td>' + escapeHtml(String(row.signature || "-")) + '</td><td class="text-end">' + numberFmt(row.count) + '</td></tr>';
+        }).join("");
+    };
+    var renderFileHeatServiceRows = function (rows) {
+      if (!fileHeatServiceRowsEl) {
+        return;
+      }
+      var items = Array.isArray(rows) ? rows : [];
+      fileHeatServiceRowsEl.innerHTML = items.length === 0
+        ? '<tr><td colspan="3" class="text-center ap-page-sub py-4">No file-log service heatmap rows found.</td></tr>'
+        : items.map(function (row) {
+          var heat = Array.isArray(row.heatmap) ? row.heatmap : [];
+          var dist = heat.map(function (h) {
+            var ts = Number(h && h.bucket_epoch || 0);
+            var cnt = numberFmt(h && h.count);
+            if (!isFinite(ts) || ts <= 0) {
+              return cnt;
+            }
+            var d = new Date(ts * 1000);
+            var label = isFinite(d.getTime()) ? d.toISOString().slice(11, 16) : String(ts);
+            return label + " (" + cnt + ")";
+          }).join(" | ");
+          return ''
+            + '<tr>'
+            + '  <td>' + escapeHtml(String(row.service || "-")) + '</td>'
+            + '  <td class="text-end">' + numberFmt(row.count) + '</td>'
+            + '  <td>' + escapeHtml(dist || "-") + '</td>'
+            + '</tr>';
+        }).join("");
+    };
+    var refreshFileHeatmap = function () {
+      if (fileHeatLoading || !logHeatmapApiUrl) {
+        return Promise.resolve();
+      }
+      fileHeatLoading = true;
+      var qp = new URLSearchParams();
+      qp.set("source", "file");
+      qp.set("since", "24h");
+      qp.set("bucket_min", "15");
+      qp.set("top", "8");
+      qp.set("line_limit", "1000");
+      return fetchJson(logHeatmapApiUrl + "?" + qp.toString()).then(function (payload) {
+        renderFileHeatSummary(payload.summary || {});
+        renderFileHeatSigRows(payload.top_signatures || []);
+        renderFileHeatServiceRows(payload.services || []);
+      }).catch(function () {
+        renderFileHeatSummary({});
+        renderFileHeatSigRows([]);
+        renderFileHeatServiceRows([]);
+      }).finally(function () {
+        fileHeatLoading = false;
+      });
+    };
+    var setFileHeatCollapsed = function (collapsed) {
+      var isCollapsed = !!collapsed;
+      if (fileHeatBodyEl) {
+        fileHeatBodyEl.classList.toggle("d-none", isCollapsed);
+      }
+      if (fileHeatToggleBtn) {
+        fileHeatToggleBtn.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+        fileHeatToggleBtn.setAttribute("title", isCollapsed ? "Expand section" : "Collapse section");
+      }
+      if (fileHeatToggleIcon) {
+        fileHeatToggleIcon.className = "bi " + (isCollapsed ? "bi-chevron-down" : "bi-chevron-up");
+      }
     };
 
     var fileTokenFromUrl = function () {
@@ -1048,12 +1180,14 @@ $levelUi = [
       }
 
       loadFilesAjax().then(function () {
+        refreshFileHeatmap();
         refreshing = false;
         if (refreshBtnEl) {
           refreshBtnEl.classList.remove("is-loading");
           refreshBtnEl.removeAttribute("aria-busy");
         }
       }, function () {
+        refreshFileHeatmap();
         recoverFromLoadError();
         refreshing = false;
         if (refreshBtnEl) {
@@ -1782,6 +1916,12 @@ $levelUi = [
         refreshData();
       });
     }
+    if (fileHeatToggleBtn) {
+      fileHeatToggleBtn.addEventListener("click", function () {
+        var collapsed = fileHeatBodyEl ? !fileHeatBodyEl.classList.contains("d-none") : true;
+        setFileHeatCollapsed(collapsed);
+      });
+    }
     if (settingsBtnEl) {
       settingsBtnEl.addEventListener("click", function (event) {
         event.preventDefault();
@@ -1814,6 +1954,8 @@ $levelUi = [
     });
     applyLevelFilter("all");
     bindFileClicks();
+    setFileHeatCollapsed(true);
+    refreshFileHeatmap();
     loadFilesAjax().catch(recoverFromLoadError);
   });
 </script>

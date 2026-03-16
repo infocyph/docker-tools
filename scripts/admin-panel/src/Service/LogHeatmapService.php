@@ -8,8 +8,12 @@ final class LogHeatmapService
     /**
      * @return array<string,mixed>
      */
-    public function collect(string $since = '24h', int $bucketMin = 15, int $top = 12, int $lineLimit = 1000): array
+    public function collect(string $source = 'both', string $since = '24h', int $bucketMin = 15, int $top = 12, int $lineLimit = 1000): array
     {
+        $source = strtolower(trim($source));
+        if (!in_array($source, ['both', 'docker', 'file'], true)) {
+            $source = 'both';
+        }
         $since = trim($since);
         if ($since === '') {
             $since = '24h';
@@ -21,6 +25,8 @@ final class LogHeatmapService
         $cmd = [
             'monitor-log-heatmap',
             '--json',
+            '--source',
+            $source,
             '--since',
             $since,
             '--bucket-min',
@@ -40,6 +46,7 @@ final class LogHeatmapService
                 'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
                 'project' => '',
                 'filters' => [
+                    'source' => $source,
                     'since' => $since,
                     'bucket_min' => $bucketMin,
                     'top' => $top,
@@ -66,6 +73,7 @@ final class LogHeatmapService
                 'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
                 'project' => '',
                 'filters' => [
+                    'source' => $source,
                     'since' => $since,
                     'bucket_min' => $bucketMin,
                     'top' => $top,

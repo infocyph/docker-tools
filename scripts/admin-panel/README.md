@@ -35,7 +35,6 @@ Additional routes:
 - `http://localhost:9920/db-health`
 - `http://localhost:9920/queue-health`
 - `http://localhost:9920/slo-view`
-- `http://localhost:9920/log-heatmap`
 - `http://localhost:9920/drift-monitor`
 - `http://localhost:9920/tls-monitor`
 - `http://localhost:9920/volume-monitor`
@@ -49,7 +48,7 @@ AJAX data endpoint:
 - `http://localhost:9920/api/db-health` (DB/Redis runtime checks; supports `engine`)
 - `http://localhost:9920/api/queue-health` (queue/cron checks; supports `since`, `pending_threshold`, `heartbeat_stale_sec`)
 - `http://localhost:9920/api/slo-view` (error budget/SLO metrics; supports `timeout`, `paths`)
-- `http://localhost:9920/api/log-heatmap` (error signatures by service/time bucket; supports `since`, `bucket_min`, `top`, `line_limit`)
+- `http://localhost:9920/api/log-heatmap` (error signatures by service/time bucket; supports `source=both|docker|file`, `since`, `bucket_min`, `top`, `line_limit`)
 - `http://localhost:9920/api/drift-monitor` (generated vs active config drift)
 - `http://localhost:9920/api/tls-monitor` (TLS/mTLS checks with policy/posture/trend; supports `domain` partial/wildcard, `timeout`, `retries`)
 - `http://localhost:9920/api/tls-cert-artifact` (downloads TLS trust artifacts; supports `kind=rootca|mtls`)

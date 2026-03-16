@@ -34,6 +34,41 @@ declare(strict_types=1);
 
 <section class="row g-3 mt-1">
   <div class="col-12">
+    <article class="card ap-card h-100">
+      <header class="card-header ap-card-head ap-card-head-wrap">
+        <div>
+          <h4 class="ap-card-title mb-1">Docker Error Heatmap <span id="apDockerHeatErrorCount" class="ap-badge ap-live-state-unhealthy">0</span></h4>
+          <p class="ap-card-sub mb-0">Top error signatures grouped by docker service and time bucket.</p>
+        </div>
+        <button id="apDockerHeatToggleBtn" class="btn ap-ghost-btn" type="button" aria-expanded="false" aria-controls="apDockerHeatBody" title="Expand section">
+          <i id="apDockerHeatToggleIcon" class="bi bi-chevron-down"></i>
+        </button>
+      </header>
+      <div id="apDockerHeatBody" class="card-body d-none">
+        <div id="apDockerHeatSummary" class="ap-monitor-summary mb-3"></div>
+        <div class="table-responsive ap-local-sticky mb-3">
+          <table class="table ap-table ap-table-sticky ap-table-emphasis mb-0">
+            <thead><tr><th>Signature</th><th class="text-end">Count</th></tr></thead>
+            <tbody id="apDockerHeatSigRows">
+            <tr><td colspan="2" class="text-center ap-page-sub py-4">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-responsive ap-local-sticky">
+          <table class="table ap-table ap-table-sticky ap-table-emphasis mb-0">
+            <thead><tr><th>Service</th><th class="text-end">Count</th><th>Bucket Distribution</th></tr></thead>
+            <tbody id="apDockerHeatServiceRows">
+            <tr><td colspan="3" class="text-center ap-page-sub py-4">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section class="row g-3 mt-1">
+  <div class="col-12">
     <article class="card ap-card">
       <header class="card-header ap-card-head ap-card-head-wrap">
         <div>
@@ -99,6 +134,7 @@ declare(strict_types=1);
       basePath = "";
     }
     var apiUrl = basePath + "/api/docker-logs";
+    var heatmapApiUrl = basePath + "/api/log-heatmap";
 
     var serviceEl = document.getElementById("apDockerLogsService");
     var tabsEl = document.getElementById("apDockerLogsTabs");
@@ -113,6 +149,13 @@ declare(strict_types=1);
     var updatedAtEl = document.getElementById("apDockerLogsUpdatedAt");
     var lastUpdatedEl = document.getElementById("apDockerLogsLastUpdated");
     var countdownBarEl = document.getElementById("apDockerLogsCountdownBar");
+    var heatSummaryEl = document.getElementById("apDockerHeatSummary");
+    var heatSigRowsEl = document.getElementById("apDockerHeatSigRows");
+    var heatServiceRowsEl = document.getElementById("apDockerHeatServiceRows");
+    var heatErrorCountEl = document.getElementById("apDockerHeatErrorCount");
+    var heatBodyEl = document.getElementById("apDockerHeatBody");
+    var heatToggleBtn = document.getElementById("apDockerHeatToggleBtn");
+    var heatToggleIcon = document.getElementById("apDockerHeatToggleIcon");
 
     var refreshTimer = null;
     var refreshCountdownTimer = null;
@@ -121,6 +164,7 @@ declare(strict_types=1);
     var lastGeneratedAt = "";
     var activeProject = "-";
     var loading = false;
+    var heatFetchInFlight = false;
 
     function esc(value) {
       return String(value || "")
@@ -139,6 +183,14 @@ declare(strict_types=1);
           return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
         })
         .join(" ");
+    }
+
+    function numberText(value) {
+      var n = Number(value);
+      if (!isFinite(n) || n < 0) {
+        return "-";
+      }
+      return String(Math.round(n));
     }
 
     function stateIconMeta(state) {
@@ -447,6 +499,116 @@ declare(strict_types=1);
       root.innerHTML = html;
     }
 
+    function renderDockerHeatSummary(summary) {
+      if (!heatSummaryEl) {
+        return;
+      }
+      var s = summary && typeof summary === "object" ? summary : {};
+      if (heatErrorCountEl) {
+        heatErrorCountEl.textContent = numberText(s.errors === "-" ? 0 : s.errors);
+      }
+      heatSummaryEl.innerHTML = ""
+        + '<span class="ap-kv-group ap-live-state-unhealthy"><span class="ap-kv-group-key">Errors</span><span class="ap-kv-group-val">' + numberText(s.errors) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Services</span><span class="ap-kv-group-val">' + numberText(s.services) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Buckets</span><span class="ap-kv-group-val">' + numberText(s.buckets) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Top Signatures</span><span class="ap-kv-group-val">' + numberText(s.top_signatures) + "</span></span>";
+    }
+
+    function renderDockerHeatSigRows(rows) {
+      if (!heatSigRowsEl) {
+        return;
+      }
+      var items = Array.isArray(rows) ? rows : [];
+      heatSigRowsEl.innerHTML = items.length === 0
+        ? '<tr><td colspan="2" class="text-center ap-page-sub py-4">No error signatures found.</td></tr>'
+        : items.map(function (row) {
+          return '<tr><td>' + esc(String(row.signature || "-")) + '</td><td class="text-end">' + numberText(row.count) + '</td></tr>';
+        }).join("");
+    }
+
+    function renderDockerHeatServiceRows(rows) {
+      if (!heatServiceRowsEl) {
+        return;
+      }
+      var items = Array.isArray(rows) ? rows : [];
+      heatServiceRowsEl.innerHTML = items.length === 0
+        ? '<tr><td colspan="3" class="text-center ap-page-sub py-4">No docker service heatmap rows found.</td></tr>'
+        : items.map(function (row) {
+          var heat = Array.isArray(row.heatmap) ? row.heatmap : [];
+          var dist = heat.map(function (h) {
+            var ts = Number(h && h.bucket_epoch || 0);
+            var cnt = numberText(h && h.count);
+            if (!isFinite(ts) || ts <= 0) {
+              return cnt;
+            }
+            var d = new Date(ts * 1000);
+            var label = isFinite(d.getTime()) ? d.toISOString().slice(11, 16) : String(ts);
+            return label + " (" + cnt + ")";
+          }).join(" | ");
+          return ''
+            + '<tr>'
+            + '  <td>' + esc(String(row.service || "-")) + '</td>'
+            + '  <td class="text-end">' + numberText(row.count) + '</td>'
+            + '  <td>' + esc(dist || "-") + '</td>'
+            + '</tr>';
+        }).join("");
+    }
+
+    function refreshDockerHeatmap(since) {
+      if (heatFetchInFlight || !heatmapApiUrl) {
+        return;
+      }
+      heatFetchInFlight = true;
+      var qp = new URLSearchParams();
+      qp.set("source", "docker");
+      qp.set("since", String(since || "30m"));
+      qp.set("bucket_min", "15");
+      qp.set("top", "8");
+      qp.set("line_limit", "1000");
+      fetch(heatmapApiUrl + "?" + qp.toString(), {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Accept": "application/json" }
+      })
+        .then(function (res) {
+          return res.json().catch(function () { return null; }).then(function (json) {
+            return { status: res.status, ok: res.ok, json: json };
+          });
+        })
+        .then(function (result) {
+          var payload = result && result.json && typeof result.json === "object" ? result.json : {};
+          if (!result.ok || !payload.ok) {
+            throw new Error("docker heatmap api failed");
+          }
+          renderDockerHeatSummary(payload.summary || {});
+          renderDockerHeatSigRows(payload.top_signatures || []);
+          renderDockerHeatServiceRows(payload.services || []);
+        })
+        .catch(function () {
+          renderDockerHeatSummary({});
+          renderDockerHeatSigRows([]);
+          renderDockerHeatServiceRows([]);
+        })
+        .finally(function () {
+          heatFetchInFlight = false;
+        });
+    }
+
+    function setDockerHeatCollapsed(collapsed) {
+      var isCollapsed = !!collapsed;
+      if (heatBodyEl) {
+        heatBodyEl.classList.toggle("d-none", isCollapsed);
+      }
+      if (heatToggleBtn) {
+        heatToggleBtn.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+        heatToggleBtn.setAttribute("title", isCollapsed ? "Expand section" : "Collapse section");
+      }
+      if (heatToggleIcon) {
+        heatToggleIcon.className = "bi " + (isCollapsed ? "bi-chevron-down" : "bi-chevron-up");
+      }
+    }
+
     function buildUrl() {
       var filters = getFilters();
       var qp = new URLSearchParams();
@@ -493,6 +655,7 @@ declare(strict_types=1);
           renderGroups(payload);
           lastGeneratedAt = String(payload.generated_at || "");
           activeProject = String(payload.project || "-");
+          refreshDockerHeatmap(getFilters().since);
 
           if (metaEl) {
             metaEl.textContent = "Project: " + activeProject + " | Services: " + String((payload.services_available || []).length);
@@ -553,12 +716,19 @@ declare(strict_types=1);
         }
       });
     }
+    if (heatToggleBtn) {
+      heatToggleBtn.addEventListener("click", function () {
+        var collapsed = heatBodyEl ? !heatBodyEl.classList.contains("d-none") : true;
+        setDockerHeatCollapsed(collapsed);
+      });
+    }
 
     function startInitialLoad() {
       refreshLogs();
     }
 
     ensureCountdownTicker();
+    setDockerHeatCollapsed(true);
     rebindAutoRefresh();
     if (document.readyState === "complete") {
       window.setTimeout(startInitialLoad, 0);

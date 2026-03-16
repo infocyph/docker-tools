@@ -54,7 +54,7 @@ $routeHref = static function (string $slug = '') use ($basePath): string {
     }
     return $basePath . '/' . $clean;
 };
-$monitoringActive = in_array($activePage, ['logs', 'docker-logs', 'db-health', 'queue-health', 'slo-view', 'log-heatmap', 'drift-monitor', 'tls-monitor', 'volume-monitor', 'live-stats'], true);
+$monitoringActive = in_array($activePage, ['logs', 'docker-logs', 'db-health', 'queue-health', 'slo-view', 'drift-monitor', 'tls-monitor', 'volume-monitor', 'live-stats'], true);
 $topbarPageTitle = trim((string)preg_replace('/\s*\|\s*Admin Panel\s*$/i', '', $pageTitle));
 if ($topbarPageTitle === '') {
     $topbarPageTitle = $pageTitle;
@@ -142,10 +142,6 @@ if ($topbarPageTitle === '') {
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'slo-view' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('slo-view'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-speedometer"></i>
               <span>Error Budget / SLO</span>
-            </a>
-            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'log-heatmap' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('log-heatmap'), ENT_QUOTES, 'UTF-8') ?>">
-              <i class="bi bi-grid-3x3-gap"></i>
-              <span>Log Error Heatmap</span>
             </a>
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'drift-monitor' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('drift-monitor'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-sliders"></i>

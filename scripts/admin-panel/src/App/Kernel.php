@@ -6,7 +6,6 @@ namespace AdminPanel\App;
 use AdminPanel\Api\DockerLogsEndpoint;
 use AdminPanel\Api\DbHealthEndpoint;
 use AdminPanel\Api\DriftMonitorEndpoint;
-use AdminPanel\Api\AlertsEndpoint;
 use AdminPanel\Api\LogHeatmapEndpoint;
 use AdminPanel\Api\LogsEntriesEndpoint;
 use AdminPanel\Api\LogsFilesEndpoint;
@@ -14,7 +13,6 @@ use AdminPanel\Api\LiveStatsEndpoint;
 use AdminPanel\Api\QueueHealthEndpoint;
 use AdminPanel\Api\RuntimeEventsEndpoint;
 use AdminPanel\Api\SloViewEndpoint;
-use AdminPanel\Api\SyntheticFlowsEndpoint;
 use AdminPanel\Api\TlsCertArtifactEndpoint;
 use AdminPanel\Api\TlsMonitorEndpoint;
 use AdminPanel\Api\VolumeMonitorEndpoint;
@@ -36,8 +34,6 @@ final class Kernel
     private SloViewEndpoint $sloViewEndpoint;
     private LogHeatmapEndpoint $logHeatmapEndpoint;
     private DriftMonitorEndpoint $driftMonitorEndpoint;
-    private AlertsEndpoint $alertsEndpoint;
-    private SyntheticFlowsEndpoint $syntheticFlowsEndpoint;
     private RuntimeEventsEndpoint $runtimeEventsEndpoint;
     private TlsCertArtifactEndpoint $tlsCertArtifactEndpoint;
     private TlsMonitorEndpoint $tlsMonitorEndpoint;
@@ -56,8 +52,6 @@ final class Kernel
         ?SloViewEndpoint $sloViewEndpoint = null,
         ?LogHeatmapEndpoint $logHeatmapEndpoint = null,
         ?DriftMonitorEndpoint $driftMonitorEndpoint = null,
-        ?AlertsEndpoint $alertsEndpoint = null,
-        ?SyntheticFlowsEndpoint $syntheticFlowsEndpoint = null,
         ?RuntimeEventsEndpoint $runtimeEventsEndpoint = null,
         ?TlsCertArtifactEndpoint $tlsCertArtifactEndpoint = null,
         ?TlsMonitorEndpoint $tlsMonitorEndpoint = null,
@@ -78,8 +72,6 @@ final class Kernel
         $this->sloViewEndpoint = $sloViewEndpoint ?? new SloViewEndpoint();
         $this->logHeatmapEndpoint = $logHeatmapEndpoint ?? new LogHeatmapEndpoint();
         $this->driftMonitorEndpoint = $driftMonitorEndpoint ?? new DriftMonitorEndpoint();
-        $this->alertsEndpoint = $alertsEndpoint ?? new AlertsEndpoint();
-        $this->syntheticFlowsEndpoint = $syntheticFlowsEndpoint ?? new SyntheticFlowsEndpoint();
         $this->runtimeEventsEndpoint = $runtimeEventsEndpoint ?? new RuntimeEventsEndpoint();
         $this->tlsCertArtifactEndpoint = $tlsCertArtifactEndpoint ?? new TlsCertArtifactEndpoint();
         $this->tlsMonitorEndpoint = $tlsMonitorEndpoint ?? new TlsMonitorEndpoint();
@@ -121,14 +113,6 @@ final class Kernel
         }
         if ($path === '/api/drift-monitor') {
             $this->driftMonitorEndpoint->handle($query);
-            return;
-        }
-        if ($path === '/api/alerts') {
-            $this->alertsEndpoint->handle($query);
-            return;
-        }
-        if ($path === '/api/synthetic-flows') {
-            $this->syntheticFlowsEndpoint->handle($query);
             return;
         }
         if ($path === '/api/runtime-events') {

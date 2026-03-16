@@ -3,15 +3,15 @@ declare(strict_types=1);
 
 namespace AdminPanel\Api;
 
-use AdminPanel\Service\RuntimeWatchService;
+use AdminPanel\Service\RuntimeEventsService;
 
-final class RuntimeWatchEndpoint
+final class RuntimeEventsEndpoint
 {
-    private RuntimeWatchService $service;
+    private RuntimeEventsService $service;
 
-    public function __construct(?RuntimeWatchService $service = null)
+    public function __construct(?RuntimeEventsService $service = null)
     {
-        $this->service = $service ?? new RuntimeWatchService();
+        $this->service = $service ?? new RuntimeEventsService();
     }
 
     /**

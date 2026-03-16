@@ -54,7 +54,7 @@ $routeHref = static function (string $slug = '') use ($basePath): string {
     }
     return $basePath . '/' . $clean;
 };
-$monitoringActive = in_array($activePage, ['logs', 'docker-logs', 'db-health', 'queue-health', 'slo-view', 'log-heatmap', 'drift-monitor', 'alerts', 'synthetic-flows', 'tls-monitor', 'runtime-watch', 'volume-monitor', 'live-stats'], true);
+$monitoringActive = in_array($activePage, ['logs', 'docker-logs', 'db-health', 'queue-health', 'slo-view', 'log-heatmap', 'drift-monitor', 'alerts', 'synthetic-flows', 'tls-monitor', 'volume-monitor', 'live-stats'], true);
 $topbarPageTitle = trim((string)preg_replace('/\s*\|\s*Admin Panel\s*$/i', '', $pageTitle));
 if ($topbarPageTitle === '') {
     $topbarPageTitle = $pageTitle;
@@ -162,10 +162,6 @@ if ($topbarPageTitle === '') {
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'tls-monitor' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('tls-monitor'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-shield-lock"></i>
               <span>TLS / mTLS</span>
-            </a>
-            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'runtime-watch' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('runtime-watch'), ENT_QUOTES, 'UTF-8') ?>">
-              <i class="bi bi-heart-pulse"></i>
-              <span>Runtime Watch</span>
             </a>
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'volume-monitor' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('volume-monitor'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-hdd-stack"></i>

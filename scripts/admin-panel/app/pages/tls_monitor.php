@@ -6,7 +6,7 @@ declare(strict_types=1);
   <div>
     <p class="ap-breadcrumb mb-1">Home / Monitoring / TLS / mTLS</p>
     <h2 class="ap-page-title mb-1">TLS / mTLS Monitor</h2>
-    <p class="ap-page-sub mb-0">Per-host certificate, policy drift, TLS posture, trend, and mTLS handshake checks.</p>
+    <p class="ap-page-sub mb-0">Per-host certificate health, role-based cert usage, policy drift, TLS posture, trend, and mTLS handshake checks.</p>
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <div id="apTlsRefreshMeta" class="ap-live-refresh-meta" aria-live="polite">
@@ -42,14 +42,37 @@ declare(strict_types=1);
         </div>
         <div class="ap-head-tools">
           <div class="ap-live-matrix-tools">
-            <input id="apTlsDomain" class="form-control form-control-sm ap-live-tool-input" type="search" placeholder="Domain filter (partial or *.wildcard)">
-            <select id="apTlsTimeout" class="form-select form-select-sm ap-live-tool-select" aria-label="Timeout">
+            <input
+              id="apTlsDomain"
+              class="form-control form-control-sm ap-live-tool-input"
+              type="search"
+              placeholder="Domain filter (partial or *.wildcard)"
+              aria-label="Domain filter"
+              data-bs-toggle="tooltip"
+              data-bs-placement="top"
+              data-bs-title="Filters hosts by domain. Supports partial text (sslcommerz) or wildcard (*.localhost). Leave empty for all hosts."
+            >
+            <select
+              id="apTlsTimeout"
+              class="form-select form-select-sm ap-live-tool-select"
+              aria-label="Probe timeout"
+              data-bs-toggle="tooltip"
+              data-bs-placement="top"
+              data-bs-title="Max seconds per probe attempt (TLS handshake, OCSP, and HTTP checks). Increase if endpoints are slow."
+            >
               <option value="2">Timeout: 2s</option>
               <option value="4" selected>Timeout: 4s</option>
               <option value="6">Timeout: 6s</option>
               <option value="10">Timeout: 10s</option>
             </select>
-            <select id="apTlsRetries" class="form-select form-select-sm ap-live-tool-select" aria-label="Probe retries">
+            <select
+              id="apTlsRetries"
+              class="form-select form-select-sm ap-live-tool-select"
+              aria-label="Probe retries"
+              data-bs-toggle="tooltip"
+              data-bs-placement="top"
+              data-bs-title="How many retry attempts are made before marking a probe as failed. Higher retries reduce transient false alarms."
+            >
               <option value="1">Retries: 1</option>
               <option value="2" selected>Retries: 2</option>
               <option value="3">Retries: 3</option>
@@ -59,6 +82,50 @@ declare(strict_types=1);
         </div>
       </header>
       <div class="card-body">
+        <div class="ap-tls-cert-model mb-3">
+          <p class="ap-card-sub mb-2 d-flex align-items-center gap-1">
+            <span>Certificate Roles (LDS)</span>
+            <button
+              type="button"
+              class="btn ap-icon-btn ap-tls-cert-help"
+              data-bs-toggle="tooltip"
+              data-bs-placement="top"
+              data-bs-title="Usage: client -> nginx/apache uses lds-server; nginx -> apache mTLS uses lds-client-internal; user/browser import uses /etc/share/certs/mTLS-user.p12."
+              aria-label="Certificate role usage info"
+            >
+              <i class="bi bi-info-circle"></i>
+            </button>
+          </p>
+          <div class="ap-tls-install-tools mb-2">
+            <a
+              id="apTlsInstallRootBtn"
+              class="btn ap-ghost-btn ap-tls-install-btn"
+              href="#"
+              data-bs-toggle="tooltip"
+              data-bs-placement="top"
+              data-bs-title="Downloads Root CA (rootCA.pem). Import to your OS/browser trust store for HTTPS trust."
+            >
+              <i class="bi bi-shield-check"></i>
+              <span>Download Root CA</span>
+            </a>
+            <a
+              id="apTlsInstallMtlsBtn"
+              class="btn ap-ghost-btn ap-tls-install-btn"
+              href="#"
+              data-bs-toggle="tooltip"
+              data-bs-placement="top"
+              data-bs-title="Downloads mTLS client bundle (mTLS-user.p12). Import into browser Personal Certificates for mTLS routes."
+            >
+              <i class="bi bi-person-badge"></i>
+              <span>Download mTLS Cert</span>
+            </a>
+          </div>
+          <div class="ap-monitor-summary mb-2">
+            <span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Server TLS</span><span class="ap-kv-group-val"><code>lds-server.pem</code></span></span>
+            <span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Internal mTLS Client</span><span class="ap-kv-group-val"><code>lds-client-internal.pem</code></span></span>
+            <span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">User mTLS Bundle</span><span class="ap-kv-group-val"><code>lds-client-user.p12</code></span></span>
+          </div>
+        </div>
         <div id="apTlsSummary" class="ap-monitor-summary mb-3"></div>
         <div id="apTlsAlerts" class="mb-3"></div>
         <div class="table-responsive ap-local-sticky">
@@ -111,10 +178,14 @@ declare(strict_types=1);
       basePath = "";
     }
     var apiUrl = basePath + "/api/tls-monitor";
+    var rootCertUrl = basePath + "/api/tls-cert-artifact?kind=rootca";
+    var mtlsCertUrl = basePath + "/api/tls-cert-artifact?kind=mtls";
 
     var domainEl = document.getElementById("apTlsDomain");
     var timeoutEl = document.getElementById("apTlsTimeout");
     var retriesEl = document.getElementById("apTlsRetries");
+    var installRootBtn = document.getElementById("apTlsInstallRootBtn");
+    var installMtlsBtn = document.getElementById("apTlsInstallMtlsBtn");
     var autoBtn = document.getElementById("apTlsAuto");
     var refreshBtn = document.getElementById("apTlsRefreshBtn");
     var metaEl = document.getElementById("apTlsMeta");
@@ -131,16 +202,23 @@ declare(strict_types=1);
 
     var refreshTimer = null;
     var refreshCountdownTimer = null;
+    var domainInputTimer = null;
     var refreshIntervalMs = 10000;
     var nextRefreshAt = 0;
     var lastGeneratedAt = "";
     var activeProject = "-";
-    var activeTarget = "-";
     var loading = false;
     var tooltipInstances = [];
     var detailModal = null;
     var detailStore = Object.create(null);
     var detailSeed = 0;
+
+    if (installRootBtn instanceof HTMLAnchorElement) {
+      installRootBtn.href = rootCertUrl;
+    }
+    if (installMtlsBtn instanceof HTMLAnchorElement) {
+      installMtlsBtn.href = mtlsCertUrl;
+    }
 
     function esc(value) {
       return String(value || "")
@@ -309,6 +387,35 @@ declare(strict_types=1);
       return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
     }
 
+    function formatTlsVersionLabel(value) {
+      var raw = String(value || "").trim();
+      if (raw === "" || raw === "-") {
+        return "TLS Unknown";
+      }
+      var m = raw.match(/^TLSv?([0-9]+\.[0-9]+)$/i);
+      if (m) {
+        return "TLS " + m[1];
+      }
+      return raw.toUpperCase().replace(/^TLSV/, "TLS ");
+    }
+
+    function formatOcspLabel(value) {
+      var raw = String(value || "").trim().toLowerCase();
+      if (raw === "stapled" || raw === "present") {
+        return "OK";
+      }
+      if (raw === "none") {
+        return "Missing";
+      }
+      if (raw.indexOf("n/a_") === 0) {
+        return "N/A";
+      }
+      if (raw === "" || raw === "-" || raw === "unknown") {
+        return "Unknown";
+      }
+      return raw.toUpperCase();
+    }
+
     function ensureDetailModal() {
       if (!detailModalEl || !window.bootstrap || typeof window.bootstrap.Modal !== "function") {
         return null;
@@ -412,6 +519,43 @@ declare(strict_types=1);
       }
     }
 
+    function formatUtcTimestamp(value) {
+      var raw = String(value || "").trim();
+      if (!raw || raw === "-") {
+        return "-";
+      }
+      var parsed = new Date(raw);
+      if (!parsed || !isFinite(parsed.getTime())) {
+        return "-";
+      }
+      return parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
+    }
+
+    function formatLocalTimestamp(value) {
+      var raw = String(value || "").trim();
+      if (!raw || raw === "-") {
+        return "-";
+      }
+      var parsed = new Date(raw);
+      if (!parsed || !isFinite(parsed.getTime())) {
+        return "-";
+      }
+      try {
+        return parsed.toLocaleString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+          timeZoneName: "short"
+        });
+      } catch (e) {
+        return parsed.toString();
+      }
+    }
+
     function clearNextRefresh() {
       if (refreshTimer) {
         window.clearTimeout(refreshTimer);
@@ -452,7 +596,7 @@ declare(strict_types=1);
       }
       if (lastUpdatedEl) {
         if (lastGeneratedAt) {
-          lastUpdatedEl.textContent = "Last update " + formatUpdatedAt(lastGeneratedAt) + " | Project " + activeProject + " | Target " + activeTarget;
+          lastUpdatedEl.textContent = "Last update " + formatUpdatedAt(lastGeneratedAt) + " | Project " + activeProject;
         } else if (loading) {
           lastUpdatedEl.textContent = "Waiting for response...";
         } else {
@@ -506,6 +650,7 @@ declare(strict_types=1);
         + '<span class="ap-kv-group ap-live-state-unhealthy"><span class="ap-kv-group-key">mTLS Broken</span><span class="ap-kv-group-val">' + esc(String(data.mtls_broken || 0)) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-starting"><span class="ap-kv-group-key">Policy Drift</span><span class="ap-kv-group-val">' + esc(String(data.policy_drift || 0)) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-starting"><span class="ap-kv-group-key">OCSP Missing</span><span class="ap-kv-group-val">' + esc(String(data.ocsp_missing || 0)) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">OCSP N/A</span><span class="ap-kv-group-val">' + esc(String(data.ocsp_not_applicable || 0)) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-starting"><span class="ap-kv-group-key">No Intermediate</span><span class="ap-kv-group-val">' + esc(String(data.no_intermediate || 0)) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-unhealthy"><span class="ap-kv-group-key">TLS Legacy</span><span class="ap-kv-group-val">' + esc(String(data.tls_legacy || 0)) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Alerts</span><span class="ap-kv-group-val">' + esc(String(data.alerts || 0)) + "</span></span>"
@@ -539,8 +684,8 @@ declare(strict_types=1);
     function renderRows(payload) {
       var items = Array.isArray(payload && payload.items) ? payload.items : [];
       if (items.length === 0) {
-        disposeTooltips();
         rowsEl.innerHTML = '<tr><td colspan="6" class="text-center ap-page-sub py-4">No TLS hosts found for current filters.</td></tr>';
+        initTooltips(document);
         return;
       }
 
@@ -631,16 +776,20 @@ declare(strict_types=1);
           "Subject: " + subject
         ].join("\n");
         var certHint = expiresAt && expiresAt !== "-" ? ("Certificate expires at " + expiresAt) : "Certificate expiration timestamp unavailable.";
-        var certSummary = /^-?[0-9]+$/.test(daysText) ? (daysText + " days left") : "Unknown";
+        var certSummary = /^-?[0-9]+$/.test(daysText) ? (daysText + " days") : "Unknown";
+        var expiresUtcText = formatUtcTimestamp(expiresAt);
+        var expiresLocalText = formatLocalTimestamp(expiresAt);
         var certDetails = [
           "Days left: " + daysText,
           "Expires at: " + expiresAt,
+          "Expires (UTC): " + expiresUtcText,
+          "Expires (Local): " + expiresLocalText,
           "Policy min days: " + (isFinite(policyMinDays) && policyMinDays >= 0 ? String(policyMinDays) : "-")
         ].join("\n");
-        var postureSummary = shortText((tlsVersion !== "-" ? tlsVersion : "TLS unknown") + " · OCSP " + ocsp, 28);
+        var postureSummary = formatTlsVersionLabel(tlsVersion) + " - OCSP " + formatOcspLabel(ocsp);
         var postureDetails = [
           "TLS/Cipher: " + tlsTextFull,
-          "OCSP: " + ocsp,
+          "OCSP: " + formatOcspLabel(ocsp) + (formatOcspLabel(ocsp) !== String(ocsp) ? (" (" + String(ocsp || "-") + ")") : ""),
           "Intermediate present: " + (hasIntermediate ? "Yes" : "No")
         ].join("\n");
 
@@ -648,7 +797,7 @@ declare(strict_types=1);
         if (chainChecked !== false) {
           chainStatusText += " d" + String(Math.max(0, Math.round(chainDepth)));
         }
-        var policySummary = policyOk ? "Policy Compliant" : "Policy Drift";
+        var policySummary = policyOk ? "Compliant" : "Drift";
         var policyDetails = [
           "Policy status: " + policySummary,
           "Expected mTLS: " + policyExpected,
@@ -667,7 +816,7 @@ declare(strict_types=1);
         var stateHint = "State: " + prettyWord(state) + " | Trend: " + prettyWord(trend) + ". Click for details.";
         var accessHint = "mTLS: " + prettyWord(mtls) + " | HTTP no-cert: " + noClient + " | with-cert: " + withClient + ". Click for details.";
         var certChipHint = certHint + " Click for details.";
-        var postureHint = "TLS: " + (tlsVersion !== "-" ? tlsVersion : "unknown") + " | OCSP: " + ocsp + " | Intermediate: " + (hasIntermediate ? "Yes" : "No") + ". Click for details.";
+        var postureHint = "TLS: " + formatTlsVersionLabel(tlsVersion) + " | OCSP: " + formatOcspLabel(ocsp) + " | Intermediate: " + (hasIntermediate ? "Yes" : "No") + ". Click for details.";
         var policyHint = "Policy: " + policySummary + " | Verify: " + verifyCode + " | SAN: " + (sanMatch ? "match" : "mismatch") + ". Click for details.";
 
         return ""
@@ -680,7 +829,7 @@ declare(strict_types=1);
           + '  <td><div class="ap-tls-cell">' + detailButton("Policy", policySummary, policyDetailId, policyTone, policyHint, "bi bi-clipboard2-check") + "</div></td>"
           + "</tr>";
       }).join("");
-      initTooltips(rowsEl);
+      initTooltips(document);
     }
 
     function buildUrl() {
@@ -692,6 +841,16 @@ declare(strict_types=1);
         qp.set("domain", filters.domain);
       }
       return apiUrl + "?" + qp.toString();
+    }
+
+    function scheduleDomainRefresh() {
+      if (domainInputTimer) {
+        window.clearTimeout(domainInputTimer);
+        domainInputTimer = null;
+      }
+      domainInputTimer = window.setTimeout(function () {
+        refreshSnapshot();
+      }, 350);
     }
 
     function refreshSnapshot() {
@@ -722,9 +881,8 @@ declare(strict_types=1);
           renderRows(payload);
           lastGeneratedAt = String(payload.generated_at || "");
           activeProject = String(payload.project || "-");
-          activeTarget = String(payload && payload.filters && payload.filters.target || "-");
           if (metaEl) {
-            metaEl.textContent = "Project: " + activeProject + " | Hosts: " + String((payload.summary && payload.summary.hosts) || 0) + " | Target: " + activeTarget + " | Alerts: " + String((payload.summary && payload.summary.alerts) || 0);
+            metaEl.textContent = "Project: " + activeProject + " | Hosts: " + String((payload.summary && payload.summary.hosts) || 0) + " | Alerts: " + String((payload.summary && payload.summary.alerts) || 0);
           }
         })
         .catch(function (err) {
@@ -776,8 +934,29 @@ declare(strict_types=1);
       domainEl.addEventListener("keydown", function (e) {
         if (e.key === "Enter") {
           e.preventDefault();
+          if (domainInputTimer) {
+            window.clearTimeout(domainInputTimer);
+            domainInputTimer = null;
+          }
           refreshSnapshot();
         }
+      });
+      domainEl.addEventListener("input", function () {
+        scheduleDomainRefresh();
+      });
+      domainEl.addEventListener("search", function () {
+        if (domainInputTimer) {
+          window.clearTimeout(domainInputTimer);
+          domainInputTimer = null;
+        }
+        refreshSnapshot();
+      });
+      domainEl.addEventListener("change", function () {
+        if (domainInputTimer) {
+          window.clearTimeout(domainInputTimer);
+          domainInputTimer = null;
+        }
+        refreshSnapshot();
       });
     }
     if (timeoutEl) {

@@ -39,7 +39,6 @@ Additional routes:
 - `http://localhost:9920/drift-monitor`
 - `http://localhost:9920/synthetic-flows`
 - `http://localhost:9920/tls-monitor`
-- `http://localhost:9920/runtime-watch`
 - `http://localhost:9920/volume-monitor`
 - `http://localhost:9920/alerts`
 - `http://localhost:9920/live-stats`
@@ -56,7 +55,8 @@ AJAX data endpoint:
 - `http://localhost:9920/api/drift-monitor` (generated vs active config drift)
 - `http://localhost:9920/api/synthetic-flows` (synthetic route probes; supports `domain`, `paths`, `timeout`)
 - `http://localhost:9920/api/tls-monitor` (TLS/mTLS checks with policy/posture/trend; supports `domain` partial/wildcard, `timeout`, `retries`)
-- `http://localhost:9920/api/runtime-watch` (restart/OOM/event monitor; supports `since`, `restart_threshold`, `event_limit`)
+- `http://localhost:9920/api/tls-cert-artifact` (downloads TLS trust artifacts; supports `kind=rootca|mtls`)
+- `http://localhost:9920/api/runtime-events` (restart/OOM/event monitor; supports `since`, `restart_threshold`, `event_limit`)
 - `http://localhost:9920/api/volume-monitor` (volume growth/inode monitor; returns all project volumes, with backend safety cap)
 - `http://localhost:9920/api/alerts` (alert rules + quiet hours + dedupe + acknowledgement; supports `run`, `ack_rule`, `ack_fingerprint`)
 

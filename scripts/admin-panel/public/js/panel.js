@@ -27,6 +27,7 @@
     basePath = "";
   }
   var liveStatsApiUrl = basePath + "/api/live-stats";
+  var runtimeEventsApiUrl = basePath + "/api/runtime-events";
 
   var livePayload = null;
   var livePollTimer = null;
@@ -35,6 +36,7 @@
   var liveRefreshIntervalMs = LIVE_REFRESH_INTERVAL_MS;
   var liveLastGeneratedAt = "";
   var liveFetchInFlight = false;
+  var liveRuntimeFetchInFlight = false;
   var charts = [];
   var liveMatrixDetailMap = {};
 
@@ -181,6 +183,14 @@
     el.classList.toggle("d-none", !!hidden);
   }
 
+  function setSectionVisible(id, visible) {
+    var el = doc.getElementById(id);
+    if (!el) {
+      return;
+    }
+    el.classList.toggle("d-none", !visible);
+  }
+
   function renderCheckCountCapsules(id, summary) {
     var el = doc.getElementById(id);
     if (!el) {
@@ -257,7 +267,21 @@
     if (!raw) {
       return "-";
     }
-    var parsed = new Date(raw);
+
+    var parsed = null;
+    if (/^-?\d+(\.\d+)?$/.test(raw)) {
+      var epoch = Number(raw);
+      if (isFinite(epoch)) {
+        // Accept both Unix seconds and Unix milliseconds.
+        if (Math.abs(epoch) < 1000000000000) {
+          epoch = epoch * 1000;
+        }
+        parsed = new Date(epoch);
+      }
+    } else {
+      parsed = new Date(raw);
+    }
+
     if (!parsed || !isFinite(parsed.getTime())) {
       return raw;
     }
@@ -1786,13 +1810,106 @@
     });
 
     if (!items.length) {
+      setSectionVisible("apLiveProblemsSection", false);
       listEl.innerHTML = '<li class="ap-live-item-muted">No problems or recent errors.</li>';
       return;
     }
 
+    setSectionVisible("apLiveProblemsSection", true);
     listEl.innerHTML = items.slice(0, 20).map(function (item) {
       return '<li class="ap-live-item"><span>' + escapeHtml(item.text || "-") + '</span><span class="ap-badge ' + item.tone + '">' + escapeHtml(item.type) + "</span></li>";
     }).join("");
+  }
+
+  function runtimeEventToneClass(action, exitCode) {
+    var a = String(action || "").toLowerCase();
+    if (a === "oom") {
+      return "ap-live-state-unhealthy";
+    }
+    if (a === "die") {
+      return String(exitCode || "") === "0" ? "ap-live-state-starting" : "ap-live-state-unhealthy";
+    }
+    if (a === "restart") {
+      return "ap-live-state-starting";
+    }
+    return "ap-live-state-info";
+  }
+
+  function renderLiveRuntimeEventsRows(events, message) {
+    var rowsEl = doc.getElementById("apLiveRuntimeEventsRows");
+    if (!rowsEl) {
+      return;
+    }
+
+    if (message) {
+      setSectionVisible("apLiveRuntimeEventsSection", false);
+      rowsEl.innerHTML = '<tr><td colspan="5" class="text-center ap-page-sub py-4">' + escapeHtml(String(message)) + "</td></tr>";
+      return;
+    }
+
+    var list = asArray(events);
+    if (!list.length) {
+      setSectionVisible("apLiveRuntimeEventsSection", false);
+      rowsEl.innerHTML = '<tr><td colspan="5" class="text-center ap-page-sub py-4">No runtime events in last 10m.</td></tr>';
+      return;
+    }
+
+    setSectionVisible("apLiveRuntimeEventsSection", true);
+    list = list.slice().sort(function (a, b) {
+      return Number(b && b.time_epoch || 0) - Number(a && a.time_epoch || 0);
+    }).slice(0, 30);
+
+    rowsEl.innerHTML = list.map(function (event) {
+      var timeValue = (event && event.time_epoch != null) ? event.time_epoch : (event && event.time != null ? event.time : "");
+      var action = (event && event.action != null) ? String(event.action) : "";
+      var name = (event && event.name != null) ? String(event.name) : "";
+      var service = (event && event.service != null) ? String(event.service).trim() : "";
+      var exitCode = (event && event.exit_code != null) ? String(event.exit_code).trim() : "";
+      return ""
+        + "<tr>"
+        + "  <td>" + escapeHtml(formatLiveUpdatedAt(timeValue)) + "</td>"
+        + '  <td><span class="ap-badge ' + runtimeEventToneClass(action, exitCode) + '">' + escapeHtml(action || "-") + "</span></td>"
+        + "  <td>" + escapeHtml(name || "-") + "</td>"
+        + "  <td>" + escapeHtml(service) + "</td>"
+        + '  <td class="text-end">' + escapeHtml(exitCode) + "</td>"
+        + "</tr>";
+    }).join("");
+  }
+
+  function fetchLiveRuntimeEvents() {
+    var rowsEl = doc.getElementById("apLiveRuntimeEventsRows");
+    if (!rowsEl || typeof window.fetch !== "function") {
+      return;
+    }
+    if (liveRuntimeFetchInFlight) {
+      return;
+    }
+
+    liveRuntimeFetchInFlight = true;
+    window.fetch(runtimeEventsApiUrl + "?since=10m&event_limit=30&restart_threshold=3", {
+      headers: {
+        "Accept": "application/json"
+      }
+    })
+      .then(function (res) {
+        if (!res.ok) {
+          throw new Error("HTTP " + res.status);
+        }
+        return res.json();
+      })
+      .then(function (payload) {
+        if (!payload || payload.ok !== true) {
+          var message = payload && payload.message ? payload.message : "Unable to load runtime events.";
+          throw new Error(message);
+        }
+        renderLiveRuntimeEventsRows(payload.events || []);
+      })
+      .catch(function () {
+        renderLiveRuntimeEventsRows([], "Runtime events unavailable.");
+      })
+      .finally(function () {
+        liveRuntimeFetchInFlight = false;
+      });
   }
 
   function renderSummary(payload, summary, generatedAt) {
@@ -2468,6 +2585,7 @@
     clearNextLiveFetch();
     setLiveLoading(true);
     setLiveError("");
+    fetchLiveRuntimeEvents();
 
     window.fetch(liveStatsApiUrl + "?ajax=1&format=json", {
       headers: {

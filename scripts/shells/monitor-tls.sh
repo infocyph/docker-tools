@@ -426,6 +426,14 @@ _extract_ocsp_status() {
   printf 'unknown'
 }
 
+_extract_ocsp_uri_from_cert() {
+  local cert_pem="${1:-}" ocsp_uri
+  [[ -n "$cert_pem" ]] || return 0
+  ocsp_uri="$(printf '%s\n' "$cert_pem" | openssl x509 -noout -text 2>/dev/null \
+    | sed -n 's/.*OCSP - URI:\(.*\)$/\1/p' | head -n1 | awk '{$1=$1;print}')"
+  printf '%s' "${ocsp_uri:-}"
+}
+
 _tls_version_rank() {
   local v="${1^^}"
   case "$v" in
@@ -562,7 +570,7 @@ main() {
   done
 
   local total=0 pass=0 warn=0 fail=0 mtls_required=0 mtls_broken=0 expiring=0 expired=0 chain_unverified=0
-  local policy_checked=0 policy_drift_count=0 tls_legacy_count=0 ocsp_missing=0 no_intermediate=0
+  local policy_checked=0 policy_drift_count=0 tls_legacy_count=0 ocsp_missing=0 ocsp_not_applicable=0 no_intermediate=0
   local state_changes=0 expiring_crossed=0 mtls_broken_crossed=0
   local -a items=() alerts=() hist_lines=()
 
@@ -572,7 +580,7 @@ main() {
   local cert subject_line subject expires_line expires_at expires_epoch days_left
   local san_block verify_out verify_code chain_ok chain_checked san_ok expiry_ok expiry_warn mtls_mode
   local curl_no_rc curl_no_code curl_mtls_rc curl_mtls_code mtls_ok no_client_ok note state
-  local tls_handshake tls_brief tls_version tls_cipher ocsp_out ocsp_status ocsp_stapled
+  local tls_handshake tls_brief tls_version tls_cipher ocsp_out ocsp_status ocsp_stapled ocsp_uri ocsp_applicable
   local chain_depth intermediate_count has_intermediate version_rank posture_note
   local policy_expected policy_min_days policy_san_strict policy_ok policy_drift policy_source
   local policy_mtls_ok policy_days_ok policy_san_ok
@@ -591,10 +599,11 @@ main() {
     tls_cipher="$(_extract_tls_cipher "$tls_brief")"
     [[ "$tls_cipher" == "-" ]] && tls_cipher="$(_extract_tls_cipher "$tls_handshake")"
 
-    ocsp_out="$(_openssl_sclient "$timeout_sec" "$retries" "$tls_target" "$d" -status || true)"
-    ocsp_status="$(_extract_ocsp_status "$ocsp_out")"
+    ocsp_out=""
+    ocsp_status="unknown"
     ocsp_stapled=0
-    [[ "$ocsp_status" == "stapled" || "$ocsp_status" == "present" ]] && ocsp_stapled=1
+    ocsp_uri=""
+    ocsp_applicable=1
 
     chain_depth="$(_num_or_default "$(printf '%s\n' "$tls_handshake" | grep -c 'BEGIN CERTIFICATE' || true)" 0)"
     if [[ -n "$cert" && "$chain_depth" -lt 1 ]]; then
@@ -623,13 +632,12 @@ main() {
       note="no_server_certificate"
       verify_code="no_cert"
       mtls_mode="broken"
+      ocsp_status="n/a_no_certificate"
+      ocsp_applicable=0
+      ((++ocsp_not_applicable))
       ((++mtls_broken))
       ((++fail))
       ((++total))
-
-      if [[ "$ocsp_status" != "stapled" && "$ocsp_status" != "present" ]]; then
-        ((++ocsp_missing))
-      fi
       ((has_intermediate == 0)) && ((++no_intermediate))
 
       policy_mtls_ok=0
@@ -640,6 +648,17 @@ main() {
       ((++policy_drift_count))
       posture_note="certificate_missing"
     else
+      ocsp_uri="$(_extract_ocsp_uri_from_cert "$cert")"
+      if [[ -z "$ocsp_uri" ]]; then
+        ocsp_applicable=0
+        ocsp_status="n/a_no_ocsp_aia"
+        ((++ocsp_not_applicable))
+      else
+        ocsp_out="$(_openssl_sclient "$timeout_sec" "$retries" "$tls_target" "$d" -status || true)"
+        ocsp_status="$(_extract_ocsp_status "$ocsp_out")"
+        [[ "$ocsp_status" == "stapled" || "$ocsp_status" == "present" ]] && ocsp_stapled=1
+      fi
+
       subject_line="$(printf '%s\n' "$cert" | openssl x509 -noout -subject 2>/dev/null || true)"
       subject="${subject_line#subject=}"
       [[ -n "$subject" ]] || subject="-"
@@ -792,7 +811,7 @@ main() {
         ((++tls_legacy_count))
         posture_note="legacy_protocol"
       fi
-      if [[ "$ocsp_status" != "stapled" && "$ocsp_status" != "present" ]]; then
+      if ((ocsp_applicable == 1)) && [[ "$ocsp_status" != "stapled" && "$ocsp_status" != "present" ]]; then
         ((++ocsp_missing))
         if [[ -z "$posture_note" ]]; then
           posture_note="ocsp_not_stapled"
@@ -929,8 +948,8 @@ main() {
   printf '"project":"%s",' "$(_json_escape "$project")"
   printf '"filters":{"domain":"%s","timeout":%s,"retries":%s,"target":"%s","policy_file":"%s","expiring_threshold_days":%s},' \
     "$(_json_escape "$domain_filter")" "$timeout_sec" "$retries" "$(_json_escape "$tls_target")" "$(_json_escape "$policy_file")" "$expiring_threshold"
-  printf '"summary":{"hosts":%d,"pass":%d,"warn":%d,"fail":%d,"mtls_required":%d,"mtls_broken":%d,"expiring_14d":%d,"expired":%d,"chain_unverified":%d,"policy_checked":%d,"policy_drift":%d,"tls_legacy":%d,"ocsp_missing":%d,"no_intermediate":%d,"alerts":%d,"state_changes":%d,"expiring_crossed":%d,"mtls_broken_crossed":%d},' \
-    "$total" "$pass" "$warn" "$fail" "$mtls_required" "$mtls_broken" "$expiring" "$expired" "$chain_unverified" "$policy_checked" "$policy_drift_count" "$tls_legacy_count" "$ocsp_missing" "$no_intermediate" "$alerts_total" "$state_changes" "$expiring_crossed" "$mtls_broken_crossed"
+  printf '"summary":{"hosts":%d,"pass":%d,"warn":%d,"fail":%d,"mtls_required":%d,"mtls_broken":%d,"expiring_14d":%d,"expired":%d,"chain_unverified":%d,"policy_checked":%d,"policy_drift":%d,"tls_legacy":%d,"ocsp_missing":%d,"ocsp_not_applicable":%d,"no_intermediate":%d,"alerts":%d,"state_changes":%d,"expiring_crossed":%d,"mtls_broken_crossed":%d},' \
+    "$total" "$pass" "$warn" "$fail" "$mtls_required" "$mtls_broken" "$expiring" "$expired" "$chain_unverified" "$policy_checked" "$policy_drift_count" "$tls_legacy_count" "$ocsp_missing" "$ocsp_not_applicable" "$no_intermediate" "$alerts_total" "$state_changes" "$expiring_crossed" "$mtls_broken_crossed"
 
   printf '"alerts":['
   local af=1 aline adomain atype asev amsg afrom ato

@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace AdminPanel\Service;
 
-final class RuntimeWatchService
+final class RuntimeEventsService
 {
     /**
      * @return array<string,mixed>
@@ -32,7 +32,7 @@ final class RuntimeWatchService
         if (!$res['ok']) {
             return [
                 'ok' => false,
-                'error' => 'runtime_watch_command_failed',
+                'error' => 'runtime_events_command_failed',
                 'message' => $res['stderr'] !== '' ? $res['stderr'] : 'monitor-runtime --json failed',
                 'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
                 'project' => '',
@@ -60,7 +60,7 @@ final class RuntimeWatchService
         if (!is_array($decoded)) {
             return [
                 'ok' => false,
-                'error' => 'invalid_runtime_watch_json',
+                'error' => 'invalid_runtime_events_json',
                 'message' => 'monitor-runtime --json returned malformed JSON.',
                 'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
                 'project' => '',

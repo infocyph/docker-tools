@@ -124,7 +124,7 @@ declare(strict_types=1);
   </div>
 </section>
 
-<section class="row g-3 mt-1">
+<section id="apLiveProblemsSection" class="row g-3 mt-1">
   <div class="col-12">
     <article class="card ap-card">
       <header class="card-header ap-card-head">
@@ -139,6 +139,40 @@ declare(strict_types=1);
       <div id="apLiveProblemsBody" data-collapsible-body="problems">
         <div class="card-body">
           <ul class="ap-live-list list-unstyled mb-0" id="apLiveIssueFeed"></ul>
+        </div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section id="apLiveRuntimeEventsSection" class="row g-3 mt-1">
+  <div class="col-12">
+    <article class="card ap-card h-100">
+      <header class="card-header ap-card-head">
+        <div>
+          <h4 class="ap-card-title mb-1">Recent Runtime Events</h4>
+          <p class="ap-card-sub mb-0">Last 10m restart/oom/die/start signals</p>
+        </div>
+        <button class="btn ap-ghost-btn ap-card-collapse-toggle" type="button" data-target="apLiveRuntimeEventsBody" aria-expanded="true" title="Collapse section">
+          <i class="bi bi-chevron-up"></i>
+        </button>
+      </header>
+      <div id="apLiveRuntimeEventsBody" data-collapsible-body="runtime-events">
+        <div class="table-responsive ap-local-sticky">
+          <table class="table ap-table ap-table-sticky ap-table-emphasis mb-0">
+            <thead>
+            <tr>
+              <th>Time</th>
+              <th>Action</th>
+              <th>Container</th>
+              <th>Service</th>
+              <th class="text-end">Exit</th>
+            </tr>
+            </thead>
+            <tbody id="apLiveRuntimeEventsRows">
+            <tr><td colspan="5" class="text-center ap-page-sub py-4">Loading...</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </article>

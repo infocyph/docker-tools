@@ -12,9 +12,10 @@ use AdminPanel\Api\LogsEntriesEndpoint;
 use AdminPanel\Api\LogsFilesEndpoint;
 use AdminPanel\Api\LiveStatsEndpoint;
 use AdminPanel\Api\QueueHealthEndpoint;
-use AdminPanel\Api\RuntimeWatchEndpoint;
+use AdminPanel\Api\RuntimeEventsEndpoint;
 use AdminPanel\Api\SloViewEndpoint;
 use AdminPanel\Api\SyntheticFlowsEndpoint;
+use AdminPanel\Api\TlsCertArtifactEndpoint;
 use AdminPanel\Api\TlsMonitorEndpoint;
 use AdminPanel\Api\VolumeMonitorEndpoint;
 use AdminPanel\Http\AjaxResponder;
@@ -37,7 +38,8 @@ final class Kernel
     private DriftMonitorEndpoint $driftMonitorEndpoint;
     private AlertsEndpoint $alertsEndpoint;
     private SyntheticFlowsEndpoint $syntheticFlowsEndpoint;
-    private RuntimeWatchEndpoint $runtimeWatchEndpoint;
+    private RuntimeEventsEndpoint $runtimeEventsEndpoint;
+    private TlsCertArtifactEndpoint $tlsCertArtifactEndpoint;
     private TlsMonitorEndpoint $tlsMonitorEndpoint;
     private VolumeMonitorEndpoint $volumeMonitorEndpoint;
     private LogsFilesEndpoint $logsFilesEndpoint;
@@ -56,7 +58,8 @@ final class Kernel
         ?DriftMonitorEndpoint $driftMonitorEndpoint = null,
         ?AlertsEndpoint $alertsEndpoint = null,
         ?SyntheticFlowsEndpoint $syntheticFlowsEndpoint = null,
-        ?RuntimeWatchEndpoint $runtimeWatchEndpoint = null,
+        ?RuntimeEventsEndpoint $runtimeEventsEndpoint = null,
+        ?TlsCertArtifactEndpoint $tlsCertArtifactEndpoint = null,
         ?TlsMonitorEndpoint $tlsMonitorEndpoint = null,
         ?VolumeMonitorEndpoint $volumeMonitorEndpoint = null,
         ?LogsFilesEndpoint $logsFilesEndpoint = null,
@@ -77,7 +80,8 @@ final class Kernel
         $this->driftMonitorEndpoint = $driftMonitorEndpoint ?? new DriftMonitorEndpoint();
         $this->alertsEndpoint = $alertsEndpoint ?? new AlertsEndpoint();
         $this->syntheticFlowsEndpoint = $syntheticFlowsEndpoint ?? new SyntheticFlowsEndpoint();
-        $this->runtimeWatchEndpoint = $runtimeWatchEndpoint ?? new RuntimeWatchEndpoint();
+        $this->runtimeEventsEndpoint = $runtimeEventsEndpoint ?? new RuntimeEventsEndpoint();
+        $this->tlsCertArtifactEndpoint = $tlsCertArtifactEndpoint ?? new TlsCertArtifactEndpoint();
         $this->tlsMonitorEndpoint = $tlsMonitorEndpoint ?? new TlsMonitorEndpoint();
         $this->volumeMonitorEndpoint = $volumeMonitorEndpoint ?? new VolumeMonitorEndpoint();
         $this->logsFilesEndpoint = $logsFilesEndpoint ?? new LogsFilesEndpoint();
@@ -127,8 +131,12 @@ final class Kernel
             $this->syntheticFlowsEndpoint->handle($query);
             return;
         }
-        if ($path === '/api/runtime-watch') {
-            $this->runtimeWatchEndpoint->handle($query);
+        if ($path === '/api/runtime-events') {
+            $this->runtimeEventsEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/tls-cert-artifact') {
+            $this->tlsCertArtifactEndpoint->handle($query);
             return;
         }
         if ($path === '/api/tls-monitor') {

@@ -762,7 +762,7 @@ body.ap-page {
 }
 
 .ap-endpoint-scroll {
-  height: 340px;
+  max-height: 340px;
   overflow: auto;
 }
 
@@ -2942,6 +2942,52 @@ body.ap-live-compact .ap-live-item {
   min-width: 0;
 }
 
+.ap-tls-cert-model {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--ap-border) 72%, transparent);
+  background: color-mix(in srgb, var(--ap-surface-2) 78%, transparent);
+}
+
+.ap-tls-cert-model code {
+  font-size: 11px;
+}
+
+.ap-tls-install-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ap-tls-install-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.ap-tls-install-btn i {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.ap-tls-cert-help {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border-radius: 999px;
+}
+
+.ap-tls-cert-help i {
+  font-size: 12px;
+}
+
 .ap-tls-pill {
   border: 1px solid color-mix(in srgb, currentColor 24%, var(--ap-border));
 }
@@ -2997,4 +3043,22 @@ body.ap-live-compact .ap-live-item {
   width: 180px;
   color: var(--ap-muted);
   font-weight: 700;
+}
+
+.ap-runtime-cell-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ap-muted);
+}
+
+.ap-runtime-signal-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ap-runtime-signal-wrap .ap-badge {
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
 }

@@ -2937,3 +2937,64 @@ body.ap-live-compact .ap-live-item {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.ap-tls-cell {
+  min-width: 0;
+}
+
+.ap-tls-pill {
+  border: 1px solid color-mix(in srgb, currentColor 24%, var(--ap-border));
+}
+
+.ap-tls-group-btn {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  max-width: 100%;
+  background: transparent;
+  padding: 0;
+  border-width: 1px;
+}
+
+.ap-tls-group-btn .ap-kv-group-key {
+  text-transform: none;
+  letter-spacing: 0;
+  gap: 5px;
+}
+
+.ap-tls-group-btn .ap-kv-group-val {
+  display: inline-block;
+}
+
+.ap-tls-group-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.ap-tls-group-val {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-tls-detail-body {
+  margin: 0;
+}
+
+.ap-tls-detail-table th,
+.ap-tls-detail-table td {
+  font-size: 12px;
+  vertical-align: middle;
+  white-space: normal;
+  word-break: break-word;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.ap-tls-detail-table th {
+  width: 180px;
+  color: var(--ap-muted);
+  font-weight: 700;
+}

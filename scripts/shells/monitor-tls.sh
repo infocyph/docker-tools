@@ -513,8 +513,8 @@ main() {
 
   local nginx_dir="${TLS_MONITOR_NGINX_DIR:-/etc/share/vhosts/nginx}"
   local rootca="${TLS_MONITOR_ROOTCA_FILE:-/etc/share/rootCA/rootCA.pem}"
-  local client_cert="${TLS_MONITOR_CLIENT_CERT:-/etc/mkcert/nginx-client.pem}"
-  local client_key="${TLS_MONITOR_CLIENT_KEY:-/etc/mkcert/nginx-client-key.pem}"
+  local client_cert="${TLS_MONITOR_CLIENT_CERT:-/etc/mkcert/lds-client-internal.pem}"
+  local client_key="${TLS_MONITOR_CLIENT_KEY:-/etc/mkcert/lds-client-internal-key.pem}"
   local policy_file="${TLS_MONITOR_POLICY_FILE:-/etc/share/state/tls-monitor-policy.tsv}"
 
   local policy_default_mtls policy_default_min_days policy_default_san_strict

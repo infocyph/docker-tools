@@ -66,25 +66,15 @@ declare(strict_types=1);
             <thead>
             <tr>
               <th>Domain</th>
-              <th class="text-end">State</th>
-              <th class="text-end">Trend</th>
-              <th>Policy</th>
-              <th class="text-end">mTLS</th>
-              <th>Subject</th>
-              <th>Expires At</th>
-              <th class="text-end">Days Left</th>
-              <th>TLS / Cipher</th>
-              <th class="text-end">SAN</th>
-              <th class="text-end">Chain</th>
-              <th class="text-end">OCSP</th>
-              <th class="text-end">HTTP(no cert)</th>
-              <th class="text-end">HTTP(with cert)</th>
-              <th>Verify</th>
-              <th>Note</th>
+              <th>State</th>
+              <th>Access Profile</th>
+              <th>Certificate Window</th>
+              <th>TLS Posture</th>
+              <th>Policy & Trust</th>
             </tr>
             </thead>
             <tbody id="apTlsRows">
-            <tr><td colspan="16" class="text-center ap-page-sub py-4">Loading...</td></tr>
+            <tr><td colspan="6" class="text-center ap-page-sub py-4">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -92,6 +82,20 @@ declare(strict_types=1);
     </article>
   </div>
 </section>
+
+<div class="modal fade" id="apTlsDetailsModal" tabindex="-1" aria-labelledby="apTlsDetailsTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 id="apTlsDetailsTitle" class="modal-title">TLS Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="apTlsDetailsBody" class="ap-tls-detail-body">-</div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
   (function () {
@@ -121,6 +125,9 @@ declare(strict_types=1);
     var updatedAtEl = document.getElementById("apTlsUpdatedAt");
     var lastUpdatedEl = document.getElementById("apTlsLastUpdated");
     var countdownBarEl = document.getElementById("apTlsCountdownBar");
+    var detailModalEl = document.getElementById("apTlsDetailsModal");
+    var detailTitleEl = document.getElementById("apTlsDetailsTitle");
+    var detailBodyEl = document.getElementById("apTlsDetailsBody");
 
     var refreshTimer = null;
     var refreshCountdownTimer = null;
@@ -130,6 +137,10 @@ declare(strict_types=1);
     var activeProject = "-";
     var activeTarget = "-";
     var loading = false;
+    var tooltipInstances = [];
+    var detailModal = null;
+    var detailStore = Object.create(null);
+    var detailSeed = 0;
 
     function esc(value) {
       return String(value || "")
@@ -172,6 +183,171 @@ declare(strict_types=1);
         return text;
       }
       return text.slice(0, size - 1) + "…";
+    }
+
+    function humanizeToken(value) {
+      var raw = String(value || "").trim();
+      if (!raw || raw === "-") {
+        return "-";
+      }
+      var normalized = raw.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+      var pretty = normalized.replace(/\b[a-z]/g, function (m) { return m.toUpperCase(); });
+      pretty = pretty.replace(/\bMtls\b/g, "mTLS")
+        .replace(/\bTls\b/g, "TLS")
+        .replace(/\bOcsp\b/g, "OCSP")
+        .replace(/\bSan\b/g, "SAN");
+      return pretty;
+    }
+
+    function tokenListText(value) {
+      var raw = String(value || "").trim();
+      if (!raw || raw === "-" || raw === "ok") {
+        return "";
+      }
+      return raw.split(",").map(function (part) {
+        return humanizeToken(part);
+      }).filter(function (part) {
+        return part !== "-";
+      }).join(", ");
+    }
+
+    function httpCodeTone(code) {
+      var raw = String(code || "000");
+      if (/^[23][0-9]{2}$/.test(raw)) {
+        return "ap-live-state-running";
+      }
+      if (raw === "000" || /^[5][0-9]{2}$/.test(raw)) {
+        return "ap-live-state-unhealthy";
+      }
+      return "ap-live-state-starting";
+    }
+
+    function boolTone(ok, checked) {
+      if (checked === false) {
+        return "ap-live-state-starting";
+      }
+      return ok ? "ap-live-state-running" : "ap-live-state-unhealthy";
+    }
+
+    function boolText(ok, checked) {
+      if (checked === false) {
+        return "N/A";
+      }
+      return ok ? "Yes" : "No";
+    }
+
+    function tooltipText(text) {
+      var raw = String(text || "").trim();
+      if (raw === "") {
+        return "";
+      }
+      return ' data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="' + esc(raw) + '"';
+    }
+
+    function disposeTooltips() {
+      if (!Array.isArray(tooltipInstances) || tooltipInstances.length === 0) {
+        tooltipInstances = [];
+        return;
+      }
+      tooltipInstances.forEach(function (instance) {
+        if (!instance || typeof instance.dispose !== "function") {
+          return;
+        }
+        try {
+          instance.dispose();
+        } catch (e) {
+        }
+      });
+      tooltipInstances = [];
+    }
+
+    function initTooltips(scopeEl) {
+      disposeTooltips();
+      if (!window.bootstrap || typeof window.bootstrap.Tooltip !== "function") {
+        return;
+      }
+      var root = scopeEl && scopeEl.querySelectorAll ? scopeEl : document;
+      var nodes = root.querySelectorAll('[data-bs-toggle="tooltip"]');
+      nodes.forEach(function (node) {
+        tooltipInstances.push(new window.bootstrap.Tooltip(node, {
+          container: "body",
+          trigger: "hover focus"
+        }));
+      });
+    }
+
+    function resetDetailStore() {
+      detailStore = Object.create(null);
+      detailSeed = 0;
+    }
+
+    function registerDetail(title, body) {
+      detailSeed += 1;
+      var id = "tlsd_" + String(detailSeed);
+      detailStore[id] = {
+        title: String(title || "TLS Details"),
+        body: String(body || "-")
+      };
+      return id;
+    }
+
+    function detailButton(groupLabel, summaryValue, detailId, tone, hint, iconClass) {
+      var btnLabel = String(groupLabel || "Details");
+      var btnValue = String(summaryValue || "-");
+      var ref = String(detailId || "");
+      var btnTone = String(tone || "ap-live-state-info");
+      var btnHint = String(hint || "Open details");
+      var icon = String(iconClass || "bi bi-info-circle");
+      return '<button type="button" class="ap-kv-group ap-tls-group-btn ' + esc(btnTone) + '"' + tooltipText(btnHint) + ' data-ap-tls-detail-id="' + esc(ref) + '"><span class="ap-kv-group-key"><i class="' + esc(icon) + ' ap-tls-group-icon" aria-hidden="true"></i>' + esc(btnLabel) + '</span><span class="ap-kv-group-val ap-tls-group-val">' + esc(btnValue) + "</span></button>";
+    }
+
+    function prettyWord(value) {
+      var raw = String(value || "").trim();
+      if (raw === "") {
+        return "-";
+      }
+      return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+    }
+
+    function ensureDetailModal() {
+      if (!detailModalEl || !window.bootstrap || typeof window.bootstrap.Modal !== "function") {
+        return null;
+      }
+      if (!detailModal) {
+        detailModal = new window.bootstrap.Modal(detailModalEl);
+      }
+      return detailModal;
+    }
+
+    function showDetailModal(title, body) {
+      if (detailTitleEl) {
+        detailTitleEl.textContent = String(title || "TLS Details");
+      }
+      if (detailBodyEl) {
+        var lines = String(body || "-")
+          .split("\n")
+          .map(function (line) { return String(line || "").trim(); })
+          .filter(function (line) { return line !== ""; });
+        if (lines.length === 0) {
+          detailBodyEl.innerHTML = "<p class=\"mb-0 ap-page-sub\">-</p>";
+        } else {
+          var rowsHtml = lines.map(function (line) {
+            var idx = line.indexOf(":");
+            var key = "Detail";
+            var value = line;
+            if (idx > 0) {
+              key = line.slice(0, idx).trim() || "Detail";
+              value = line.slice(idx + 1).trim();
+            }
+            return "<tr><th>" + esc(key) + "</th><td>" + esc(value || "-") + "</td></tr>";
+          }).join("");
+          detailBodyEl.innerHTML = '<div class="table-responsive"><table class="table table-sm ap-table mb-0 ap-tls-detail-table"><tbody>' + rowsHtml + "</tbody></table></div>";
+        }
+      }
+      var modal = ensureDetailModal();
+      if (modal) {
+        modal.show();
+      }
     }
 
     function showError(message) {
@@ -360,19 +536,11 @@ declare(strict_types=1);
       }).join("");
     }
 
-    function yesNoBadge(ok, checked) {
-      if (checked === false) {
-        return '<span class="ap-badge ap-live-state-starting">N/A</span>';
-      }
-      return ok
-        ? '<span class="ap-badge ap-live-state-running">Yes</span>'
-        : '<span class="ap-badge ap-live-state-unhealthy">No</span>';
-    }
-
     function renderRows(payload) {
       var items = Array.isArray(payload && payload.items) ? payload.items : [];
       if (items.length === 0) {
-        rowsEl.innerHTML = '<tr><td colspan="16" class="text-center ap-page-sub py-4">No TLS hosts found for current filters.</td></tr>';
+        disposeTooltips();
+        rowsEl.innerHTML = '<tr><td colspan="6" class="text-center ap-page-sub py-4">No TLS hosts found for current filters.</td></tr>';
         return;
       }
 
@@ -382,6 +550,7 @@ declare(strict_types=1);
         return ad.localeCompare(bd);
       });
 
+      resetDetailStore();
       rowsEl.innerHTML = items.map(function (item) {
         var domain = String(item && item.domain || "-");
         var state = String(item && item.state || "warn");
@@ -401,44 +570,117 @@ declare(strict_types=1);
         var verifyCode = String(item && item.verify_code || "-");
         var tlsVersion = String(item && item.tls_version || "-");
         var tlsCipher = String(item && item.tls_cipher || "-");
-        var tlsText = tlsVersion;
-        if (tlsCipher !== "-" && tlsCipher !== "") {
-          tlsText += " / " + shortText(tlsCipher, 28);
-        }
+        var tlsTextFull = tlsVersion + (tlsCipher !== "-" && tlsCipher !== "" ? (" / " + tlsCipher) : "");
         var policyExpected = String(item && item.policy_expected_mtls || "any");
         var policyMinDays = Number(item && item.policy_min_days != null ? item.policy_min_days : -1);
         var policyStrict = !(item && item.policy_san_strict === false);
         var policyOk = !(item && item.policy_ok === false);
         var policyDrift = String(item && item.policy_drift || "-");
-        var policyText = "mTLS:" + policyExpected + " | min:" + (isFinite(policyMinDays) && policyMinDays >= 0 ? String(policyMinDays) + "d" : "-") + " | SAN:" + (policyStrict ? "strict" : "soft");
-        if (!policyOk && policyDrift !== "-" && policyDrift !== "") {
-          policyText += " | drift:" + policyDrift;
-        }
-        var policyClass = policyOk ? "ap-live-state-running" : "ap-live-state-unhealthy";
+        var policyClass = policyOk ? "ap-live-state-running" : "ap-live-state-starting";
         var ocspClass = (ocsp === "stapled" || ocsp === "present") ? "ap-live-state-running" : "ap-live-state-starting";
-        var chainText = (chainChecked ? (chainOk ? "Yes" : "No") : "N/A") + " | d:" + String(Math.max(0, Math.round(chainDepth))) + " | i:" + (hasIntermediate ? "yes" : "no");
         var note = String(item && item.note || "-");
+        var postureNote = tokenListText(item && item.posture_note);
+        var noteText = tokenListText(note);
+        var driftText = tokenListText(policyDrift);
         var daysText = isFinite(daysLeft) && daysLeft > -9999 ? String(daysLeft) : "-";
+        var daysClass = "ap-live-state-info";
+        if (isFinite(daysLeft) && daysLeft >= 0) {
+          daysClass = daysLeft <= 14 ? "ap-live-state-starting" : "ap-live-state-running";
+        } else if (isFinite(daysLeft) && daysLeft < 0) {
+          daysClass = "ap-live-state-unhealthy";
+        }
+        var verifyClass = verifyCode === "0 (ok)" ? "ap-live-state-running" : (verifyCode === "rootca_missing" ? "ap-live-state-starting" : "ap-live-state-unhealthy");
+        var intermediateClass = hasIntermediate ? "ap-live-state-running" : "ap-live-state-starting";
+        var stateTone = toneClass(state);
+        var mtlsRequired = /require/.test(mtls.toLowerCase());
+        var withClientSuccess = /^[23][0-9]{2}$/.test(withClient);
+        var noClientSuccess = /^[23][0-9]{2}$/.test(noClient);
+        var accessTone = withClientSuccess ? ((mtlsRequired && noClientSuccess) ? "ap-live-state-starting" : "ap-live-state-running") : httpCodeTone(withClient);
+        var mtlsLower = String(mtls || "").toLowerCase();
+        if (mtlsLower === "broken" || mtlsLower === "error") {
+          accessTone = "ap-live-state-unhealthy";
+        } else if (mtlsLower === "required" && noClientSuccess) {
+          accessTone = "ap-live-state-unhealthy";
+        }
+        var postureTone = "ap-live-state-info";
+        if (/tlsv1(\.0|\.1)?/i.test(tlsVersion) || /^TLSv1\.[01]$/i.test(tlsVersion)) {
+          postureTone = "ap-live-state-unhealthy";
+        } else if (ocspClass === "ap-live-state-running" && intermediateClass === "ap-live-state-running") {
+          postureTone = "ap-live-state-running";
+        } else if (ocspClass === "ap-live-state-starting" || intermediateClass === "ap-live-state-starting") {
+          postureTone = "ap-live-state-starting";
+        }
+        var policyTone = policyClass;
+        if (!policyOk && (verifyClass === "ap-live-state-unhealthy" || !sanMatch || (chainChecked && !chainOk))) {
+          policyTone = "ap-live-state-unhealthy";
+        }
+
+        var stateSummary = prettyWord(state) + " (" + prettyWord(trend) + ")";
+        var stateDetails = [
+          "State: " + state,
+          "Trend: " + trend,
+          "Reason: " + (noteText || "-"),
+          "Posture: " + (postureNote || "-"),
+          "Drift: " + (driftText || "-")
+        ].join("\n");
+        var accessSummary = "mTLS " + prettyWord(mtls);
+        var accessDetails = [
+          "mTLS mode: " + mtls,
+          "HTTP no-cert: " + noClient,
+          "HTTP with-cert: " + withClient,
+          "Subject: " + subject
+        ].join("\n");
+        var certHint = expiresAt && expiresAt !== "-" ? ("Certificate expires at " + expiresAt) : "Certificate expiration timestamp unavailable.";
+        var certSummary = /^-?[0-9]+$/.test(daysText) ? (daysText + " days left") : "Unknown";
+        var certDetails = [
+          "Days left: " + daysText,
+          "Expires at: " + expiresAt,
+          "Policy min days: " + (isFinite(policyMinDays) && policyMinDays >= 0 ? String(policyMinDays) : "-")
+        ].join("\n");
+        var postureSummary = shortText((tlsVersion !== "-" ? tlsVersion : "TLS unknown") + " · OCSP " + ocsp, 28);
+        var postureDetails = [
+          "TLS/Cipher: " + tlsTextFull,
+          "OCSP: " + ocsp,
+          "Intermediate present: " + (hasIntermediate ? "Yes" : "No")
+        ].join("\n");
+
+        var chainStatusText = boolText(chainOk, chainChecked);
+        if (chainChecked !== false) {
+          chainStatusText += " d" + String(Math.max(0, Math.round(chainDepth)));
+        }
+        var policySummary = policyOk ? "Policy Compliant" : "Policy Drift";
+        var policyDetails = [
+          "Policy status: " + policySummary,
+          "Expected mTLS: " + policyExpected,
+          "Min days: " + (isFinite(policyMinDays) && policyMinDays >= 0 ? String(policyMinDays) : "-"),
+          "SAN mode: " + (policyStrict ? "Strict" : "Soft"),
+          "SAN match: " + boolText(sanMatch, true),
+          "Chain: " + chainStatusText,
+          "Verify: " + verifyCode,
+          "Drift: " + (driftText || "-")
+        ].join("\n");
+        var stateDetailId = registerDetail(domain + " state", stateDetails);
+        var accessDetailId = registerDetail(domain + " access profile", accessDetails);
+        var certDetailId = registerDetail(domain + " certificate window", certDetails);
+        var postureDetailId = registerDetail(domain + " TLS posture", postureDetails);
+        var policyDetailId = registerDetail(domain + " policy & trust", policyDetails);
+        var stateHint = "State: " + prettyWord(state) + " | Trend: " + prettyWord(trend) + ". Click for details.";
+        var accessHint = "mTLS: " + prettyWord(mtls) + " | HTTP no-cert: " + noClient + " | with-cert: " + withClient + ". Click for details.";
+        var certChipHint = certHint + " Click for details.";
+        var postureHint = "TLS: " + (tlsVersion !== "-" ? tlsVersion : "unknown") + " | OCSP: " + ocsp + " | Intermediate: " + (hasIntermediate ? "Yes" : "No") + ". Click for details.";
+        var policyHint = "Policy: " + policySummary + " | Verify: " + verifyCode + " | SAN: " + (sanMatch ? "match" : "mismatch") + ". Click for details.";
+
         return ""
           + "<tr>"
           + "  <td>" + esc(domain) + "</td>"
-          + '  <td class="text-end"><span class="ap-badge ' + esc(toneClass(state)) + '">' + esc(state) + "</span></td>"
-          + '  <td class="text-end"><span class="ap-badge ' + esc(trendToneClass(trend)) + '">' + esc(trend) + "</span></td>"
-          + '  <td><span class="ap-badge ' + esc(policyClass) + '" title="' + esc(policyText) + '">' + esc(shortText(policyText, 40)) + "</span></td>"
-          + '  <td class="text-end"><span class="ap-badge ap-live-state-info">' + esc(mtls) + "</span></td>"
-          + '  <td title="' + esc(subject) + '">' + esc(shortText(subject, 42)) + "</td>"
-          + '  <td>' + esc(expiresAt) + "</td>"
-          + '  <td class="text-end">' + esc(daysText) + "</td>"
-          + '  <td title="' + esc(tlsText) + '">' + esc(tlsText) + "</td>"
-          + '  <td class="text-end">' + yesNoBadge(sanMatch, true) + "</td>"
-          + '  <td class="text-end" title="' + esc(chainText) + '">' + yesNoBadge(chainOk, chainChecked) + "</td>"
-          + '  <td class="text-end"><span class="ap-badge ' + esc(ocspClass) + '">' + esc(ocsp) + "</span></td>"
-          + '  <td class="text-end">' + esc(noClient) + "</td>"
-          + '  <td class="text-end">' + esc(withClient) + "</td>"
-          + "  <td>" + esc(verifyCode) + "</td>"
-          + "  <td>" + esc(note) + "</td>"
+          + '  <td><div class="ap-tls-cell">' + detailButton("State", stateSummary, stateDetailId, stateTone, stateHint, "bi bi-activity") + "</div></td>"
+          + '  <td><div class="ap-tls-cell">' + detailButton("Access", accessSummary, accessDetailId, accessTone, accessHint, "bi bi-person-lock") + "</div></td>"
+          + '  <td><div class="ap-tls-cell">' + detailButton("Certificate", certSummary, certDetailId, daysClass, certChipHint, "bi bi-calendar-check") + "</div></td>"
+          + '  <td><div class="ap-tls-cell">' + detailButton("Posture", postureSummary, postureDetailId, postureTone, postureHint, "bi bi-shield-check") + "</div></td>"
+          + '  <td><div class="ap-tls-cell">' + detailButton("Policy", policySummary, policyDetailId, policyTone, policyHint, "bi bi-clipboard2-check") + "</div></td>"
           + "</tr>";
       }).join("");
+      initTooltips(rowsEl);
     }
 
     function buildUrl() {
@@ -514,6 +756,22 @@ declare(strict_types=1);
     if (refreshBtn) {
       refreshBtn.addEventListener("click", refreshSnapshot);
     }
+    rowsEl.addEventListener("click", function (event) {
+      var target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+      var btn = target.closest("[data-ap-tls-detail-id]");
+      if (!btn) {
+        return;
+      }
+      event.preventDefault();
+      var ref = String(btn.getAttribute("data-ap-tls-detail-id") || "");
+      if (ref === "" || !detailStore[ref]) {
+        return;
+      }
+      showDetailModal(detailStore[ref].title, detailStore[ref].body);
+    });
     if (domainEl) {
       domainEl.addEventListener("keydown", function (e) {
         if (e.key === "Enter") {

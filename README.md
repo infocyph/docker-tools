@@ -254,11 +254,27 @@ All certs are written to `/etc/mkcert`.
 
 | Certificate Type | Files Generated                                                |
 | ---------------- | -------------------------------------------------------------- |
-| Apache (Server)  | `apache-server.pem`, `apache-server-key.pem`                   |
-| Apache (Client)  | `apache-client.pem`, `apache-client-key.pem`                   |
-| Nginx (Server)   | `nginx-server.pem`, `nginx-server-key.pem`                     |
-| Nginx (Proxy)    | `nginx-proxy.pem`, `nginx-proxy-key.pem`                       |
-| Nginx (Client)   | `nginx-client.pem`, `nginx-client-key.pem`, `nginx-client.p12` |
+| LDS (Server)     | `lds-server.pem`, `lds-server-key.pem`                         |
+| LDS (Client Internal) | `lds-client-internal.pem`, `lds-client-internal-key.pem` |
+| LDS (Client User) | `lds-client-user.pem`, `lds-client-user-key.pem`, `lds-client-user.p12` |
+
+### 🎯 Certificate role mapping
+
+Use certs by TLS role, not by service name:
+
+| Traffic / Role | Certificate to use |
+| --- | --- |
+| Client -> Nginx (TLS termination, including localhost router) | `lds-server.pem`, `lds-server-key.pem` |
+| Nginx -> Apache (mTLS upstream client auth) | `lds-client-internal.pem`, `lds-client-internal-key.pem` |
+| Apache as TLS server for Nginx | `lds-server.pem`, `lds-server-key.pem` |
+| Human/browser/API client cert bundle | `lds-client-user.p12` (from `lds-client-user.pem`, `lds-client-user-key.pem`) |
+
+For `locals.conf`-style Nginx HTTPS routers, use:
+
+```nginx
+ssl_certificate /etc/mkcert/lds-server.pem;
+ssl_certificate_key /etc/mkcert/lds-server-key.pem;
+```
 
 ---
 

@@ -148,7 +148,7 @@ RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
-      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep tmux gzip \
+      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep gzip \
       lnav multitail less php php-mbstring php-curl php-zip php-phar php-openssl php-common \
   && update-ca-certificates \
   && mkdir -p \

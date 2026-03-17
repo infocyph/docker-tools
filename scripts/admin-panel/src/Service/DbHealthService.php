@@ -3,15 +3,19 @@ declare(strict_types=1);
 
 namespace AdminPanel\Service;
 
+use AdminPanel\Support\ProcessRunner;
+
 final class DbHealthService
 {
+    private const COMMAND_TIMEOUT_SECONDS = 20;
+
     /**
      * @return array<string,mixed>
      */
     public function collect(string $engine = 'all'): array
     {
         $engine = strtolower(trim($engine));
-        if (!in_array($engine, ['all', 'mysql', 'postgres', 'redis'], true)) {
+        if (!in_array($engine, ['all', 'mysql', 'mariadb', 'postgres', 'redis', 'mongodb', 'elasticsearch', 'db-client'], true)) {
             $engine = 'all';
         }
 
@@ -41,7 +45,11 @@ final class DbHealthService
                     'not_running' => 0,
                     'redis' => 0,
                     'mysql' => 0,
+                    'mariadb' => 0,
                     'postgres' => 0,
+                    'mongodb' => 0,
+                    'elasticsearch' => 0,
+                    'db_client' => 0,
                 ],
                 'items' => [],
             ];
@@ -67,7 +75,11 @@ final class DbHealthService
                     'not_running' => 0,
                     'redis' => 0,
                     'mysql' => 0,
+                    'mariadb' => 0,
                     'postgres' => 0,
+                    'mongodb' => 0,
+                    'elasticsearch' => 0,
+                    'db_client' => 0,
                 ],
                 'items' => [],
             ];
@@ -82,42 +94,6 @@ final class DbHealthService
      */
     private function runCommand(array $command): array
     {
-        if (!function_exists('proc_open')) {
-            return [
-                'ok' => false,
-                'stdout' => '',
-                'stderr' => 'proc_open unavailable',
-                'exit_code' => 127,
-            ];
-        }
-
-        $descriptors = [
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
-        ];
-
-        $proc = @proc_open($command, $descriptors, $pipes);
-        if (!is_resource($proc)) {
-            return [
-                'ok' => false,
-                'stdout' => '',
-                'stderr' => 'failed to start process',
-                'exit_code' => 127,
-            ];
-        }
-
-        $stdout = stream_get_contents($pipes[1]) ?: '';
-        fclose($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]) ?: '';
-        fclose($pipes[2]);
-
-        $exitCode = (int)@proc_close($proc);
-
-        return [
-            'ok' => ($exitCode === 0),
-            'stdout' => $stdout,
-            'stderr' => trim($stderr),
-            'exit_code' => $exitCode,
-        ];
+        return ProcessRunner::run($command, self::COMMAND_TIMEOUT_SECONDS);
     }
 }

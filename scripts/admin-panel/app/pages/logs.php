@@ -1711,8 +1711,11 @@ $levelUi = [
         renderServiceOptions(payload.services || []);
         renderFileList(payload.files || [], payload.activeToken || requestedToken);
         updateDomainSelector(serviceSelect ? (serviceSelect.value || "all") : "all");
-        if (rootsTextEl && payload.rootsText) {
-          rootsTextEl.textContent = "Filter by service/domain and inspect recent entries instantly.";
+        if (rootsTextEl) {
+          var rootsText = String(payload && payload.rootsText ? payload.rootsText : "").trim();
+          rootsTextEl.textContent = rootsText !== ""
+            ? ("Log roots: " + rootsText)
+            : "Filter by service/domain and inspect recent entries instantly.";
         }
         return applyServiceFilter(false).then(function () {
           var activeVisible = getActiveVisibleFile();

@@ -43,11 +43,31 @@ _infer_project() {
 
 _engine_from() {
   local x="${1,,}"
+  if [[ "$x" == *redis-insight* || "$x" == *redis_insight* || "$x" == *redisinsight* ]]; then
+    printf 'db-client'
+    return 0
+  fi
+  if [[ "$x" == *cloudbeaver* || "$x" == *mongo-express* || "$x" == *mongo_express* || "$x" == *kibana* || "$x" == *filebeat* ]]; then
+    printf 'db-client'
+    return 0
+  fi
+  if [[ "$x" == *mariadb* ]]; then
+    printf 'mariadb'
+    return 0
+  fi
+  if [[ "$x" == *mongodb* ]]; then
+    printf 'mongodb'
+    return 0
+  fi
+  if [[ "$x" == *elasticsearch* ]]; then
+    printf 'elasticsearch'
+    return 0
+  fi
   if [[ "$x" == *redis* ]]; then
     printf 'redis'
     return 0
   fi
-  if [[ "$x" == *mysql* || "$x" == *mariadb* ]]; then
+  if [[ "$x" == *mysql* ]]; then
     printf 'mysql'
     return 0
   fi
@@ -294,10 +314,125 @@ _probe_postgres() {
   fi
 }
 
+_probe_mongodb() {
+  local name="${1:-}"
+  _probe_defaults
+
+  local user pass out
+  user="$(_container_env_value "$name" MONGO_INITDB_ROOT_USERNAME)"
+  [[ -n "$user" ]] || user="$(_container_env_value "$name" MONGODB_ROOT_USERNAME)"
+  [[ -n "$user" ]] || user="root"
+  pass="$(_container_env_value "$name" MONGO_INITDB_ROOT_PASSWORD)"
+  [[ -n "$pass" ]] || pass="$(_container_env_value "$name" MONGODB_ROOT_PASSWORD)"
+  [[ -n "$pass" ]] || pass="12345"
+
+  out="$(
+    docker exec \
+      -e LDS_MONGO_USER="$user" \
+      -e LDS_MONGO_PASS="$pass" \
+      "$name" bash -c '
+        mongosh --quiet "mongodb://$LDS_MONGO_USER:$LDS_MONGO_PASS@localhost:27017/admin" --eval "
+          var s=db.serverStatus();
+          var cur=(s.connections&&s.connections.current)||0;
+          var active=(s.globalLock&&s.globalLock.activeClients&&s.globalLock.activeClients.total)||0;
+          var max=cur+((s.connections&&s.connections.available)||0);
+          var ops=(s.opcounters&&((s.opcounters.insert||0)+(s.opcounters.query||0)+(s.opcounters.update||0)+(s.opcounters.delete||0)))||0;
+          print(cur + \"|\" + active + \"|\" + max + \"|\" + ops);
+        " 2>/dev/null
+      ' 2>/dev/null || docker exec \
+      -e LDS_MONGO_USER="$user" \
+      -e LDS_MONGO_PASS="$pass" \
+      "$name" sh -c '
+        mongosh --quiet "mongodb://$LDS_MONGO_USER:$LDS_MONGO_PASS@localhost:27017/admin" --eval "
+          var s=db.serverStatus();
+          var cur=(s.connections&&s.connections.current)||0;
+          var active=(s.globalLock&&s.globalLock.activeClients&&s.globalLock.activeClients.total)||0;
+          var max=cur+((s.connections&&s.connections.available)||0);
+          var ops=(s.opcounters&&((s.opcounters.insert||0)+(s.opcounters.query||0)+(s.opcounters.update||0)+(s.opcounters.delete||0)))||0;
+          print(cur + \"|\" + active + \"|\" + max + \"|\" + ops);
+        " 2>/dev/null
+      ' 2>/dev/null || true
+  )"
+
+  if [[ -z "$out" ]]; then
+    P_LEVEL="fail"
+    P_NOTE="mongodb_probe_failed"
+    return 0
+  fi
+
+  local conn active max_conn ops
+  IFS='|' read -r conn active max_conn ops <<<"$out"
+  P_CONNECTIONS="$(_num_or_default "$conn" -1)"
+  P_ACTIVE="$(_num_or_default "$active" -1)"
+  P_MAX_CONN="$(_num_or_default "$max_conn" -1)"
+  P_OPS="$(_num_or_default "$ops" -1)"
+  P_NOTE="ok"
+  P_LEVEL="pass"
+
+  if ((P_MAX_CONN > 0 && P_CONNECTIONS >= 0)); then
+    P_MEM_PCT=$((P_CONNECTIONS * 100 / P_MAX_CONN))
+    if ((P_MEM_PCT >= 85)); then
+      P_LEVEL="warn"
+      P_NOTE="connection_pressure"
+    fi
+  fi
+}
+
+_probe_elasticsearch() {
+  local name="${1:-}"
+  _probe_defaults
+
+  local health_json status nodes active_shards unassigned pct
+  health_json="$(_docker_exec_pref_shell "$name" 'curl -fsS http://localhost:9200/_cluster/health 2>/dev/null || true')"
+  if [[ -z "$health_json" ]]; then
+    P_LEVEL="fail"
+    P_NOTE="elasticsearch_probe_failed"
+    return 0
+  fi
+
+  status="$(printf '%s' "$health_json" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p' | head -n1)"
+  nodes="$(printf '%s' "$health_json" | sed -n 's/.*"number_of_nodes":[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)"
+  active_shards="$(printf '%s' "$health_json" | sed -n 's/.*"active_shards":[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)"
+  unassigned="$(printf '%s' "$health_json" | sed -n 's/.*"unassigned_shards":[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)"
+  pct="$(printf '%s' "$health_json" | sed -n 's/.*"active_shards_percent_as_number":[[:space:]]*\([0-9.]\+\).*/\1/p' | head -n1)"
+
+  P_CONNECTIONS="$(_num_or_default "$nodes" -1)"
+  P_ACTIVE="$(_num_or_default "$active_shards" -1)"
+  P_SLOW="$(_num_or_default "$unassigned" -1)"
+  P_MEM_PCT="$(_num_or_default "${pct%%.*}" -1)"
+  P_NOTE="ok"
+  P_LEVEL="pass"
+
+  case "${status,,}" in
+    green) P_LEVEL="pass"; P_NOTE="cluster_green" ;;
+    yellow) P_LEVEL="warn"; P_NOTE="cluster_yellow" ;;
+    red) P_LEVEL="fail"; P_NOTE="cluster_red" ;;
+    *) P_LEVEL="warn"; P_NOTE="cluster_unknown" ;;
+  esac
+}
+
+_probe_db_client() {
+  local health="${1:-}"
+  _probe_defaults
+
+  local h="${health,,}"
+  P_LEVEL="pass"
+  P_NOTE="client_ok"
+  if [[ "$h" == "unhealthy" ]]; then
+    P_LEVEL="fail"
+    P_NOTE="client_unhealthy"
+    return 0
+  fi
+  if [[ "$h" == "starting" ]]; then
+    P_LEVEL="warn"
+    P_NOTE="client_starting"
+  fi
+}
+
 usage() {
   cat <<'EOF'
 Usage:
-  monitor-db [--json] [--engine <all|mysql|postgres|redis>]
+  monitor-db [--json] [--engine <all|mysql|mariadb|postgres|redis|mongodb|elasticsearch|db-client>]
 
 Examples:
   monitor-db --json
@@ -318,7 +453,7 @@ main() {
 
   engine_filter="${engine_filter,,}"
   case "$engine_filter" in
-    all | mysql | postgres | redis) ;;
+    all | mysql | mariadb | postgres | redis | mongodb | elasticsearch | db-client) ;;
     *) engine_filter="all" ;;
   esac
 
@@ -350,7 +485,7 @@ main() {
   fi
 
   local total=0 pass=0 warn=0 fail=0 running=0 not_running=0
-  local redis_n=0 mysql_n=0 postgres_n=0
+  local redis_n=0 mysql_n=0 mariadb_n=0 postgres_n=0 mongodb_n=0 elasticsearch_n=0 db_client_n=0
   local -a items=()
   local row name service image state health engine level note
   while IFS='|' read -r name service image state health; do
@@ -364,7 +499,11 @@ main() {
     case "$engine" in
       redis) ((++redis_n)) ;;
       mysql) ((++mysql_n)) ;;
+      mariadb) ((++mariadb_n)) ;;
       postgres) ((++postgres_n)) ;;
+      mongodb) ((++mongodb_n)) ;;
+      elasticsearch) ((++elasticsearch_n)) ;;
+      db-client) ((++db_client_n)) ;;
     esac
 
     _probe_defaults
@@ -379,7 +518,11 @@ main() {
       case "$engine" in
         redis) _probe_redis "$name" ;;
         mysql) _probe_mysql "$name" ;;
+        mariadb) _probe_mysql "$name" ;;
         postgres) _probe_postgres "$name" ;;
+        mongodb) _probe_mongodb "$name" ;;
+        elasticsearch) _probe_elasticsearch "$name" ;;
+        db-client) _probe_db_client "$health" ;;
       esac
       level="$P_LEVEL"
       note="$P_NOTE"
@@ -396,8 +539,8 @@ main() {
   done <<<"$raw"
 
   if ((json == 0)); then
-    printf 'DB/Redis Health | project=%s targets=%d pass=%d warn=%d fail=%d (redis=%d mysql=%d postgres=%d)\n' \
-      "$project" "$total" "$pass" "$warn" "$fail" "$redis_n" "$mysql_n" "$postgres_n"
+    printf 'DB Health | project=%s targets=%d pass=%d warn=%d fail=%d (redis=%d mysql=%d mariadb=%d postgres=%d mongodb=%d elasticsearch=%d db_client=%d)\n' \
+      "$project" "$total" "$pass" "$warn" "$fail" "$redis_n" "$mysql_n" "$mariadb_n" "$postgres_n" "$mongodb_n" "$elasticsearch_n" "$db_client_n"
     return 0
   fi
 
@@ -406,8 +549,8 @@ main() {
   printf '"generated_at":"%s",' "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
   printf '"project":"%s",' "$(_json_escape "$project")"
   printf '"filters":{"engine":"%s"},' "$(_json_escape "$engine_filter")"
-  printf '"summary":{"targets":%d,"pass":%d,"warn":%d,"fail":%d,"running":%d,"not_running":%d,"redis":%d,"mysql":%d,"postgres":%d},' \
-    "$total" "$pass" "$warn" "$fail" "$running" "$not_running" "$redis_n" "$mysql_n" "$postgres_n"
+  printf '"summary":{"targets":%d,"pass":%d,"warn":%d,"fail":%d,"running":%d,"not_running":%d,"redis":%d,"mysql":%d,"mariadb":%d,"postgres":%d,"mongodb":%d,"elasticsearch":%d,"db_client":%d},' \
+    "$total" "$pass" "$warn" "$fail" "$running" "$not_running" "$redis_n" "$mysql_n" "$mariadb_n" "$postgres_n" "$mongodb_n" "$elasticsearch_n" "$db_client_n"
   printf '"items":['
   local f=1
   local connections active max_conn slow evicted used_mem max_mem mem_pct replica repl_lag ops

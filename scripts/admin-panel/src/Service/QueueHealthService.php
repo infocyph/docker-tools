@@ -3,8 +3,12 @@ declare(strict_types=1);
 
 namespace AdminPanel\Service;
 
+use AdminPanel\Support\ProcessRunner;
+
 final class QueueHealthService
 {
+    private const COMMAND_TIMEOUT_SECONDS = 20;
+
     /**
      * @return array<string,mixed>
      */
@@ -48,8 +52,30 @@ final class QueueHealthService
                     'fail' => 0,
                     'stale_workers' => 0,
                     'failed_jobs_total' => 0,
+                    'runner_issues' => 0,
                 ],
-                'queue_backend' => [],
+                'queue_backend' => [
+                    'type' => 'redis',
+                    'container' => '',
+                    'state' => '',
+                    'pending' => 0,
+                    'delayed' => 0,
+                    'reserved' => 0,
+                    'oldest_pending_age_s' => -1,
+                    'level' => 'warn',
+                    'note' => 'backend_not_detected',
+                    'runner' => [
+                        'container' => '',
+                        'state' => '',
+                        'supervisor' => 'unknown',
+                        'cron' => 'missing',
+                        'logrotate' => 'missing',
+                        'programs_total' => 0,
+                        'programs_not_running' => 0,
+                        'level' => 'warn',
+                        'note' => 'runner_not_detected',
+                    ],
+                ],
                 'items' => [],
             ];
         }
@@ -74,8 +100,30 @@ final class QueueHealthService
                     'fail' => 0,
                     'stale_workers' => 0,
                     'failed_jobs_total' => 0,
+                    'runner_issues' => 0,
                 ],
-                'queue_backend' => [],
+                'queue_backend' => [
+                    'type' => 'redis',
+                    'container' => '',
+                    'state' => '',
+                    'pending' => 0,
+                    'delayed' => 0,
+                    'reserved' => 0,
+                    'oldest_pending_age_s' => -1,
+                    'level' => 'warn',
+                    'note' => 'backend_not_detected',
+                    'runner' => [
+                        'container' => '',
+                        'state' => '',
+                        'supervisor' => 'unknown',
+                        'cron' => 'missing',
+                        'logrotate' => 'missing',
+                        'programs_total' => 0,
+                        'programs_not_running' => 0,
+                        'level' => 'warn',
+                        'note' => 'runner_not_detected',
+                    ],
+                ],
                 'items' => [],
             ];
         }
@@ -89,42 +137,6 @@ final class QueueHealthService
      */
     private function runCommand(array $command): array
     {
-        if (!function_exists('proc_open')) {
-            return [
-                'ok' => false,
-                'stdout' => '',
-                'stderr' => 'proc_open unavailable',
-                'exit_code' => 127,
-            ];
-        }
-
-        $descriptors = [
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
-        ];
-
-        $proc = @proc_open($command, $descriptors, $pipes);
-        if (!is_resource($proc)) {
-            return [
-                'ok' => false,
-                'stdout' => '',
-                'stderr' => 'failed to start process',
-                'exit_code' => 127,
-            ];
-        }
-
-        $stdout = stream_get_contents($pipes[1]) ?: '';
-        fclose($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]) ?: '';
-        fclose($pipes[2]);
-
-        $exitCode = (int)@proc_close($proc);
-
-        return [
-            'ok' => ($exitCode === 0),
-            'stdout' => $stdout,
-            'stderr' => trim($stderr),
-            'exit_code' => $exitCode,
-        ];
+        return ProcessRunner::run($command, self::COMMAND_TIMEOUT_SECONDS);
     }
 }

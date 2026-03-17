@@ -30,11 +30,11 @@ Open:
 
 Additional routes:
 
+- `http://localhost:9920/host-manager`
 - `http://localhost:9920/logs`
 - `http://localhost:9920/docker-logs`
 - `http://localhost:9920/db-health`
 - `http://localhost:9920/queue-health`
-- `http://localhost:9920/slo-view`
 - `http://localhost:9920/drift-monitor`
 - `http://localhost:9920/tls-monitor`
 - `http://localhost:9920/volume-monitor`
@@ -45,9 +45,9 @@ AJAX data endpoint:
 - `http://localhost:9920/api/live-stats` (powered by full `status --json` payload)
   - Includes `core`, `sections`, `checks`, and derived summary fields.
 - `http://localhost:9920/api/docker-logs` (service-grouped container logs; supports `service`, `since`, `grep`, `tail`)
-- `http://localhost:9920/api/db-health` (DB/Redis runtime checks; supports `engine`)
-- `http://localhost:9920/api/queue-health` (queue/cron checks; supports `since`, `pending_threshold`, `heartbeat_stale_sec`)
-- `http://localhost:9920/api/slo-view` (error budget/SLO metrics; supports `timeout`, `paths`)
+- `http://localhost:9920/api/hosts` (host manager CRUD endpoint; `GET` list, `GET?action=options` mkhost-style runtime/docroot options, `POST` add, `PUT/PATCH` edit, `DELETE` remove with `domain`)
+- `http://localhost:9920/api/db-health` (DB runtime checks incl. DB clients; supports `engine`)
+- `http://localhost:9920/api/queue-health` (queue/cron checks incl. docker-runner supervisor/cron/logrotate state; supports `since`, `pending_threshold`, `heartbeat_stale_sec`)
 - `http://localhost:9920/api/log-heatmap` (error signatures by service/time bucket; supports `source=both|docker|file`, `since`, `bucket_min`, `top`, `line_limit`)
 - `http://localhost:9920/api/drift-monitor` (generated vs active config drift)
 - `http://localhost:9920/api/tls-monitor` (TLS/mTLS checks with policy/posture/trend; supports `domain` partial/wildcard, `timeout`, `retries`)

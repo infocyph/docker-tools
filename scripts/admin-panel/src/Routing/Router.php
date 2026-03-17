@@ -26,11 +26,11 @@ final class Router
         return new self(
             [
                 'dashboard' => ['view' => 'dashboard', 'title' => 'Operations Overview | Admin Panel'],
+                'host-manager' => ['view' => 'host_manager', 'title' => 'Host Manager | Admin Panel'],
                 'logs' => ['view' => 'logs', 'title' => 'Log Streams | Admin Panel'],
                 'docker-logs' => ['view' => 'docker_logs', 'title' => 'Docker Logs | Admin Panel'],
-                'db-health' => ['view' => 'db_health', 'title' => 'DB / Redis Health | Admin Panel'],
+                'db-health' => ['view' => 'db_health', 'title' => 'DB Health | Admin Panel'],
                 'queue-health' => ['view' => 'queue_health', 'title' => 'Queue / Cron Health | Admin Panel'],
-                'slo-view' => ['view' => 'slo_view', 'title' => 'Error Budget / SLO | Admin Panel'],
                 'drift-monitor' => ['view' => 'drift_monitor', 'title' => 'Config Drift Monitor | Admin Panel'],
                 'tls-monitor' => ['view' => 'tls_monitor', 'title' => 'TLS / mTLS Monitor | Admin Panel'],
                 'volume-monitor' => ['view' => 'volume_monitor', 'title' => 'Volume Growth / Inode Monitor | Admin Panel'],
@@ -38,9 +38,9 @@ final class Router
             ],
             [
                 'docker_logs' => 'docker-logs',
+                'host_manager' => 'host-manager',
                 'db_health' => 'db-health',
                 'queue_health' => 'queue-health',
-                'slo_view' => 'slo-view',
                 'drift_monitor' => 'drift-monitor',
                 'tls_monitor' => 'tls-monitor',
                 'volume_monitor' => 'volume-monitor',

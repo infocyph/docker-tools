@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 <section class="ap-page-head">
   <div>
-    <p class="ap-breadcrumb mb-1">Home / Monitoring / DB / Redis Health</p>
-    <h2 class="ap-page-title mb-1">DB / Redis Health</h2>
-    <p class="ap-page-sub mb-0">Connection pressure, slow queries, evictions, and replication basics.</p>
+    <p class="ap-breadcrumb mb-1">Home / Monitoring / DB Health</p>
+    <h2 class="ap-page-title mb-1">DB Health</h2>
+    <p class="ap-page-sub mb-0">Database and DB-client runtime health across LocalDevStack services.</p>
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <div id="apDbHealthRefreshMeta" class="ap-live-refresh-meta" aria-live="polite">
@@ -38,15 +38,19 @@ declare(strict_types=1);
       <header class="card-header ap-card-head ap-card-head-wrap">
         <div>
           <h4 class="ap-card-title mb-1">Filters</h4>
-          <p id="apDbHealthMeta" class="ap-card-sub mb-0">Inspect database and redis runtime health.</p>
+          <p id="apDbHealthMeta" class="ap-card-sub mb-0">Inspect DB engines and DB client services.</p>
         </div>
         <div class="ap-head-tools">
           <div class="ap-live-matrix-tools">
             <select id="apDbHealthEngine" class="form-select form-select-sm ap-live-tool-select" aria-label="Engine filter">
               <option value="all" selected>Engine: All</option>
-              <option value="mysql">Engine: MySQL / MariaDB</option>
+              <option value="mysql">Engine: MySQL</option>
+              <option value="mariadb">Engine: MariaDB</option>
               <option value="postgres">Engine: PostgreSQL</option>
               <option value="redis">Engine: Redis</option>
+              <option value="mongodb">Engine: MongoDB</option>
+              <option value="elasticsearch">Engine: Elasticsearch</option>
+              <option value="db-client">Engine: DB Client</option>
             </select>
           </div>
         </div>
@@ -237,7 +241,7 @@ declare(strict_types=1);
       var remainingMs = hasNext ? Math.max(0, nextRefreshAt - Date.now()) : 0;
       if (updatedAtEl) {
         if (loading) {
-          updatedAtEl.textContent = "Refreshing DB/Redis health...";
+          updatedAtEl.textContent = "Refreshing DB health...";
         } else if (hasNext) {
           updatedAtEl.textContent = "Next refresh in " + formatCountdown(remainingMs);
         } else {
@@ -288,13 +292,17 @@ declare(strict_types=1);
         + '<span class="ap-kv-group ap-live-state-unhealthy"><span class="ap-kv-group-key">Fail</span><span class="ap-kv-group-val">' + esc(String(data.fail || 0)) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Redis</span><span class="ap-kv-group-val">' + esc(String(data.redis || 0)) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">MySQL</span><span class="ap-kv-group-val">' + esc(String(data.mysql || 0)) + "</span></span>"
-        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Postgres</span><span class="ap-kv-group-val">' + esc(String(data.postgres || 0)) + "</span></span>";
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">MariaDB</span><span class="ap-kv-group-val">' + esc(String(data.mariadb || 0)) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Postgres</span><span class="ap-kv-group-val">' + esc(String(data.postgres || 0)) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">MongoDB</span><span class="ap-kv-group-val">' + esc(String(data.mongodb || 0)) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Elasticsearch</span><span class="ap-kv-group-val">' + esc(String(data.elasticsearch || 0)) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">DB Clients</span><span class="ap-kv-group-val">' + esc(String(data.db_client || 0)) + "</span></span>";
     }
 
     function renderRows(payload) {
       var items = Array.isArray(payload && payload.items) ? payload.items : [];
       if (items.length === 0) {
-        rowsEl.innerHTML = '<tr><td colspan="13" class="text-center ap-page-sub py-4">No DB/Redis targets found.</td></tr>';
+        rowsEl.innerHTML = '<tr><td colspan="13" class="text-center ap-page-sub py-4">No DB targets found.</td></tr>';
         return;
       }
 
@@ -366,7 +374,7 @@ declare(strict_types=1);
         .catch(function (err) {
           renderSummary({});
           renderRows({ items: [] });
-          showError(err && err.message ? err.message : "Unable to load DB/Redis health.");
+          showError(err && err.message ? err.message : "Unable to load DB health.");
         })
         .finally(function () {
           setLoading(false);

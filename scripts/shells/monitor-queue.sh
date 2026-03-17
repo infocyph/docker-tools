@@ -88,6 +88,19 @@ _find_redis_container() {
   done <<<"$raw"
 }
 
+_find_runner_container() {
+  local raw name service image state hay
+  raw="$(docker ps -a --format '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.State}}' 2>/dev/null || true)"
+  while IFS='|' read -r name service image state; do
+    [[ -n "$name" ]] || continue
+    hay="${name,,} ${service,,} ${image,,}"
+    if [[ "${service,,}" == "runner" || "${name,,}" == "runner" || "$hay" == *"infocyph/runner"* ]]; then
+      printf '%s|%s\n' "$name" "$state"
+      return 0
+    fi
+  done <<<"$raw"
+}
+
 _scan_laravel_failed_jobs() {
   local container="${1:-}"
   [[ -n "$container" ]] || {
@@ -110,6 +123,82 @@ _scan_laravel_failed_jobs() {
     fi
   fi
   printf '%s' '-1'
+}
+
+_runner_defaults() {
+  RUNNER_LEVEL="warn"
+  RUNNER_NOTE="runner_not_detected"
+  RUNNER_CONTAINER="-"
+  RUNNER_STATE="-"
+  RUNNER_SUPERVISOR="unknown"
+  RUNNER_CRON="missing"
+  RUNNER_LOGROTATE="missing"
+  RUNNER_PROGRAMS_TOTAL=0
+  RUNNER_PROGRAMS_NOT_RUNNING=0
+}
+
+_probe_runner_supervisor() {
+  local container="${1:-}" state="${2:-}"
+  _runner_defaults
+
+  if [[ -z "$container" ]]; then
+    return 0
+  fi
+
+  RUNNER_CONTAINER="$container"
+  RUNNER_STATE="${state:--}"
+  RUNNER_NOTE="ok"
+
+  if [[ "$state" != "running" ]]; then
+    RUNNER_LEVEL="fail"
+    RUNNER_NOTE="runner_not_running"
+    return 0
+  fi
+
+  local out line program pstate
+  out="$(_docker_exec_pref_shell "$container" 'supervisorctl -c /etc/supervisor/supervisord.conf status 2>/dev/null || true')"
+  if [[ -z "$out" ]]; then
+    RUNNER_LEVEL="fail"
+    RUNNER_NOTE="supervisorctl_failed"
+    return 0
+  fi
+
+  RUNNER_SUPERVISOR="up"
+  RUNNER_LEVEL="pass"
+  RUNNER_NOTE="ok"
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    program="$(printf '%s\n' "$line" | awk '{print $1}')"
+    pstate="$(printf '%s\n' "$line" | awk '{print $2}')"
+    [[ -n "$program" && -n "$pstate" ]] || continue
+    ((++RUNNER_PROGRAMS_TOTAL))
+
+    if [[ "$program" == "cron" ]]; then
+      RUNNER_CRON="$pstate"
+    elif [[ "$program" == "logrotate" ]]; then
+      RUNNER_LOGROTATE="$pstate"
+    fi
+
+    if [[ "$pstate" != "RUNNING" ]]; then
+      ((++RUNNER_PROGRAMS_NOT_RUNNING))
+    fi
+  done <<<"$out"
+
+  if [[ "$RUNNER_CRON" != "RUNNING" ]]; then
+    RUNNER_LEVEL="fail"
+    RUNNER_NOTE="runner_cron_not_running"
+    return 0
+  fi
+  if [[ "$RUNNER_LOGROTATE" != "RUNNING" ]]; then
+    RUNNER_LEVEL="fail"
+    RUNNER_NOTE="runner_logrotate_not_running"
+    return 0
+  fi
+  if ((RUNNER_PROGRAMS_NOT_RUNNING > 0)); then
+    RUNNER_LEVEL="warn"
+    RUNNER_NOTE="runner_programs_not_running"
+  fi
 }
 
 usage() {
@@ -215,13 +304,21 @@ main() {
     fi
   fi
 
+  local runner_container="" runner_state="" runner_entry
+  runner_entry="$(_find_runner_container || true)"
+  if [[ -n "$runner_entry" ]]; then
+    IFS='|' read -r runner_container runner_state <<<"$runner_entry"
+  fi
+  _probe_runner_supervisor "$runner_container" "$runner_state"
+
   local total_workers=0 pass=0 warn=0 fail=0 stale_workers=0 failed_jobs_total=0
   local -a items=()
   local row name service image state
   while IFS='|' read -r name service image state; do
     [[ -n "$name" ]] || continue
     local hay="${name,,} ${service,,} ${image,,}"
-    if [[ "$hay" != *queue* && "$hay" != *worker* && "$hay" != *cron* && "$hay" != *php* && "$hay" != *node* ]]; then
+    # Keep worker matching explicit to avoid pulling generic runtime containers (e.g. php_8.5).
+    if [[ "$hay" != *queue* && "$hay" != *worker* && "$hay" != *cron* && "$hay" != *scheduler* && "$hay" != *schedule* && "$hay" != *horizon* && "$hay" != *node* ]]; then
       continue
     fi
     ((++total_workers))
@@ -311,16 +408,23 @@ main() {
     queue_note="oldest_pending_old"
   fi
 
-  local overall_fail=$fail overall_warn=$warn
+  local overall_fail=$fail overall_warn=$warn runner_issues=0
   if [[ "$queue_level" == "fail" ]]; then
     ((++overall_fail))
   elif [[ "$queue_level" == "warn" ]]; then
     ((++overall_warn))
   fi
+  if [[ "$RUNNER_LEVEL" == "fail" ]]; then
+    ((++overall_fail))
+    ((++runner_issues))
+  elif [[ "$RUNNER_LEVEL" == "warn" ]]; then
+    ((++overall_warn))
+    ((++runner_issues))
+  fi
 
   if ((json == 0)); then
-    printf 'Queue/Cron Health | project=%s workers=%d pass=%d warn=%d fail=%d pending=%d oldest_age=%ds\n' \
-      "$project" "$total_workers" "$pass" "$overall_warn" "$overall_fail" "$queue_pending" "$oldest_pending_age"
+    printf 'Queue/Cron Health | project=%s workers=%d pass=%d warn=%d fail=%d pending=%d oldest_age=%ds runner=%s/%s\n' \
+      "$project" "$total_workers" "$pass" "$overall_warn" "$overall_fail" "$queue_pending" "$oldest_pending_age" "$RUNNER_CONTAINER" "$RUNNER_NOTE"
     return 0
   fi
 
@@ -330,8 +434,8 @@ main() {
   printf '"project":"%s",' "$(_json_escape "$project")"
   printf '"filters":{"since":"%s","pending_threshold":%d,"heartbeat_stale_sec":%d},' \
     "$(_json_escape "$since")" "$pending_threshold" "$stale_sec"
-  printf '"summary":{"workers":%d,"pass":%d,"warn":%d,"fail":%d,"stale_workers":%d,"failed_jobs_total":%d},' \
-    "$total_workers" "$pass" "$overall_warn" "$overall_fail" "$stale_workers" "$failed_jobs_total"
+  printf '"summary":{"workers":%d,"pass":%d,"warn":%d,"fail":%d,"stale_workers":%d,"failed_jobs_total":%d,"runner_issues":%d},' \
+    "$total_workers" "$pass" "$overall_warn" "$overall_fail" "$stale_workers" "$failed_jobs_total" "$runner_issues"
   printf '"queue_backend":{'
   printf '"type":"redis",'
   printf '"container":"%s",' "$(_json_escape "${redis_container:--}")"
@@ -341,7 +445,18 @@ main() {
   printf '"reserved":%d,' "$queue_reserved"
   printf '"oldest_pending_age_s":%d,' "$oldest_pending_age"
   printf '"level":"%s",' "$(_json_escape "$queue_level")"
-  printf '"note":"%s"' "$(_json_escape "$queue_note")"
+  printf '"note":"%s",' "$(_json_escape "$queue_note")"
+  printf '"runner":{'
+  printf '"container":"%s",' "$(_json_escape "$RUNNER_CONTAINER")"
+  printf '"state":"%s",' "$(_json_escape "$RUNNER_STATE")"
+  printf '"supervisor":"%s",' "$(_json_escape "$RUNNER_SUPERVISOR")"
+  printf '"cron":"%s",' "$(_json_escape "$RUNNER_CRON")"
+  printf '"logrotate":"%s",' "$(_json_escape "$RUNNER_LOGROTATE")"
+  printf '"programs_total":%d,' "$RUNNER_PROGRAMS_TOTAL"
+  printf '"programs_not_running":%d,' "$RUNNER_PROGRAMS_NOT_RUNNING"
+  printf '"level":"%s",' "$(_json_escape "$RUNNER_LEVEL")"
+  printf '"note":"%s"' "$(_json_escape "$RUNNER_NOTE")"
+  printf '}'
   printf '},'
   printf '"items":['
   local f=1 it

@@ -54,7 +54,7 @@ $routeHref = static function (string $slug = '') use ($basePath): string {
     }
     return $basePath . '/' . $clean;
 };
-$monitoringActive = in_array($activePage, ['logs', 'docker-logs', 'db-health', 'queue-health', 'slo-view', 'drift-monitor', 'tls-monitor', 'volume-monitor', 'live-stats'], true);
+$monitoringActive = in_array($activePage, ['logs', 'docker-logs', 'db-health', 'queue-health', 'drift-monitor', 'tls-monitor', 'volume-monitor', 'live-stats'], true);
 $topbarPageTitle = trim((string)preg_replace('/\s*\|\s*Admin Panel\s*$/i', '', $pageTitle));
 if ($topbarPageTitle === '') {
     $topbarPageTitle = $pageTitle;
@@ -114,6 +114,10 @@ if ($topbarPageTitle === '') {
           <i class="bi bi-speedometer2"></i>
           <span>Dashboard</span>
         </a>
+        <a class="ap-nav-link <?= $activePage === 'host-manager' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('host-manager'), ENT_QUOTES, 'UTF-8') ?>">
+          <i class="bi bi-hdd-network"></i>
+          <span>Host Manager</span>
+        </a>
         <div class="ap-nav-tree <?= $monitoringActive ? 'is-open' : '' ?>">
           <button
             class="ap-nav-link ap-nav-link-toggle <?= $monitoringActive ? 'active' : '' ?>"
@@ -133,15 +137,11 @@ if ($topbarPageTitle === '') {
             </a>
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'db-health' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('db-health'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-database-check"></i>
-              <span>DB / Redis Health</span>
+              <span>DB Health</span>
             </a>
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'queue-health' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('queue-health'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-list-task"></i>
               <span>Queue / Cron</span>
-            </a>
-            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'slo-view' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('slo-view'), ENT_QUOTES, 'UTF-8') ?>">
-              <i class="bi bi-speedometer"></i>
-              <span>Error Budget / SLO</span>
             </a>
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'drift-monitor' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('drift-monitor'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-sliders"></i>

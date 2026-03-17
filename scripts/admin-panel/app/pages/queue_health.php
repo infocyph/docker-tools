@@ -6,7 +6,7 @@ declare(strict_types=1);
   <div>
     <p class="ap-breadcrumb mb-1">Home / Monitoring / Queue / Cron</p>
     <h2 class="ap-page-title mb-1">Queue / Cron Health</h2>
-    <p class="ap-page-sub mb-0">Stuck queue backlog, oldest pending age, scheduler heartbeat, and failed job signals.</p>
+    <p class="ap-page-sub mb-0">Queue backlog, scheduler heartbeat, failed jobs, and docker-runner supervisor/cron/logrotate signals.</p>
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <div id="apQueueRefreshMeta" class="ap-live-refresh-meta" aria-live="polite">
@@ -301,11 +301,13 @@ declare(strict_types=1);
         + '<span class="ap-kv-group ap-live-state-starting"><span class="ap-kv-group-key">Warn</span><span class="ap-kv-group-val">' + esc(String(data.warn || 0)) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-unhealthy"><span class="ap-kv-group-key">Fail</span><span class="ap-kv-group-val">' + esc(String(data.fail || 0)) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-starting"><span class="ap-kv-group-key">Stale Workers</span><span class="ap-kv-group-val">' + esc(String(data.stale_workers || 0)) + "</span></span>"
-        + '<span class="ap-kv-group ap-live-state-unhealthy"><span class="ap-kv-group-key">Failed Jobs</span><span class="ap-kv-group-val">' + esc(String(data.failed_jobs_total || 0)) + "</span></span>";
+        + '<span class="ap-kv-group ap-live-state-unhealthy"><span class="ap-kv-group-key">Failed Jobs</span><span class="ap-kv-group-val">' + esc(String(data.failed_jobs_total || 0)) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-starting"><span class="ap-kv-group-key">Runner Issues</span><span class="ap-kv-group-val">' + esc(String(data.runner_issues || 0)) + "</span></span>";
     }
 
     function renderBackend(backend) {
       var data = backend && typeof backend === "object" ? backend : {};
+      var runner = data.runner && typeof data.runner === "object" ? data.runner : {};
       backendEl.innerHTML = ""
         + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Backend</span><span class="ap-kv-group-val">' + esc(String(data.type || "-")) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Container</span><span class="ap-kv-group-val">' + esc(String(data.container || "-")) + "</span></span>"
@@ -313,7 +315,14 @@ declare(strict_types=1);
         + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Delayed</span><span class="ap-kv-group-val">' + numberText(data.delayed) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Reserved</span><span class="ap-kv-group-val">' + numberText(data.reserved) + "</span></span>"
         + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Oldest Age (s)</span><span class="ap-kv-group-val">' + numberText(data.oldest_pending_age_s) + "</span></span>"
-        + '<span class="ap-kv-group ' + esc(toneClass(data.level || "warn")) + '"><span class="ap-kv-group-key">State</span><span class="ap-kv-group-val">' + esc(String(data.note || "-")) + "</span></span>";
+        + '<span class="ap-kv-group ' + esc(toneClass(data.level || "warn")) + '"><span class="ap-kv-group-key">State</span><span class="ap-kv-group-val">' + esc(String(data.note || "-")) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Runner</span><span class="ap-kv-group-val">' + esc(String(runner.container || "-")) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Runner State</span><span class="ap-kv-group-val">' + esc(String(runner.state || "-")) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Supervisor</span><span class="ap-kv-group-val">' + esc(String(runner.supervisor || "-")) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Cron</span><span class="ap-kv-group-val">' + esc(String(runner.cron || "-")) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Logrotate</span><span class="ap-kv-group-val">' + esc(String(runner.logrotate || "-")) + "</span></span>"
+        + '<span class="ap-kv-group ap-live-state-info"><span class="ap-kv-group-key">Programs Down</span><span class="ap-kv-group-val">' + numberText(runner.programs_not_running) + "</span></span>"
+        + '<span class="ap-kv-group ' + esc(toneClass(runner.level || "warn")) + '"><span class="ap-kv-group-key">Runner Note</span><span class="ap-kv-group-val">' + esc(String(runner.note || "-")) + "</span></span>";
     }
 
     function renderRows(payload) {

@@ -7,6 +7,8 @@ use AdminPanel\Service\LogsDataService;
 
 final class LogsEntriesEndpoint
 {
+    private const JSON_FLAGS = JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
+
     private LogsDataService $logsData;
 
     public function __construct(?LogsDataService $logsData = null)
@@ -64,7 +66,16 @@ final class LogsEntriesEndpoint
             header('Content-Type: application/json; charset=UTF-8');
             header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
         }
-        echo json_encode($payload, JSON_UNESCAPED_SLASHES);
+
+        $json = json_encode($payload, self::JSON_FLAGS);
+        if ($json === false) {
+            if (!headers_sent()) {
+                http_response_code(500);
+            }
+            echo '{"ok":false,"error":"json_encode_failed"}';
+            return;
+        }
+
+        echo $json;
     }
 }
-

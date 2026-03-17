@@ -6,13 +6,13 @@ namespace AdminPanel\App;
 use AdminPanel\Api\DockerLogsEndpoint;
 use AdminPanel\Api\DbHealthEndpoint;
 use AdminPanel\Api\DriftMonitorEndpoint;
+use AdminPanel\Api\HostManagerEndpoint;
 use AdminPanel\Api\LogHeatmapEndpoint;
 use AdminPanel\Api\LogsEntriesEndpoint;
 use AdminPanel\Api\LogsFilesEndpoint;
 use AdminPanel\Api\LiveStatsEndpoint;
 use AdminPanel\Api\QueueHealthEndpoint;
 use AdminPanel\Api\RuntimeEventsEndpoint;
-use AdminPanel\Api\SloViewEndpoint;
 use AdminPanel\Api\TlsCertArtifactEndpoint;
 use AdminPanel\Api\TlsMonitorEndpoint;
 use AdminPanel\Api\VolumeMonitorEndpoint;
@@ -31,9 +31,9 @@ final class Kernel
     private DockerLogsEndpoint $dockerLogsEndpoint;
     private DbHealthEndpoint $dbHealthEndpoint;
     private QueueHealthEndpoint $queueHealthEndpoint;
-    private SloViewEndpoint $sloViewEndpoint;
     private LogHeatmapEndpoint $logHeatmapEndpoint;
     private DriftMonitorEndpoint $driftMonitorEndpoint;
+    private HostManagerEndpoint $hostManagerEndpoint;
     private RuntimeEventsEndpoint $runtimeEventsEndpoint;
     private TlsCertArtifactEndpoint $tlsCertArtifactEndpoint;
     private TlsMonitorEndpoint $tlsMonitorEndpoint;
@@ -49,9 +49,9 @@ final class Kernel
         ?DockerLogsEndpoint $dockerLogsEndpoint = null,
         ?DbHealthEndpoint $dbHealthEndpoint = null,
         ?QueueHealthEndpoint $queueHealthEndpoint = null,
-        ?SloViewEndpoint $sloViewEndpoint = null,
         ?LogHeatmapEndpoint $logHeatmapEndpoint = null,
         ?DriftMonitorEndpoint $driftMonitorEndpoint = null,
+        ?HostManagerEndpoint $hostManagerEndpoint = null,
         ?RuntimeEventsEndpoint $runtimeEventsEndpoint = null,
         ?TlsCertArtifactEndpoint $tlsCertArtifactEndpoint = null,
         ?TlsMonitorEndpoint $tlsMonitorEndpoint = null,
@@ -69,9 +69,9 @@ final class Kernel
         $this->dockerLogsEndpoint = $dockerLogsEndpoint ?? new DockerLogsEndpoint();
         $this->dbHealthEndpoint = $dbHealthEndpoint ?? new DbHealthEndpoint();
         $this->queueHealthEndpoint = $queueHealthEndpoint ?? new QueueHealthEndpoint();
-        $this->sloViewEndpoint = $sloViewEndpoint ?? new SloViewEndpoint();
         $this->logHeatmapEndpoint = $logHeatmapEndpoint ?? new LogHeatmapEndpoint();
         $this->driftMonitorEndpoint = $driftMonitorEndpoint ?? new DriftMonitorEndpoint();
+        $this->hostManagerEndpoint = $hostManagerEndpoint ?? new HostManagerEndpoint();
         $this->runtimeEventsEndpoint = $runtimeEventsEndpoint ?? new RuntimeEventsEndpoint();
         $this->tlsCertArtifactEndpoint = $tlsCertArtifactEndpoint ?? new TlsCertArtifactEndpoint();
         $this->tlsMonitorEndpoint = $tlsMonitorEndpoint ?? new TlsMonitorEndpoint();
@@ -103,16 +103,16 @@ final class Kernel
             $this->queueHealthEndpoint->handle($query);
             return;
         }
-        if ($path === '/api/slo-view') {
-            $this->sloViewEndpoint->handle($query);
-            return;
-        }
         if ($path === '/api/log-heatmap') {
             $this->logHeatmapEndpoint->handle($query);
             return;
         }
         if ($path === '/api/drift-monitor') {
             $this->driftMonitorEndpoint->handle($query);
+            return;
+        }
+        if ($path === '/api/hosts') {
+            $this->hostManagerEndpoint->handle($query, $server);
             return;
         }
         if ($path === '/api/runtime-events') {

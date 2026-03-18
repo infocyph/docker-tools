@@ -3,6 +3,8 @@ services:
   {{PHP_SERVICE}}:
     container_name: {{PHP_CONTAINER_NAME}}
     hostname: {{PHP_HOSTNAME}}
+    image: localdevstack-php:{{PHP_VERSION}}
+    pull_policy: never
     restart: unless-stopped
     environment:
       - TZ=${TZ:-}

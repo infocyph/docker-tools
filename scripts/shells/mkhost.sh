@@ -338,7 +338,7 @@ node_is_valid_custom() {
 }
 
 ###############################################################################
-# 7) Doc-root suggestions (two-column menu)
+# 7) Doc-root suggestions (column menu)
 ###############################################################################
 collect_docroot_options() {
   local base="$APP_SCAN_DIR"
@@ -390,9 +390,12 @@ collect_docroot_options() {
   )
 }
 
-print_two_column_menu() {
-  local arr_name="$1" start="$2"
+print_column_menu() {
+  # print_column_menu <array_name> <start_index> [columns]
+  local arr_name="$1" start="$2" cols="${3:-2}"
   local -n arr="$arr_name"
+  [[ "$cols" =~ ^[0-9]+$ ]] || cols=2
+  ((cols < 1)) && cols=1
 
   local i width=0
   for ((i=start; i<${#arr[@]}; i++)); do
@@ -401,17 +404,19 @@ print_two_column_menu() {
   ((width < 10)) && width=10
   local colw=$((width + 7))
 
-  local idx
-  for ((idx=start; idx<${#arr[@]}; idx+=2)); do
-    local left_i="$idx"
-    local right_i=$((idx+1))
-    local left="  $(printf '%3d) ' "$left_i")${arr[left_i]}"
-    if (( right_i < ${#arr[@]} )); then
-      local right="  $(printf '%3d) ' "$right_i")${arr[right_i]}"
-      printf "%-${colw}s%s\n" "$left" "$right"
-    else
-      printf "%s\n" "$left"
-    fi
+  local row c idx cell
+  for ((row=start; row<${#arr[@]}; row+=cols)); do
+    for ((c=0; c<cols; c++)); do
+      idx=$((row+c))
+      ((idx < ${#arr[@]})) || break
+      cell="  $(printf '%3d) ' "$idx")${arr[idx]}"
+      if (( c < cols-1 && idx+1 < ${#arr[@]} )); then
+        printf "%-${colw}s" "$cell"
+      else
+        printf "%s" "$cell"
+      fi
+    done
+    printf "\n"
   done
 }
 
@@ -1047,7 +1052,7 @@ choose_doc_root() {
   done < <(collect_docroot_options || true)
 
   say "${CYAN}Doc root suggestions from ${APP_SCAN_DIR}:${NC}"
-  print_two_column_menu opts 0
+  print_column_menu opts 0 3
 
   local max=$(( ${#opts[@]} - 1 ))
   local sel

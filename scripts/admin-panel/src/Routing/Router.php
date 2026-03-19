@@ -27,6 +27,9 @@ final class Router
             [
                 'dashboard' => ['view' => 'dashboard', 'title' => 'Operations Overview | Admin Panel'],
                 'host-manager' => ['view' => 'host_manager', 'title' => 'Host Manager | Admin Panel'],
+                'automation-manager' => ['view' => 'automation_manager', 'title' => 'Automation Manager | Admin Panel'],
+                'automation-cron' => ['view' => 'automation_cron', 'title' => 'Cron Builder | Admin Panel'],
+                'automation-supervisor' => ['view' => 'automation_supervisor', 'title' => 'Supervisor Builder | Admin Panel'],
                 'logs' => ['view' => 'logs', 'title' => 'Log Streams | Admin Panel'],
                 'docker-logs' => ['view' => 'docker_logs', 'title' => 'Docker Logs | Admin Panel'],
                 'db-health' => ['view' => 'db_health', 'title' => 'DB Health | Admin Panel'],
@@ -39,6 +42,9 @@ final class Router
             [
                 'docker_logs' => 'docker-logs',
                 'host_manager' => 'host-manager',
+                'automation_manager' => 'automation-manager',
+                'automation_cron' => 'automation-cron',
+                'automation_supervisor' => 'automation-supervisor',
                 'db_health' => 'db-health',
                 'queue_health' => 'queue-health',
                 'drift_monitor' => 'drift-monitor',

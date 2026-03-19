@@ -114,7 +114,15 @@ final class HostManagerService
             return ['ok' => false, 'error' => 'host_add_failed', 'message' => $res['stderr'] !== '' ? $res['stderr'] : 'mkhost failed', 'exit_code' => $res['exit_code']];
         }
         $list = $this->listHosts();
-        return ['ok' => true, 'message' => 'Host added.', 'domain' => $built['domain'], 'host' => $this->findHost($list, (string)$built['domain']), 'summary' => $list['summary'] ?? []];
+        return [
+            'ok' => true,
+            'message' => 'Host added. Run `lds reboot` to apply changes.',
+            'reboot_required' => true,
+            'reboot_command' => 'lds reboot',
+            'domain' => $built['domain'],
+            'host' => $this->findHost($list, (string)$built['domain']),
+            'summary' => $list['summary'] ?? [],
+        ];
     }
 
     /** @param array<string,mixed> $payload @return array<string,mixed> */
@@ -135,7 +143,9 @@ final class HostManagerService
             $added['error'] = 'host_edit_add_failed';
             return $added;
         }
-        $added['message'] = 'Host updated.';
+        $added['message'] = 'Host updated. Run `lds reboot` to apply changes.';
+        $added['reboot_required'] = true;
+        $added['reboot_command'] = 'lds reboot';
         return $added;
     }
 
@@ -215,7 +225,7 @@ final class HostManagerService
         } else {
             $proxyHost = trim((string)($payload['proxy_host'] ?? ''));
             $proxyIp = trim((string)($payload['proxy_ip'] ?? ''));
-            if ($proxyHost === '' || preg_match('/[\\s\\/]/', $proxyHost)) return ['ok' => false, 'error' => 'validation_proxy_host', 'message' => 'proxy_host is required and must not include spaces or slashes.'];
+            if (!$this->isValidProxyHost($proxyHost)) return ['ok' => false, 'error' => 'validation_proxy_host', 'message' => 'proxy_host must contain at least one dot and include only letters, numbers, dot, underscore, or hyphen.'];
             if (!$this->isValidIpAddress($proxyIp)) return ['ok' => false, 'error' => 'validation_proxy_ip', 'message' => 'proxy_ip must be a valid IPv4 or IPv6 address.'];
             $proxyHttpPort = (int)($payload['proxy_http_port'] ?? 80); if ($proxyHttpPort < 1 || $proxyHttpPort > 65535) $proxyHttpPort = 80;
             $proxyHttpsPort = (int)($payload['proxy_https_port'] ?? 443); if ($proxyHttpsPort < 1 || $proxyHttpsPort > 65535) $proxyHttpsPort = 443;
@@ -594,7 +604,41 @@ final class HostManagerService
 
     private function isValidIpAddress(string $value): bool
     {
-        return filter_var($value, FILTER_VALIDATE_IP) !== false;
+        $value = trim($value);
+        if ($value === '') {
+            return false;
+        }
+
+        if (preg_match('/^([0-9]{1,3}\.){3}[0-9]{1,3}$/', $value) === 1) {
+            $parts = explode('.', $value);
+            if (count($parts) !== 4) {
+                return false;
+            }
+            foreach ($parts as $part) {
+                if (!preg_match('/^[0-9]+$/', $part)) {
+                    return false;
+                }
+                $n = (int)$part;
+                if ($n < 0 || $n > 255) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        return preg_match('/^[0-9a-fA-F:]+$/', $value) === 1 && str_contains($value, ':');
+    }
+
+    private function isValidProxyHost(string $value): bool
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return false;
+        }
+        if (preg_match('/^[A-Za-z0-9._-]+$/', $value) !== 1) {
+            return false;
+        }
+        return str_contains($value, '.');
     }
 
     private function isValidDomain(string $domain): bool

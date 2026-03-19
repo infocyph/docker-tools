@@ -142,6 +142,10 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     ADMIN_PANEL_PRODUCT_NAME=LocalDevStack \
     ADMIN_PANEL_BRAND_NAME=docker-tools \
     ADMIN_PANEL_COMPANY_NAME=infocyph \
+    ADMIN_PANEL_CRON_DIR=/etc/share/scheduler/cron-jobs \
+    ADMIN_PANEL_SUPERVISOR_DIR=/etc/share/scheduler/supervisor \
+    ADMIN_PANEL_RUNNER_CONTAINER=RUNNER \
+    ADMIN_PANEL_RUNNER_SUPERVISOR_CONF=/etc/supervisor/supervisord.conf \
     BANNER_SHOWN=0
 
 RUN apk add --no-cache \
@@ -165,6 +169,8 @@ RUN apk add --no-cache \
       /etc/share/state \
       /etc/share/logviewer \
       /etc/share/admin-panel \
+      /etc/share/scheduler/cron-jobs \
+      /etc/share/scheduler/supervisor \
       /etc/share/certs \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*

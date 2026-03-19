@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace AdminPanel\App;
 
+use AdminPanel\Api\AutomationManagerEndpoint;
 use AdminPanel\Api\DockerLogsEndpoint;
 use AdminPanel\Api\DbHealthEndpoint;
 use AdminPanel\Api\DriftMonitorEndpoint;
@@ -34,6 +35,7 @@ final class Kernel
     private LogHeatmapEndpoint $logHeatmapEndpoint;
     private DriftMonitorEndpoint $driftMonitorEndpoint;
     private HostManagerEndpoint $hostManagerEndpoint;
+    private AutomationManagerEndpoint $automationManagerEndpoint;
     private RuntimeEventsEndpoint $runtimeEventsEndpoint;
     private TlsCertArtifactEndpoint $tlsCertArtifactEndpoint;
     private TlsMonitorEndpoint $tlsMonitorEndpoint;
@@ -52,6 +54,7 @@ final class Kernel
         ?LogHeatmapEndpoint $logHeatmapEndpoint = null,
         ?DriftMonitorEndpoint $driftMonitorEndpoint = null,
         ?HostManagerEndpoint $hostManagerEndpoint = null,
+        ?AutomationManagerEndpoint $automationManagerEndpoint = null,
         ?RuntimeEventsEndpoint $runtimeEventsEndpoint = null,
         ?TlsCertArtifactEndpoint $tlsCertArtifactEndpoint = null,
         ?TlsMonitorEndpoint $tlsMonitorEndpoint = null,
@@ -72,6 +75,7 @@ final class Kernel
         $this->logHeatmapEndpoint = $logHeatmapEndpoint ?? new LogHeatmapEndpoint();
         $this->driftMonitorEndpoint = $driftMonitorEndpoint ?? new DriftMonitorEndpoint();
         $this->hostManagerEndpoint = $hostManagerEndpoint ?? new HostManagerEndpoint();
+        $this->automationManagerEndpoint = $automationManagerEndpoint ?? new AutomationManagerEndpoint();
         $this->runtimeEventsEndpoint = $runtimeEventsEndpoint ?? new RuntimeEventsEndpoint();
         $this->tlsCertArtifactEndpoint = $tlsCertArtifactEndpoint ?? new TlsCertArtifactEndpoint();
         $this->tlsMonitorEndpoint = $tlsMonitorEndpoint ?? new TlsMonitorEndpoint();
@@ -113,6 +117,10 @@ final class Kernel
         }
         if ($path === '/api/hosts') {
             $this->hostManagerEndpoint->handle($query, $server);
+            return;
+        }
+        if ($path === '/api/automation-manager') {
+            $this->automationManagerEndpoint->handle($query, $server);
             return;
         }
         if ($path === '/api/runtime-events') {

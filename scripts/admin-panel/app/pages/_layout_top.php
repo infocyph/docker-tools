@@ -55,6 +55,7 @@ $routeHref = static function (string $slug = '') use ($basePath): string {
     return $basePath . '/' . $clean;
 };
 $monitoringActive = in_array($activePage, ['logs', 'docker-logs', 'db-health', 'queue-health', 'drift-monitor', 'tls-monitor', 'volume-monitor', 'live-stats'], true);
+$automationActive = in_array($activePage, ['automation-manager', 'automation-cron', 'automation-supervisor'], true);
 $topbarPageTitle = trim((string)preg_replace('/\s*\|\s*Admin Panel\s*$/i', '', $pageTitle));
 if ($topbarPageTitle === '') {
     $topbarPageTitle = $pageTitle;
@@ -118,6 +119,33 @@ if ($topbarPageTitle === '') {
           <i class="bi bi-hdd-network"></i>
           <span>Host Manager</span>
         </a>
+        <div class="ap-nav-tree <?= $automationActive ? 'is-open' : '' ?>">
+          <button
+            class="ap-nav-link ap-nav-link-toggle <?= $automationActive ? 'active' : '' ?>"
+            type="button"
+            data-nav-toggle="automation"
+            aria-expanded="<?= $automationActive ? 'true' : 'false' ?>"
+            aria-controls="apNavAutomationSubmenu"
+          >
+            <i class="bi bi-clock-history"></i>
+            <span>Automation</span>
+            <i class="bi bi-chevron-down ap-nav-caret" aria-hidden="true"></i>
+          </button>
+          <div id="apNavAutomationSubmenu" class="ap-nav-submenu <?= $automationActive ? 'is-open' : '' ?>" aria-label="Automation submenu">
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'automation-manager' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('automation-manager'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-list-ul"></i>
+              <span>Overview</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'automation-cron' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('automation-cron'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-calendar-event"></i>
+              <span>Cron</span>
+            </a>
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'automation-supervisor' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('automation-supervisor'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-cpu"></i>
+              <span>Supervisor</span>
+            </a>
+          </div>
+        </div>
         <div class="ap-nav-tree <?= $monitoringActive ? 'is-open' : '' ?>">
           <button
             class="ap-nav-link ap-nav-link-toggle <?= $monitoringActive ? 'active' : '' ?>"

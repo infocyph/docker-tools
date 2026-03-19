@@ -3,6 +3,7 @@ set -euo pipefail
 
 VHOST_NGINX_DIR="${VHOST_NGINX_DIR:-/etc/share/vhosts/nginx}"
 MAX_HEADER_LINES="${MAX_HEADER_LINES:-120}"
+APP_BASE_DIR="${APP_BASE_DIR:-/app}"
 
 ###############################################################################
 # Colors + UI (mkhost-style, safe under set -u)
@@ -175,6 +176,40 @@ normalize_docroot() {
   echo "$p"
 }
 
+resolve_docroot_path() {
+  local raw norm base candidate
+  raw="${1:-}"
+  norm="$(normalize_docroot "$raw")"
+  [[ -n "$norm" ]] || {
+    echo ""
+    return 0
+  }
+
+  if [[ -d "$norm" || -f "$norm" ]]; then
+    echo "$norm"
+    return 0
+  fi
+
+  base="$(normalize_docroot "$APP_BASE_DIR")"
+  [[ -n "$base" ]] || {
+    echo "$norm"
+    return 0
+  }
+
+  if [[ "$norm" == "$base" || "$norm" == "$base/"* ]]; then
+    echo "$norm"
+    return 0
+  fi
+
+  candidate="$base$norm"
+  if [[ -d "$candidate" || -f "$candidate" ]]; then
+    echo "$candidate"
+    return 0
+  fi
+
+  echo "$norm"
+}
+
 list_vhost_domains() {
   [[ -d "$VHOST_NGINX_DIR" ]] || return 0
   local f base d
@@ -222,7 +257,7 @@ kv_get() { awk -F= -v k="$1" '$1==k{ sub(/^([^=]*=)/,""); print; exit }'; }
 
 emit_single_from_domain() {
   local domain="$1"
-  local meta app docroot container profile sock_web sock_fpm
+  local meta app docroot_raw docroot container profile sock_web sock_fpm
 
   meta="$(read_meta_from_conf "$domain" || true)"
   [[ -n "$meta" ]] || die "Missing or unreadable LDS-META header for: $domain"
@@ -233,7 +268,8 @@ emit_single_from_domain() {
   fi
 
   app="$(printf '%s\n' "$meta" | kv_get app)"
-  docroot="$(printf '%s\n' "$meta" | kv_get docroot)"
+  docroot_raw="$(printf '%s\n' "$meta" | kv_get docroot)"
+  docroot="$(resolve_docroot_path "$docroot_raw")"
   [[ -n "$app" ]] || die "Missing LDS-META: app= in $domain"
 
   case "$app" in
@@ -256,8 +292,8 @@ emit_single_from_domain() {
 
   if ((want_json)); then
     printf '{'
-    printf '"domain":"%s","app":"%s","docroot":"%s","container":"%s","profile":"%s"' \
-      "$domain" "$app" "${docroot:-}" "${container:-}" "${profile:-}"
+    printf '"domain":"%s","app":"%s","docroot":"%s","docroot_raw":"%s","container":"%s","profile":"%s"' \
+      "$domain" "$app" "${docroot:-}" "${docroot_raw:-}" "${container:-}" "${profile:-}"
     if ((want_sock)); then
       printf ',"sock_web":"%s","sock_fpm":"%s"' "${sock_web:-}" "${sock_fpm:-}"
     fi
@@ -311,15 +347,19 @@ emit_meta_block_from_domain() {
 }
 
 domains_matching_docroot() {
-  local want
+  local want want_resolved
   want="$(normalize_docroot "$1")"
   [[ -n "$want" ]] || return 0
-  local d meta dr
+  want_resolved="$(resolve_docroot_path "$want")"
+  local d meta dr_raw dr_resolved
   while IFS= read -r d; do
     meta="$(read_meta_from_conf "$d" 2>/dev/null || true)"
     [[ -n "$meta" ]] || continue
-    dr="$(normalize_docroot "$(printf '%s\n' "$meta" | kv_get docroot)")"
-    [[ "$dr" == "$want" ]] && printf '%s\n' "$d"
+    dr_raw="$(normalize_docroot "$(printf '%s\n' "$meta" | kv_get docroot)")"
+    dr_resolved="$(resolve_docroot_path "$dr_raw")"
+    if [[ "$dr_raw" == "$want" || "$dr_resolved" == "$want" || "$dr_raw" == "$want_resolved" || "$dr_resolved" == "$want_resolved" ]]; then
+      printf '%s\n' "$d"
+    fi
   done < <(list_vhost_domains)
 }
 
@@ -367,7 +407,7 @@ emit_list_directories() {
   while IFS= read -r d; do
     meta="$(read_meta_from_conf "$d" 2>/dev/null || true)"
     [[ -n "$meta" ]] || continue
-    dir="$(normalize_docroot "$(printf '%s\n' "$meta" | kv_get docroot)")"
+    dir="$(resolve_docroot_path "$(printf '%s\n' "$meta" | kv_get docroot)")"
     [[ -n "$dir" ]] || continue
     if [[ "$seen" != *"|$dir|"* ]]; then
       seen="${seen}${dir}|"
@@ -391,7 +431,7 @@ emit_list_table() {
     meta="$(read_meta_from_conf "$d" 2>/dev/null || true)"
     [[ -n "$meta" ]] || continue
     app="$(printf '%s\n' "$meta" | kv_get app)"
-    docroot="$(normalize_docroot "$(printf '%s\n' "$meta" | kv_get docroot)")"
+    docroot="$(resolve_docroot_path "$(printf '%s\n' "$meta" | kv_get docroot)")"
     fpm_mode="$(printf '%s\n' "$meta" | kv_get fpm_mode)"
     case "$app" in
     php)

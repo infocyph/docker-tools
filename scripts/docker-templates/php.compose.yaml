@@ -19,7 +19,6 @@ services:
       - ./docker/conf/openssl.cnf:/etc/ssl/openssl.cnf
       - ./configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
       - "./configuration/ssh:/home/${USER}/.ssh:ro"
-      - "${HOME}/.gitconfig:/home/${USER}/.gitconfig"
       - ./logs/php-fpm:/var/log/php-fpm
     networks:
       frontend: {}

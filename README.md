@@ -43,7 +43,7 @@ A lightweight, multi-tool Docker image for:
 - `mkhost` generates Nginx/Apache vhost configs using predefined templates
 - Uses runtime-versions DB baked during build:
   - `/etc/share/runtime-versions.json` (override via `RUNTIME_VERSIONS_DB`)
-- Supports helper flags to query/reset internal “active” selections (`ACTIVE_PHP_PROFILE`, `ACTIVE_NODE_PROFILE`, `APACHE_ACTIVE`)
+- Stores runtime state in `env-store` (JSON), including helper query/reset flags (`APACHE_ACTIVE`)
 
 ### 3) SOPS/Age encrypted env workflow (Model B)
 - `age` + `sops` installed
@@ -97,6 +97,8 @@ A lightweight, multi-tool Docker image for:
 | `notify` | Send notification to `notifierd` |
 | `notifierd` | TCP → stdout bridge (for host watchers) |
 | `status` | Docker compose project status and diagnostics (`--json` supported) |
+| `env-store` | JSON-backed key/value store for runtime state (`jq` managed) |
+| `profile-chooser` | Interactive profile+env collector for host-side compose flush |
 | `domain-which` | Resolve app/container/profile/docroot for a domain (supports `--json`) |
 | `es-policy` | Bootstrap/update Elasticsearch ILM + templates + Kibana data views |
 | `gitx` | Git helper CLI |
@@ -159,7 +161,7 @@ This repo is designed so you can keep **all generated + persistent artifacts** i
 |---|---|---|
 | `./configuration/apache` | `/etc/share/vhosts/apache` | `mkhost`, `certify` |
 | `./configuration/nginx` | `/etc/share/vhosts/nginx` |`mkhost`, `certify` |
-| `./configuration/node` | `/etc/share/vhosts/node` | `mkhost`, `rmhost`, `status` checks |
+| `./configuration/docker-compose` | `/etc/share/vhosts/docker-compose` | `mkhost`, `rmhost`, `status` checks |
 | `./configuration/fpm` | `/etc/share/vhosts/fpm` | `mkhost`, `init-fpm-pool-dirs`, `status` checks |
 | `./configuration/ssl` | `/etc/mkcert` |  `certify`, `mkcert` |
 | `./configuration/certs` | `/etc/share/certs` | `certify` export dir, `status` checks |
@@ -181,7 +183,7 @@ services:
     volumes:
       - ./configuration/apache:/etc/share/vhosts/apache
       - ./configuration/nginx:/etc/share/vhosts/nginx
-      - ./configuration/node:/etc/share/vhosts/node
+      - ./configuration/docker-compose:/etc/share/vhosts/docker-compose
       - ./configuration/fpm:/etc/share/vhosts/fpm
 
       - ./configuration/ssl:/etc/mkcert
@@ -213,7 +215,7 @@ Use as:
 docker run --rm -it \
   -v "$(pwd)/configuration/apache:/etc/share/vhosts/apache" \
   -v "$(pwd)/configuration/nginx:/etc/share/vhosts/nginx" \
-  -v "$(pwd)/configuration/node:/etc/share/vhosts/node" \
+  -v "$(pwd)/configuration/docker-compose:/etc/share/vhosts/docker-compose" \
   -v "$(pwd)/configuration/fpm:/etc/share/vhosts/fpm" \
   -v "$(pwd)/configuration/ssl:/etc/mkcert" \
   -v "$(pwd)/configuration/certs:/etc/share/certs" \
@@ -252,11 +254,27 @@ All certs are written to `/etc/mkcert`.
 
 | Certificate Type | Files Generated                                                |
 | ---------------- | -------------------------------------------------------------- |
-| Apache (Server)  | `apache-server.pem`, `apache-server-key.pem`                   |
-| Apache (Client)  | `apache-client.pem`, `apache-client-key.pem`                   |
-| Nginx (Server)   | `nginx-server.pem`, `nginx-server-key.pem`                     |
-| Nginx (Proxy)    | `nginx-proxy.pem`, `nginx-proxy-key.pem`                       |
-| Nginx (Client)   | `nginx-client.pem`, `nginx-client-key.pem`, `nginx-client.p12` |
+| LDS (Server)     | `lds-server.pem`, `lds-server-key.pem`                         |
+| LDS (Client Internal) | `lds-client-internal.pem`, `lds-client-internal-key.pem` |
+| LDS (Client User) | `lds-client-user.pem`, `lds-client-user-key.pem`, `lds-client-user.p12` |
+
+### 🎯 Certificate role mapping
+
+Use certs by TLS role, not by service name:
+
+| Traffic / Role | Certificate to use |
+| --- | --- |
+| Client -> Nginx (TLS termination, including localhost router) | `lds-server.pem`, `lds-server-key.pem` |
+| Nginx -> Apache (mTLS upstream client auth) | `lds-client-internal.pem`, `lds-client-internal-key.pem` |
+| Apache as TLS server for Nginx | `lds-server.pem`, `lds-server-key.pem` |
+| Human/browser/API client cert bundle | `lds-client-user.p12` (from `lds-client-user.pem`, `lds-client-user-key.pem`) |
+
+For `locals.conf`-style Nginx HTTPS routers, use:
+
+```nginx
+ssl_certificate /etc/mkcert/lds-server.pem;
+ssl_certificate_key /etc/mkcert/lds-server-key.pem;
+```
 
 ---
 
@@ -266,7 +284,8 @@ All certs are written to `/etc/mkcert`.
 
 * Nginx vhost: `/etc/share/vhosts/nginx/<domain>.conf`
 * Apache vhost (only if you choose Apache): `/etc/share/vhosts/apache/<domain>.conf`
-* Node service yaml (only if you choose Node): `/etc/share/vhosts/node/<token>.yaml`
+* Node service yaml (only if you choose Node): `/etc/share/vhosts/docker-compose/<token>.yaml`
+* PHP service yaml (only if you choose PHP): `/etc/share/vhosts/docker-compose/phpXX.yaml`
 
 Run it:
 
@@ -288,7 +307,7 @@ It runs a guided 9-step flow (slightly different for PHP vs Node):
 * Client body size
 * Runtime version selection:
 
-    * PHP: choose PHP version/profile
+    * PHP: choose PHP version
     * Node: choose Node version + optional run command
 * If HTTPS: optional client certificate verification (mutual TLS)
 
@@ -298,20 +317,18 @@ If you enable HTTPS, `mkhost` triggers `certify` automatically so the required c
 
 ### Helpful flags
 
-`mkhost` stores the “active selections” into env (used by your `server` wrapper to enable compose profiles).
+`mkhost` stores state in `env-store`.
 You can query/reset these values:
 
 ```bash
 mkhost --RESET
-mkhost --ACTIVE_PHP_PROFILE
-mkhost --ACTIVE_NODE_PROFILE
 mkhost --APACHE_ACTIVE
+mkhost --JSON
 ```
 
-* `--RESET` clears all active selections.
-* `--ACTIVE_PHP_PROFILE` prints the chosen PHP profile (if PHP was selected).
-* `--ACTIVE_NODE_PROFILE` prints the chosen Node profile (if Node was selected).
+* `--RESET` clears mkhost state.
 * `--APACHE_ACTIVE` prints `apache` when Apache mode was selected.
+* `--JSON` prints structured state from key `MKHOST_STATE`.
 
 ---
 
@@ -321,7 +338,7 @@ mkhost --APACHE_ACTIVE
 
 * `/etc/share/vhosts/nginx/<domain>.conf`
 * `/etc/share/vhosts/apache/<domain>.conf`
-* `/etc/share/vhosts/node/<token>.yaml` (token is a safe slug of the domain)
+* `/etc/share/vhosts/docker-compose/<token>.yaml` (Node token is a safe slug of the domain)
 
 Run it:
 
@@ -348,6 +365,14 @@ Behavior:
 * Requires confirmation (`y/N`) — in multi-domain mode it asks **once** for the full plan
 * If nothing exists for that domain, it exits with code `2` (useful for scripts)
 
+State/query flags:
+
+```bash
+rmhost --RESET
+rmhost --APACHE_DELETE
+rmhost --JSON
+```
+
 ---
 
 ## 📊 status (project diagnostics)
@@ -371,22 +396,26 @@ status --json | jq .
 Human output sections:
 
 * Core: `Project`, `Profiles`, `Containers`, `Ports`, `URLs`
-* Diagnostics: `Problems`, `Top consumers`, `Stats`, `Disk`, `Volumes`, `Networks`, `Probes`, `Recent errors`, `Drift`
+* Diagnostics: `Problems`, `Container runtime` (`Top consumers` + `Stats`), `Disk`, `Volumes`, `Networks`, `Probes`, `Recent errors`, `Drift`
 * `Checks`:
   * `System test`: internet reachability, egress IP, memory, docker runtime
-  * `Project test`: container health summary, artifact counts, mount checks
+  * `Project containers`: container health summary
+  * `Project artifacts`: artifact and log counts
+  * `Project mounts`: mount readiness and emptiness checks
 
 `--json` shape:
 
 * Top-level: `generated_at`, `full`, `core`, `sections`
-* `core`: project summary, containers, port summaries, URLs
-* `sections`: `problems`, `top_consumers`, `stats`, `disk`, `volumes`, `networks`, `probes`, `recent_errors`, `drift`, `checks`
+* `core`: project metadata, running summary, port summaries, URLs
+* `sections`: `problems`, `containers` (merged `core` + `top_consumers` + `stats`), `disk`, `volumes`, `networks`, `probes`, `recent_errors`, `drift`, `checks`
 
 Helpful env overrides:
 
 * `STATUS_PROJECT` (force project name)
 * `STATUS_PROBE=0|1` (disable/enable URL probing)
 * `STATUS_FORCE_COLOR=1` (force ANSI colors)
+* `STATUS_MOUNT_DEEP_COUNT=1` (opt-in deep recursive mount file counts; default is fast shallow mode)
+* `STATUS_LOG_SCAN_MAX_DEPTH=3` (depth limit for `/global/log` checks; use `all` or `-1` for full recursion)
 * `WORKING_DIR` / `LDS_WORKDIR` (workdir hint)
 * `ENV_DOCKER` (custom docker env file path)
 * `VHOST_NGINX_DIR` (domain source dir)
@@ -402,6 +431,53 @@ domain-which --list-domains
 domain-which example.com
 domain-which --json example.com
 domain-which --app example.com
+```
+
+---
+
+## 🧩 profile-chooser (host-flush helper)
+
+`profile-chooser` lets you interactively select service profiles and their required env values, then stores state in `env-store` (JSON by default; SQLite optional).
+Host-side tooling can fetch newline-separated outputs and decide how/when to flush into compose env/profiles.
+
+```bash
+profile-chooser                # interactive selection
+profile-chooser --json         # full saved state
+profile-chooser --profiles     # newline list
+profile-chooser --services     # newline list
+profile-chooser --envs         # newline KEY=VALUE pairs
+profile-chooser --reset
+```
+
+Stored state key in `env-store`:
+
+* `PROFILE_CHOOSER_STATE` (structured JSON object)
+
+---
+
+## 🗃️ env-store (JSON state store)
+
+`env-store` is a small JSON-backed key/value store for container runtime state.
+It is used by profile/mkhost/rmhost flows as the single state backend.
+
+Default file:
+
+* `/etc/share/state/env-store.json` (override with `ENV_STORE_JSON`)
+* Optional SQLite backend: set `ENV_STORE_BACKEND=sqlite` (DB path: `ENV_STORE_DB`)
+
+Common structured keys used by bundled scripts:
+
+* `PROFILE_CHOOSER_STATE`
+* `MKHOST_STATE`
+* `RMHOST_STATE`
+
+Examples:
+
+```bash
+env-store set-json STACK_META '{"name":"LocalDevStack","ports":[80,443],"flags":{"probe":true}}'
+env-store get-json STACK_META
+env-store list
+env-store json | jq .
 ```
 
 ---
@@ -653,9 +729,15 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `STATUS_PROJECT`      | (auto)                             | force project name for `status` |
 | `STATUS_PROBE`        | `1`                                | enable URL probes in `status` |
 | `STATUS_FORCE_COLOR`  | `0`                                | force color output in `status` |
+| `STATUS_MOUNT_DEEP_COUNT` | `0`                           | deep recursive mount file counts in `status` checks (slow on bind mounts) |
+| `STATUS_LOG_SCAN_MAX_DEPTH` | `3`                         | max depth for `/global/log` file counts in `status` checks (`all`/`-1` = full recursion) |
 | `WORKING_DIR` / `LDS_WORKDIR` | current dir                | stack root hint for `status` |
 | `ENV_DOCKER`          | `$WORKING_DIR/docker/.env`         | compose env file path used by `status` |
 | `VHOST_NGINX_DIR`     | auto                               | vhost dir used by `status` URL discovery |
+| `ENV_STORE_BACKEND`   | `json`                             | backend for `env-store` (`json` or `sqlite`) |
+| `ENV_STORE_JSON`      | `/etc/share/state/env-store.json` | JSON state file used by `env-store` and stateful shell tools |
+| `ENV_STORE_DB`        | `/etc/share/state/env-store.db`   | SQLite state DB used when `ENV_STORE_BACKEND=sqlite` |
+| `ENV_STORE_SQLITE_BIN`| `sqlite3`                          | sqlite client binary used by `env-store` |
 
 ---
 

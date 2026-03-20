@@ -1,9 +1,10 @@
 name: {{COMPOSE_PROJECT_NAME}}
-
 services:
     {{NODE_SERVICE}}:
       container_name: {{NODE_CONTAINER_NAME}}
       hostname: {{NODE_HOSTNAME}}
+      image: localdevstack-node:{{NODE_VERSION}}
+      pull_policy: never
       build:
         context: docker/dockerfiles
         dockerfile: node.Dockerfile
@@ -22,6 +23,8 @@ services:
         - HOST=0.0.0.0
         - NPM_AUDIT=${NPM_AUDIT:-0}
         - NPM_FUND=${NPM_FUND:-0}
+        - NODE_ACCESS_LOG_FILE={{NODE_ACCESS_LOG_FILE}}
+        - NODE_ERROR_LOG_FILE={{NODE_ERROR_LOG_FILE}}
         {{NODE_CMD_LINE}}
       env_file:
         - .env
@@ -34,6 +37,7 @@ services:
         - "./configuration/ssh:/home/${USER}/.ssh:ro"
         - lds_ssl_roots:/etc/share/rootCA:ro
         - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+        - "./logs/node:/var/log/node-app"
       depends_on:
         - server-tools
       healthcheck:
@@ -41,4 +45,3 @@ services:
         interval: 30s
         timeout: 5s
         retries: 5
-      profiles: ["node","{{NODE_PROFILE}}"]

@@ -134,25 +134,31 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     SOPS_KEYS_DIR=/etc/share/sops/keys \
     SOPS_CFG_DIR=/etc/share/sops/config \
     SOPS_REPO_DIR=/etc/share/vhosts/sops \
-    LOGVIEW_AUTOSTART=1 \
-    LOGVIEW_PORT=9911 \
-    LOGVIEW_BIND=0.0.0.0 \
-    LOGVIEW_ROOTS=/global/log \
-    LOGVIEW_MAX_TAIL_LINES=25000 \
-    LOGVIEW_CACHE_TTL=2 \
+    ADMIN_PANEL_AUTOSTART=1 \
+    ADMIN_PANEL_PORT=9911 \
+    ADMIN_PANEL_BIND=0.0.0.0 \
+    ADMIN_PANEL_DOCROOT=/etc/share/admin-panel \
+    ADMIN_PANEL_PHP_SERVER_LOG=/tmp/admin-panel-php-server.log \
+    ADMIN_PANEL_PRODUCT_NAME=LocalDevStack \
+    ADMIN_PANEL_BRAND_NAME=docker-tools \
+    ADMIN_PANEL_COMPANY_NAME=infocyph \
+    ADMIN_PANEL_CRON_DIR=/etc/share/scheduler/cron-jobs \
+    ADMIN_PANEL_SUPERVISOR_DIR=/etc/share/scheduler/supervisor \
+    ADMIN_PANEL_RUNNER_CONTAINER=RUNNER \
+    ADMIN_PANEL_RUNNER_SUPERVISOR_CONF=/etc/supervisor/supervisord.conf \
     BANNER_SHOWN=0
 
 RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
-      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep tmux gzip \
+      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep gzip \
       lnav multitail less php php-mbstring php-curl php-zip php-phar php-openssl php-common \
   && update-ca-certificates \
   && mkdir -p \
       /etc/mkcert \
       /etc/share/rootCA \
-      /etc/share/vhosts/node \
+      /etc/share/vhosts/docker-compose \
       /etc/share/vhosts/apache \
       /etc/share/vhosts/nginx \
       /etc/share/vhosts/sops \
@@ -160,7 +166,11 @@ RUN apk add --no-cache \
       /etc/share/sops/global \
       /etc/share/sops/keys \
       /etc/share/sops/config \
+      /etc/share/state \
       /etc/share/logviewer \
+      /etc/share/admin-panel \
+      /etc/share/scheduler/cron-jobs \
+      /etc/share/scheduler/supervisor \
       /etc/share/certs \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*
@@ -181,12 +191,24 @@ COPY scripts/shells/notify.sh /usr/local/bin/notify
 COPY scripts/shells/senv.sh /usr/local/bin/senv
 COPY scripts/shells/domain-which.sh /usr/local/bin/domain-which
 COPY scripts/shells/status.sh /usr/local/bin/status
+COPY scripts/shells/monitor-flows.sh /usr/local/bin/monitor-flows
+COPY scripts/shells/monitor-runtime.sh /usr/local/bin/monitor-runtime
+COPY scripts/shells/monitor-tls.sh /usr/local/bin/monitor-tls
+COPY scripts/shells/monitor-db.sh /usr/local/bin/monitor-db
+COPY scripts/shells/monitor-volumes.sh /usr/local/bin/monitor-volumes
+COPY scripts/shells/monitor-queue.sh /usr/local/bin/monitor-queue
+COPY scripts/shells/monitor-slo.sh /usr/local/bin/monitor-slo
+COPY scripts/shells/monitor-log-heatmap.sh /usr/local/bin/monitor-log-heatmap
+COPY scripts/shells/monitor-drift.sh /usr/local/bin/monitor-drift
+COPY scripts/shells/monitor-alerts.sh /usr/local/bin/monitor-alerts
+COPY scripts/shells/env-store.sh /usr/local/bin/env-store
+COPY scripts/shells/profile-chooser.sh /usr/local/bin/profile-chooser
 COPY scripts/shells/init-fpm-pool-dirs.sh /usr/local/bin/init-fpm-pool-dirs
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/http-templates/ /etc/http-templates/
 COPY scripts/docker-templates/ /etc/docker-templates/
 COPY scripts/fpm-templates/ /etc/fpm-templates/
-COPY scripts/logviewer/ /etc/share/logviewer
+COPY scripts/admin-panel/ /etc/share/admin-panel
 
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner
@@ -212,18 +234,22 @@ RUN chmod +x \
       /usr/local/bin/senv \
       /usr/local/bin/domain-which \
       /usr/local/bin/status \
+      /usr/local/bin/monitor-flows \
+      /usr/local/bin/monitor-runtime \
+      /usr/local/bin/monitor-tls \
+      /usr/local/bin/monitor-db \
+      /usr/local/bin/monitor-volumes \
+      /usr/local/bin/monitor-queue \
+      /usr/local/bin/monitor-slo \
+      /usr/local/bin/monitor-log-heatmap \
+      /usr/local/bin/monitor-drift \
+      /usr/local/bin/monitor-alerts \
+      /usr/local/bin/env-store \
+      /usr/local/bin/profile-chooser \
       /usr/local/bin/init-fpm-pool-dirs \
       /usr/local/bin/composer \
   && init-fpm-pool-dirs \
-  && touch /etc/environment \
   && chmod -R 755 /etc/share/vhosts \
-  && chmod 644 /etc/environment \
-  && echo 'ACTIVE_PHP_PROFILE=""' >> /etc/environment \
-  && echo 'APACHE_ACTIVE=""' >> /etc/environment \
-  && echo 'ACTIVE_NODE_PROFILE=""' >> /etc/environment \
-  && echo 'DELETE_PHP_PROFILE=""' >> /etc/environment \
-  && echo 'APACHE_DELETE=""' >> /etc/environment \
-  && echo 'DELETE_NODE_PROFILE=""' >> /etc/environment \
   && mkdir -p /etc/profile.d \
   && { \
       echo 'set linenumbers'; \

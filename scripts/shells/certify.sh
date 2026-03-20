@@ -6,7 +6,7 @@ VHOST_DIR="/etc/share/vhosts"
 
 # User-facing export (only safe artifacts: root CA public cert + chosen P12)
 EXPORT_DIR="${EXPORT_DIR:-/etc/share/certs}"
-EXPORT_P12="${EXPORT_P12:-nginx-client.p12}"          # source (inside CERT_DIR)
+EXPORT_P12="${EXPORT_P12:-lds-client-user.p12}"       # source (inside CERT_DIR)
 EXPORT_P12_NAME="${EXPORT_P12_NAME:-mTLS-user.p12}"   # destination filename (inside EXPORT_DIR)
 EXPORT_ROOTCA_NAME="${EXPORT_ROOTCA_NAME:-rootCA.pem}"
 
@@ -250,26 +250,20 @@ export_user_artifacts() {
   fi
 
   say " - ${DIM}Available in:${NC} $EXPORT_DIR"
-  (ls -la "$EXPORT_DIR" 2>/dev/null || true) | sed 's/^/   /' || true
+  (ls "$EXPORT_DIR" 2>/dev/null || true) | sed 's/^/   /' || true
 }
 
 generate_certificates() {
   declare -A CERT_FILES=(
-    ["Local Common (Server)"]="local.pem local-key.pem"
-    ["Nginx (Server)"]="nginx-server.pem nginx-server-key.pem"
-    ["Nginx (Proxy)"]="nginx-proxy.pem nginx-proxy-key.pem"
-    ["Nginx (Client)"]="nginx-client.pem nginx-client-key.pem --client p12"
-    ["Apache (Server)"]="apache-server.pem apache-server-key.pem"
-    ["Apache (Client)"]="apache-client.pem apache-client-key.pem --client"
+    ["LDS (Server)"]="lds-server.pem lds-server-key.pem"
+    ["LDS (Client Internal)"]="lds-client-internal.pem lds-client-internal-key.pem --client"
+    ["LDS (Client User)"]="lds-client-user.pem lds-client-user-key.pem --client p12"
   )
 
   local labels=(
-    "Local Common (Server)"
-    "Nginx (Server)"
-    "Nginx (Proxy)"
-    "Nginx (Client)"
-    "Apache (Server)"
-    "Apache (Client)"
+    "LDS (Server)"
+    "LDS (Client Internal)"
+    "LDS (Client User)"
   )
 
   local output=""
@@ -329,7 +323,11 @@ generate_certificates() {
     regenerated=$((regenerated + 1))
   done
 
-  chmod 644 "$CERT_DIR"/apache-*.pem 2>/dev/null || true
+  chmod 644 \
+    "$CERT_DIR"/lds-server.pem \
+    "$CERT_DIR"/lds-client-internal.pem \
+    "$CERT_DIR"/lds-client-user.pem \
+    2>/dev/null || true
 
   run_mkcert -install >/dev/null 2>&1 || true
 
@@ -364,7 +362,6 @@ main() {
   echo
 
   generate_certificates
-
   update_container_trust
 
   # Export only user-required artifacts:

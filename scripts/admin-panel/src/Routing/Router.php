@@ -1,0 +1,94 @@
+<?php
+declare(strict_types=1);
+
+namespace AdminPanel\Routing;
+
+final class Router
+{
+    /** @var array<string,array{view:string,title:string}> */
+    private array $routes;
+
+    /** @var array<string,string> */
+    private array $aliases;
+
+    /**
+     * @param array<string,array{view:string,title:string}> $routes
+     * @param array<string,string> $aliases
+     */
+    public function __construct(array $routes, array $aliases = [])
+    {
+        $this->routes = $routes;
+        $this->aliases = $aliases;
+    }
+
+    public static function defaults(): self
+    {
+        return new self(
+            [
+                'dashboard' => ['view' => 'dashboard', 'title' => 'Operations Overview | Admin Panel'],
+                'host-manager' => ['view' => 'host_manager', 'title' => 'Host Manager | Admin Panel'],
+                'automation-manager' => ['view' => 'automation_manager', 'title' => 'Automation Manager | Admin Panel'],
+                'automation-cron' => ['view' => 'automation_cron', 'title' => 'Cron Builder | Admin Panel'],
+                'automation-supervisor' => ['view' => 'automation_supervisor', 'title' => 'Supervisor Builder | Admin Panel'],
+                'logs' => ['view' => 'logs', 'title' => 'Log Streams | Admin Panel'],
+                'docker-logs' => ['view' => 'docker_logs', 'title' => 'Docker Logs | Admin Panel'],
+                'db-health' => ['view' => 'db_health', 'title' => 'DB Health | Admin Panel'],
+                'queue-health' => ['view' => 'queue_health', 'title' => 'Queue / Cron Health | Admin Panel'],
+                'drift-monitor' => ['view' => 'drift_monitor', 'title' => 'Config Drift Monitor | Admin Panel'],
+                'tls-monitor' => ['view' => 'tls_monitor', 'title' => 'TLS / mTLS Monitor | Admin Panel'],
+                'volume-monitor' => ['view' => 'volume_monitor', 'title' => 'Volume Growth / Inode Monitor | Admin Panel'],
+                'live-stats' => ['view' => 'live_stats', 'title' => 'Live Stack Telemetry | Admin Panel'],
+            ],
+            [
+                'docker_logs' => 'docker-logs',
+                'host_manager' => 'host-manager',
+                'automation_manager' => 'automation-manager',
+                'automation_cron' => 'automation-cron',
+                'automation_supervisor' => 'automation-supervisor',
+                'db_health' => 'db-health',
+                'queue_health' => 'queue-health',
+                'drift_monitor' => 'drift-monitor',
+                'tls_monitor' => 'tls-monitor',
+                'volume_monitor' => 'volume-monitor',
+                'live_stats' => 'live-stats',
+            ],
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $server
+     */
+    public function resolve(array $server): ResolvedRoute
+    {
+        $requestUri = (string)($server['REQUEST_URI'] ?? '/');
+        $requestPath = (string)(parse_url($requestUri, PHP_URL_PATH) ?? '/');
+        $requestPath = trim($requestPath);
+        if ($requestPath === '') {
+            $requestPath = '/';
+        }
+
+        $scriptName = (string)($server['SCRIPT_NAME'] ?? '/index.php');
+        $scriptDir = str_replace('\\', '/', dirname($scriptName));
+        if ($scriptDir === '.' || $scriptDir === '/') {
+            $scriptDir = '';
+        }
+
+        if ($scriptDir !== '' && str_starts_with($requestPath, $scriptDir . '/')) {
+            $requestPath = substr($requestPath, strlen($scriptDir));
+        }
+
+        $segments = explode('/', trim($requestPath, '/'));
+        $firstSegment = strtolower((string)($segments[0] ?? ''));
+        $slug = $firstSegment === '' ? 'dashboard' : $firstSegment;
+        $slug = $this->aliases[$slug] ?? $slug;
+
+        if (!isset($this->routes[$slug])) {
+            $slug = 'dashboard';
+        }
+
+        $route = $this->routes[$slug];
+        $path = $slug === 'dashboard' ? '/' : '/' . $slug;
+
+        return new ResolvedRoute($slug, $route['view'], $route['title'], $path);
+    }
+}

@@ -353,6 +353,26 @@ _count_files_recursive() {
   find "$base" -type f -name "$pattern" 2>/dev/null | wc -l | awk '{print $1}'
 }
 
+_count_files_depth_limited() {
+  local base="${1:-}" pattern="${2:-*}" max_depth="${3:-3}"
+  [[ -d "$base" ]] || {
+    printf "0"
+    return 0
+  }
+
+  if [[ "$max_depth" == "all" || "$max_depth" == "-1" ]]; then
+    _count_files_recursive "$base" "$pattern"
+    return 0
+  fi
+
+  if [[ "$max_depth" =~ ^[0-9]+$ ]]; then
+    find "$base" -mindepth 1 -maxdepth "$max_depth" -type f -name "$pattern" 2>/dev/null | wc -l | awk '{print $1}'
+    return 0
+  fi
+
+  _count_files_recursive "$base" "$pattern"
+}
+
 _count_dir_entries() {
   local base="${1:-}"
   [[ -d "$base" ]] || {
@@ -360,6 +380,28 @@ _count_dir_entries() {
     return 0
   }
   find "$base" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | awk '{print $1}'
+}
+
+_count_mount_files_for_status() {
+  local base="${1:-}" entry_count="${2:-0}"
+  [[ -d "$base" ]] || {
+    printf "0"
+    return 0
+  }
+
+  # Deep recursive scans over bind mounts are very slow on some hosts
+  # (notably Docker Desktop on Windows). Keep status responsive by using
+  # shallow counts unless explicitly requested.
+  if [[ "${STATUS_MOUNT_DEEP_COUNT:-0}" == "1" ]]; then
+    _count_files_recursive "$base" "*"
+    return 0
+  fi
+
+  if [[ "$entry_count" =~ ^[0-9]+$ ]]; then
+    printf "%s" "$entry_count"
+  else
+    printf "0"
+  fi
 }
 
 _status_project_mount_checks_rows() {
@@ -371,13 +413,12 @@ _status_project_mount_checks_rows() {
     "rootCA|/etc/share/rootCA|dir_nonempty"
     "nginx_vhosts|/etc/share/vhosts/nginx|dir_nonempty"
     "apache_vhosts|/etc/share/vhosts/apache|dir_nonempty"
-    "node_vhosts|/etc/share/vhosts/node|dir"
+    "node_vhosts|/etc/share/vhosts/docker-compose|dir"
     "fpm_pools|/etc/share/vhosts/fpm|dir_nonempty"
     "sops_repo|/etc/share/vhosts/sops|dir"
     "sops_global|/etc/share/sops/global|dir"
     "sops_keys|/etc/share/sops/keys|dir"
     "sops_config|/etc/share/sops/config|dir"
-    "logviewer|/etc/share/logviewer|dir"
   )
 
   local spec key path kind exists entry_count file_count state flag
@@ -404,10 +445,14 @@ _status_project_mount_checks_rows() {
         if [[ -d "$path" ]]; then
           exists=1
           entry_count="$(_count_dir_entries "$path")"
-          file_count="$(_count_files_recursive "$path" "*")"
+          file_count="$(_count_mount_files_for_status "$path" "$entry_count")"
           if [[ "$entry_count" =~ ^[0-9]+$ ]] && ((entry_count > 0)); then
             state="PASS"
-            flag="files=$file_count"
+            if [[ "${STATUS_MOUNT_DEEP_COUNT:-0}" == "1" ]]; then
+              flag="files=$file_count"
+            else
+              flag="entries=$entry_count"
+            fi
           else
             state="WARN"
             flag="empty"
@@ -1200,11 +1245,12 @@ _status_checks() {
   local containers_st="WARN" containers_note=""
   local nginx_dir="/etc/share/vhosts/nginx"
   local apache_dir="/etc/share/vhosts/apache"
-  local node_dir="/etc/share/vhosts/node"
+  local node_dir="/etc/share/vhosts/docker-compose"
   local fpm_dir="/etc/share/vhosts/fpm"
   local cert_dir="/etc/share/certs"
   local rootca_dir="/etc/share/rootCA"
   local logs_dir="/global/log"
+  local logs_scan_depth="${STATUS_LOG_SCAN_MAX_DEPTH:-3}"
 
   local c_nginx c_apache c_node c_fpm c_certs c_rootca c_logs_log c_logs_gz c_logs_total
   c_nginx="$(_count_glob_matches "$nginx_dir" "*.conf")"
@@ -1213,8 +1259,8 @@ _status_checks() {
   c_fpm="$(_count_glob_matches "$fpm_dir" "*.conf")"
   c_certs="$(_count_glob_matches "$cert_dir" "*")"
   c_rootca="$(_count_glob_matches "$rootca_dir" "*")"
-  c_logs_log="$(_count_files_recursive "$logs_dir" "*.log")"
-  c_logs_gz="$(_count_files_recursive "$logs_dir" "*.gz")"
+  c_logs_log="$(_count_files_depth_limited "$logs_dir" "*.log" "$logs_scan_depth")"
+  c_logs_gz="$(_count_files_depth_limited "$logs_dir" "*.gz" "$logs_scan_depth")"
   c_logs_total=$((c_logs_log + c_logs_gz))
 
   local -a missing_dirs=()
@@ -1299,18 +1345,16 @@ _status_checks() {
 
   local proj_state
   proj_state="$(_summary_state "$proj_pass" "$proj_warn" "$proj_fail")"
-  printf "  %bProject test:%b %s  (%d pass, %d warn, %d fail)\n" \
-    "$CYAN" "$NC" "$(_state_badge "$proj_state")" "$proj_pass" "$proj_warn" "$proj_fail"
-  printf "    - containers: %s\n" "$(_state_badge "$containers_st")"
-  printf "      - total: %s\n" "$total"
-  printf "      - running: %s\n" "$running"
-  printf "      - healthy: %s\n" "$healthy"
-  printf "      - no_health: %s\n" "$no_health"
-  printf "      - starting: %s\n" "$starting"
-  printf "      - unhealthy: %s\n" "$unhealthy"
-  printf "      - restarting: %s\n" "$restarting"
-  printf "      - exited: %s\n" "$exited"
-  printf "      - other: %s\n" "$other"
+  printf "  %bProject containers:%b %s\n" "$CYAN" "$NC" "$(_state_badge "$containers_st")"
+  printf "    - total: %s\n" "$total"
+  printf "    - running: %s\n" "$running"
+  printf "    - healthy: %s\n" "$healthy"
+  printf "    - no_health: %s\n" "$no_health"
+  printf "    - starting: %s\n" "$starting"
+  printf "    - unhealthy: %s\n" "$unhealthy"
+  printf "    - restarting: %s\n" "$restarting"
+  printf "    - exited: %s\n" "$exited"
+  printf "    - other: %s\n" "$other"
   if ((${#bad_lines[@]})); then
     local -a bad_names=()
     local row bn
@@ -1320,31 +1364,32 @@ _status_checks() {
     done
     local w_name
     w_name="$(_container_name_col_width 28 "${bad_names[@]}")"
-    printf "    - container_issues:\n"
+    printf "    - issues:\n"
     for row in "${bad_lines[@]}"; do
       local bs bh
       IFS='|' read -r bn bs bh <<<"$row"
-      printf "      - %-*s  state=%s health=%s\n" "$w_name" "$(_fit_container_name "$bn" "$w_name")" "${bs:-"-"}" "${bh:-"-"}"
+      printf "      - %-*s  state=%s health=%s\n" \
+        "$w_name" "$(_fit_container_name "$bn" "$w_name")" "${bs:-"-"}" "${bh:-"-"}"
     done
   else
-    printf "    - container_issues: (none)\n"
+    printf "    - issues: (none)\n"
   fi
-  printf "    - artifacts: %s\n" "$(_state_badge "$artifacts_st")"
-  printf "      - nginx_conf: %s\n" "$c_nginx"
-  printf "      - apache_conf: %s\n" "$c_apache"
-  printf "      - node_yaml: %s\n" "$c_node"
-  printf "      - fpm_conf: %s\n" "$c_fpm"
-  printf "      - cert_files: %s\n" "$c_certs"
-  printf "      - rootca_files: %s\n" "$c_rootca"
-  printf "      - logs_total: %s\n" "$c_logs_total"
-  printf "      - logs_plain: %s\n" "$c_logs_log"
-  printf "      - logs_gz: %s\n" "$c_logs_gz"
+  printf "  %bProject artifacts:%b %s\n" "$CYAN" "$NC" "$(_state_badge "$artifacts_st")"
+  printf "    - nginx_conf: %s\n" "$c_nginx"
+  printf "    - apache_conf: %s\n" "$c_apache"
+  printf "    - node_yaml: %s\n" "$c_node"
+  printf "    - fpm_conf: %s\n" "$c_fpm"
+  printf "    - cert_files: %s\n" "$c_certs"
+  printf "    - rootca_files: %s\n" "$c_rootca"
+  printf "    - logs_total: %s\n" "$c_logs_total"
+  printf "    - logs_plain: %s\n" "$c_logs_log"
+  printf "    - logs_gz: %s\n" "$c_logs_gz"
   if ((${#missing_dirs[@]})); then
-    printf "      - missing_dirs: %s\n" "${missing_dirs[*]}"
+    printf "    - missing_dirs: %s\n" "${missing_dirs[*]}"
   else
-    printf "      - missing_dirs: (none)\n"
+    printf "    - missing_dirs: (none)\n"
   fi
-  printf "    - mounts: %s  %s\n" "$(_state_badge "$mounts_st")" "$mounts_note"
+  printf "  %bProject mounts:%b %s  %s\n" "$CYAN" "$NC" "$(_state_badge "$mounts_st")" "$mounts_note"
   local w_mount=8
   for mount_row in "${mount_rows[@]}"; do
     IFS='|' read -r m_key _ _ _ _ _ _ _ <<<"$mount_row"
@@ -1354,7 +1399,7 @@ _status_checks() {
   for mount_row in "${mount_rows[@]}"; do
     IFS='|' read -r m_key m_path m_kind m_exists m_entries m_files m_state m_flag <<<"$mount_row"
     local m_msg="$m_flag"
-    printf "      - %-*s  %s  %s\n" \
+    printf "    - %-*s  %s  %s\n" \
       "$w_mount" "$m_key" "$(_state_badge "$m_state")" "$m_msg"
   done
 }
@@ -1515,6 +1560,72 @@ _status_json_stats() {
     printf '}'
   done
   printf ']}'
+}
+
+_status_json_containers_core() {
+  local -a cids=() ctrs=()
+  mapfile -t cids < <(_status_project_cids)
+  if ((${#cids[@]})); then
+    mapfile -t ctrs < <(
+      docker inspect -f '{{.Name}}|{{ index .Config.Labels "com.docker.compose.service" }}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+        "${cids[@]}" 2>/dev/null |
+        sed 's#^/##' |
+        sed '/^[[:space:]]*$/d' |
+        sort
+    )
+  fi
+
+  local total running
+  total=${#ctrs[@]}
+  running=0
+  if ((total)); then
+    local line _n _svc st _h
+    for line in "${ctrs[@]}"; do
+      IFS='|' read -r _n _svc st _h <<<"$line"
+      [[ "$st" == "running" ]] && ((++running))
+    done
+  fi
+
+  printf '{'
+  printf '"summary":{"running":%s,"total":%s},' "$running" "$total"
+  printf '"items":['
+  local first=1 line name svc state health health_disp
+  for line in "${ctrs[@]}"; do
+    IFS='|' read -r name svc state health <<<"$line"
+    ((first)) || printf ","
+    first=0
+    health_disp="${health:-}"
+    [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp="-"
+    local health_icon="!"
+    if [[ "$health_disp" == "healthy" ]]; then
+      health_icon="✓"
+    elif [[ "$health_disp" == "unhealthy" ]]; then
+      health_icon="×"
+    fi
+    printf '{'
+    printf '"name":"%s",' "$(_json_escape "$name")"
+    printf '"service":"%s",' "$(_json_escape "$svc")"
+    printf '"state":"%s",' "$(_json_escape "$state")"
+    printf '"health":"%s",' "$(_json_escape "$health_disp")"
+    printf '"health_icon":"%s"' "$(_json_escape "$health_icon")"
+    printf '}'
+  done
+  printf ']}'
+}
+
+_status_json_containers_merged() {
+  local stats_svc="${1:-}"
+  local core_json top_consumers_json stats_json
+
+  core_json="$(_status_json_containers_core 2>/dev/null || printf '{"summary":{"running":0,"total":0},"items":[]}')"
+  top_consumers_json="$(_status_json_top_consumers 2>/dev/null || printf '{"all":[],"by_mem":[],"by_cpu":[]}')"
+  stats_json="$(_status_json_stats "$stats_svc" 2>/dev/null || printf '{"service_filter":"","items":[]}')"
+
+  printf '{'
+  printf '"core":%s,' "$core_json"
+  printf '"top_consumers":%s,' "$top_consumers_json"
+  printf '"stats":%s' "$stats_json"
+  printf '}'
 }
 
 _status_json_disk() {
@@ -2050,11 +2161,12 @@ _status_json_checks() {
   local containers_st="WARN" containers_note=""
   local nginx_dir="/etc/share/vhosts/nginx"
   local apache_dir="/etc/share/vhosts/apache"
-  local node_dir="/etc/share/vhosts/node"
+  local node_dir="/etc/share/vhosts/docker-compose"
   local fpm_dir="/etc/share/vhosts/fpm"
   local cert_dir="/etc/share/certs"
   local rootca_dir="/etc/share/rootCA"
   local logs_dir="/global/log"
+  local logs_scan_depth="${STATUS_LOG_SCAN_MAX_DEPTH:-3}"
 
   local c_nginx c_apache c_node c_fpm c_certs c_rootca c_logs_log c_logs_gz c_logs_total
   c_nginx="$(_count_glob_matches "$nginx_dir" "*.conf")"
@@ -2063,8 +2175,8 @@ _status_json_checks() {
   c_fpm="$(_count_glob_matches "$fpm_dir" "*.conf")"
   c_certs="$(_count_glob_matches "$cert_dir" "*")"
   c_rootca="$(_count_glob_matches "$rootca_dir" "*")"
-  c_logs_log="$(_count_files_recursive "$logs_dir" "*.log")"
-  c_logs_gz="$(_count_files_recursive "$logs_dir" "*.gz")"
+  c_logs_log="$(_count_files_depth_limited "$logs_dir" "*.log" "$logs_scan_depth")"
+  c_logs_gz="$(_count_files_depth_limited "$logs_dir" "*.gz" "$logs_scan_depth")"
   c_logs_total=$((c_logs_log + c_logs_gz))
 
   local -a missing_dirs=()
@@ -2236,14 +2348,13 @@ _status_json_checks() {
 _status_full_json() {
   local stats_svc="${1:-}"
   local generated_at core_json
-  local problems_json top_consumers_json stats_json disk_json volumes_json
+  local problems_json containers_json disk_json volumes_json
   local networks_json probes_json recent_errors_json drift_json checks_json
 
   generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
   core_json="$(_status_core 1 0 2>/dev/null || printf '{}')"
   problems_json="$(_status_json_problems 2>/dev/null || printf '{"count":0,"items":[]}')"
-  top_consumers_json="$(_status_json_top_consumers 2>/dev/null || printf '{"all":[],"by_mem":[],"by_cpu":[]}')"
-  stats_json="$(_status_json_stats "$stats_svc" 2>/dev/null || printf '{"service_filter":"","items":[]}')"
+  containers_json="$(_status_json_containers_merged "$stats_svc" 2>/dev/null || printf '{"core":{"summary":{"running":0,"total":0},"items":[]},"top_consumers":{"all":[],"by_mem":[],"by_cpu":[]},"stats":{"service_filter":"","items":[]}}')"
   disk_json="$(_status_json_disk 2>/dev/null || printf '{"items":[]}')"
   volumes_json="$(_status_json_volumes 2>/dev/null || printf '{"size_table_available":false,"items":[]}')"
   networks_json="$(_status_json_networks 2>/dev/null || printf '{"networks":[],"container_ips":[],"matrix":{"columns":[],"rows":[]}}')"
@@ -2258,8 +2369,7 @@ _status_full_json() {
   printf '"core":%s,' "${core_json}"
   printf '"sections":{'
   printf '"problems":%s,' "${problems_json}"
-  printf '"top_consumers":%s,' "${top_consumers_json}"
-  printf '"stats":%s,' "${stats_json}"
+  printf '"containers":%s,' "${containers_json}"
   printf '"disk":%s,' "${disk_json}"
   printf '"volumes":%s,' "${volumes_json}"
   printf '"networks":%s,' "${networks_json}"
@@ -2366,26 +2476,8 @@ _status_core() {
     printf "\"profiles\":\"%s\"," "$(_json_escape "$profiles")"
     printf "\"summary\":{\"running\":%s,\"total\":%s}," "$running" "$total"
 
-    printf "\"containers\":["
-    local first=1 line name svc state health
-    for line in "${ctrs[@]}"; do
-      IFS='|' read -r name svc state health <<<"$line"
-      ((first)) || printf ","
-      first=0
-      local health_disp="${health:-}"
-      [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp="-"
-      printf "{"
-      printf "\"name\":\"%s\"," "$(_json_escape "$name")"
-      printf "\"service\":\"%s\"," "$(_json_escape "$svc")"
-      printf "\"state\":\"%s\"," "$(_json_escape "$state")"
-      printf "\"health\":\"%s\"," "$(_json_escape "$health_disp")"
-      printf "\"health_icon\":\"%s\"" "$(_json_escape "$(_health_icon "$health_disp")")"
-      printf "}"
-    done
-    printf "],"
-
     printf "\"ports\":["
-    first=1
+    local first=1
     local p
     for p in "${port_summary[@]}"; do
       [[ -n "$p" ]] || continue
@@ -2508,16 +2600,199 @@ _status_core() {
   fi
 }
 
+_status_docker_logs_json() {
+  local svc_filter="${1:-}" since="${2:-}" grep_pat="${3:-}" tail="${4:-80}"
+  local project project_display
+  project="$(lds_project)"
+  project_display="${__STATUS_PROJECT_DISPLAY:-$project}"
+
+  [[ "$tail" =~ ^[0-9]+$ ]] || tail=80
+  ((tail < 1)) && tail=1
+  ((tail > 500)) && tail=500
+
+  svc_filter="$(normalize_service "$svc_filter")"
+  if [[ "$svc_filter" == "all" ]]; then
+    svc_filter=""
+  fi
+
+  _json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf "%s" "$s"
+  }
+
+  local -a cids=() ctrs=()
+  mapfile -t cids < <(_status_project_cids)
+  if ((${#cids[@]})); then
+    mapfile -t ctrs < <(
+      docker inspect -f '{{.Name}}|{{ index .Config.Labels "com.docker.compose.service" }}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+        "${cids[@]}" 2>/dev/null |
+        sed 's#^/##' |
+        sed '/^[[:space:]]*$/d' |
+        sort
+    )
+  fi
+
+  declare -A svc_seen=()
+  local -a services=()
+  local line n s st h
+  for line in "${ctrs[@]}"; do
+    IFS='|' read -r n s st h <<<"$line"
+    s="$(normalize_service "$s")"
+    [[ -n "$s" ]] || continue
+    if [[ -z "${svc_seen[$s]+x}" ]]; then
+      svc_seen["$s"]=1
+      services+=("$s")
+    fi
+  done
+  if ((${#services[@]})); then
+    mapfile -t services < <(printf '%s\n' "${services[@]}" | sort -u)
+  fi
+
+  local generated_at
+  generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
+
+  printf '{'
+  printf '"ok":true,'
+  printf '"generated_at":"%s",' "$(_json_escape "$generated_at")"
+  printf '"project":"%s",' "$(_json_escape "$project_display")"
+  printf '"filters":{"service":"%s","since":"%s","grep":"%s","tail":%s},' \
+    "$(_json_escape "$svc_filter")" "$(_json_escape "$since")" "$(_json_escape "$grep_pat")" "$tail"
+
+  printf '"services_available":['
+  local sf=1 svc
+  for svc in "${services[@]}"; do
+    ((sf)) || printf ","
+    sf=0
+    printf '"%s"' "$(_json_escape "$svc")"
+  done
+  printf '],'
+
+  printf '"groups":['
+  local gf=1
+  for svc in "${services[@]}"; do
+    [[ -n "$svc_filter" && "$svc" != "$svc_filter" ]] && continue
+
+    local -a svc_rows=()
+    for line in "${ctrs[@]}"; do
+      IFS='|' read -r n s st h <<<"$line"
+      s="$(normalize_service "$s")"
+      [[ "$s" == "$svc" ]] || continue
+      svc_rows+=("$n|$st|$h")
+    done
+    ((${#svc_rows[@]})) || continue
+
+    ((gf)) || printf ","
+    gf=0
+
+    printf '{'
+    printf '"service":"%s",' "$(_json_escape "$svc")"
+
+    printf '"containers":['
+    local cf=1 row cn cst ch
+    for row in "${svc_rows[@]}"; do
+      IFS='|' read -r cn cst ch <<<"$row"
+      [[ -n "$ch" && "$ch" != "null" ]] || ch="-"
+      ((cf)) || printf ","
+      cf=0
+      printf '{"name":"%s","state":"%s","health":"%s"}' \
+        "$(_json_escape "$cn")" "$(_json_escape "${cst:--}")" "$(_json_escape "$ch")"
+    done
+    printf '],'
+
+    local -a all_lines=()
+    for row in "${svc_rows[@]}"; do
+      IFS='|' read -r cn cst ch <<<"$row"
+      local -a cmd=(docker logs --timestamps --tail "$tail")
+      [[ -n "$since" ]] && cmd+=(--since "$since")
+      cmd+=("$cn")
+
+      local -a raw_lines=()
+      mapfile -t raw_lines < <("${cmd[@]}" 2>&1 || true)
+
+      local ln
+      for ln in "${raw_lines[@]}"; do
+        [[ -n "$ln" ]] || continue
+        if [[ -n "$grep_pat" ]]; then
+          shopt -s nocasematch
+          [[ "$ln" == *"$grep_pat"* ]] || {
+            shopt -u nocasematch
+            continue
+          }
+          shopt -u nocasematch
+        fi
+        all_lines+=("[$cn] $ln")
+      done
+    done
+
+    printf '"lines":['
+    local lf=1 ln
+    for ln in "${all_lines[@]}"; do
+      ((lf)) || printf ","
+      lf=0
+      printf '"%s"' "$(_json_escape "$ln")"
+    done
+    printf '],'
+    printf '"line_count":%s' "${#all_lines[@]}"
+    printf '}'
+  done
+  printf ']'
+  printf '}\n'
+}
+
 cmd_status() {
-  local json=0 quiet=0
+  local json=0 quiet=0 docker_logs_json=0
+  local logs_service="" logs_since="" logs_grep="" logs_tail="80"
   while [[ "${1:-}" ]]; do
     case "$1" in
       --json) json=1; shift ;;
+      --docker-logs-json) docker_logs_json=1; shift ;;
+      --service)
+        if ((docker_logs_json)); then
+          logs_service="${2:-}"
+          shift 2
+        else
+          break
+        fi
+        ;;
+      --since)
+        if ((docker_logs_json)); then
+          logs_since="${2:-}"
+          shift 2
+        else
+          break
+        fi
+        ;;
+      --grep)
+        if ((docker_logs_json)); then
+          logs_grep="${2:-}"
+          shift 2
+        else
+          break
+        fi
+        ;;
+      --tail)
+        if ((docker_logs_json)); then
+          logs_tail="${2:-}"
+          shift 2
+        else
+          break
+        fi
+        ;;
       --quiet|-q) quiet=1; shift ;;
       -h|--help) usage; return 0 ;;
       *) break ;;
     esac
   done
+
+  if ((docker_logs_json)); then
+    _status_docker_logs_json "$logs_service" "$logs_since" "$logs_grep" "$logs_tail"
+    return 0
+  fi
 
   if ((json)); then
     _status_full_json "${1:-}"
@@ -2532,10 +2807,11 @@ cmd_status() {
   printf "\n%bProblems:%b\n" "$CYAN" "$NC"
   _status_show_problems || true
 
-  printf "\n%bTop consumers:%b\n" "$CYAN" "$NC"
+  printf "\n%bContainer runtime:%b\n" "$CYAN" "$NC"
+  printf "  %bTop consumers:%b\n" "$BOLD" "$NC"
   _status_show_top_consumers || true
 
-  printf "\n%bStats:%b\n" "$CYAN" "$NC"
+  printf "\n  %bStats:%b\n" "$BOLD" "$NC"
   _status_show_stats "${1:-}" || true
 
   printf "\n%bDisk:%b\n" "$CYAN" "$NC"
@@ -2564,10 +2840,12 @@ usage() {
   cat <<'EOF'
 Usage:
   status [--json] [--quiet] [service]
+  status --docker-logs-json [--service <svc>] [--since <dur>] [--grep <text>] [--tail <n>]
 
 Examples:
   status
   status --json
+  status --docker-logs-json --since 30m --tail 120
   status php82
   STATUS_PROJECT=LocalDevStack status
 EOF

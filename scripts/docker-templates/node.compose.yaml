@@ -36,7 +36,7 @@ services:
         - "${PROJECT_DIR:-./../application}{{DOC_ROOT}}:/app"
         - "./configuration/ssh:/home/${USER}/.ssh:ro"
         - lds_ssl_roots:/etc/share/rootCA:ro
-        - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+        - "${HOME}/.gitconfig:/home/${USER}/.gitconfig"
         - "./logs/node:/var/log/node-app"
       depends_on:
         - server-tools

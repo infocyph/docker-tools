@@ -133,6 +133,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     SOPS_BASE_DIR=/etc/share/sops \
     SOPS_KEYS_DIR=/etc/share/sops/keys \
     SOPS_CFG_DIR=/etc/share/sops/config \
+    SOPS_GLOBAL_DIR=/etc/share/sops/global \
     SOPS_REPO_DIR=/etc/share/vhosts/sops \
     ADMIN_PANEL_AUTOSTART=1 \
     ADMIN_PANEL_PORT=9911 \
@@ -207,6 +208,7 @@ COPY scripts/shells/env-store.sh /usr/local/bin/env-store
 COPY scripts/shells/profile-chooser.sh /usr/local/bin/profile-chooser
 COPY scripts/shells/init-fpm-pool-dirs.sh /usr/local/bin/init-fpm-pool-dirs
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
+COPY scripts/tests/ /etc/share/scripts/tests/
 COPY scripts/http-templates/ /etc/http-templates/
 COPY scripts/docker-templates/ /etc/docker-templates/
 COPY scripts/fpm-templates/ /etc/fpm-templates/
@@ -252,6 +254,7 @@ RUN chmod +x \
       /usr/local/bin/profile-chooser \
       /usr/local/bin/init-fpm-pool-dirs \
       /usr/local/bin/composer \
+      /etc/share/scripts/tests/senv-smoke.sh \
   && init-fpm-pool-dirs \
   && chmod -R 755 /etc/share/vhosts \
   && mkdir -p /etc/profile.d \

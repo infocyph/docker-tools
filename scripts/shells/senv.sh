@@ -56,9 +56,6 @@ REPO_LOCAL_YAML="./.sops.yaml"
 DEFAULT_GLOBAL_KEY="$SOPS_GLOBAL_DIR/age.keys"
 DEFAULT_FALLBACK_YAML="$SOPS_GLOBAL_DIR/.sops.yaml"
 
-# Back-compat (old layout)
-OLD_GLOBAL_KEY="$SOPS_BASE_DIR/age.keys"
-OLD_FALLBACK_YAML="$SOPS_BASE_DIR/.sops.yaml"
 
 safe_mkdir_p() { mkdir -p "$1" 2>/dev/null || true; }
 
@@ -284,7 +281,7 @@ ensure_project_default() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Choose key / choose config (with new global/ + back-compat)
+# Choose key / choose config (global-only model)
 # ─────────────────────────────────────────────────────────────────────────────
 choose_key_file() {
   if [[ -n "${SOPS_AGE_KEY_FILE:-}" ]]; then
@@ -304,10 +301,6 @@ choose_key_file() {
     echo "$DEFAULT_GLOBAL_KEY"
     return
   }
-  [[ -f "$OLD_GLOBAL_KEY" ]] && {
-    echo "$OLD_GLOBAL_KEY"
-    return
-  }
   echo "$DEFAULT_GLOBAL_KEY"
 }
 
@@ -319,10 +312,6 @@ choose_global_fallback_yaml_path() {
 
   [[ -f "$DEFAULT_FALLBACK_YAML" ]] && {
     echo "$DEFAULT_FALLBACK_YAML"
-    return
-  }
-  [[ -f "$OLD_FALLBACK_YAML" ]] && {
-    echo "$OLD_FALLBACK_YAML"
     return
   }
   echo "$DEFAULT_FALLBACK_YAML"
@@ -819,8 +808,6 @@ keys selection order:
        $SOPS_KEYS_DIR/<project>.age.keys
   3) Global fallback (preferred):
        $SOPS_GLOBAL_DIR/age.keys
-  4) Back-compat global key (if present):
-       $SOPS_BASE_DIR/age.keys
 
 Config selection order:
   1) Local config (repo):
@@ -829,8 +816,6 @@ Config selection order:
        $SOPS_CFG_DIR/<project>.sops.yaml
   3) Global config (preferred):
        $SOPS_GLOBAL_DIR/.sops.yaml
-  4) Back-compat global config (if present):
-       $SOPS_BASE_DIR/.sops.yaml
   Override global config path with:
        SOPS_CONFIG_FILE=/path/to/.sops.yaml
 

@@ -34,7 +34,7 @@ services:
         datastore: {}
       volumes:
         - "${PROJECT_DIR:-./../application}{{DOC_ROOT}}:/app"
-        - lds_git_config:/home/${USER}/.gitconfig:ro
+        - lds_git_config:/git-config:ro
         - lds_ssl_roots:/etc/share/rootCA:ro
         - "./configuration/ssh:/home/${USER}/.ssh:ro"
         - "./logs/node:/var/log/node-app"

@@ -146,6 +146,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     ADMIN_PANEL_SUPERVISOR_DIR=/etc/share/scheduler/supervisor \
     ADMIN_PANEL_RUNNER_CONTAINER=RUNNER \
     ADMIN_PANEL_RUNNER_SUPERVISOR_CONF=/etc/supervisor/supervisord.conf \
+    GIT_CONFIG_GLOBAL=/git-config/.gitconfig \
     BANNER_SHOWN=0
 
 RUN apk add --no-cache \
@@ -172,6 +173,7 @@ RUN apk add --no-cache \
       /etc/share/scheduler/cron-jobs \
       /etc/share/scheduler/supervisor \
       /etc/share/certs \
+      /git-config \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*
 

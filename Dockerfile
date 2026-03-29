@@ -212,12 +212,14 @@ COPY scripts/admin-panel/ /etc/share/admin-panel
 
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner
+ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/git-default.sh /usr/local/bin/git-default
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/ChromaCat/chromacat /usr/local/bin/chromacat
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Sqlite/sqlitex /usr/local/bin/sqlitex
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Network/netx /usr/local/bin/netx
 
 RUN chmod +x \
       /usr/local/bin/gitx \
+      /usr/local/bin/git-default \
       /usr/local/bin/certify \
       /usr/local/bin/mkhost \
       /usr/local/bin/rmhost \

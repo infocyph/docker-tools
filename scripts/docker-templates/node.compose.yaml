@@ -35,6 +35,7 @@ services:
       volumes:
         - "${PROJECT_DIR:-./../application}{{DOC_ROOT}}:/app"
         - "./configuration/ssh:/home/${USER}/.ssh:ro"
+        - lds_git_config:/home/${USER}/.gitconfig:ro
         - lds_ssl_roots:/etc/share/rootCA:ro
         - "./logs/node:/var/log/node-app"
       depends_on:

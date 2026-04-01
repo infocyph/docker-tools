@@ -350,14 +350,6 @@ declare(strict_types=1);
       msgEl.textContent = t;
     }
 
-    function showRebootAlert(payload) {
-      if (!payload || !payload.reboot_required) {
-        return;
-      }
-      var rebootCmd = String(payload.reboot_command || "lds reboot").trim() || "lds reboot";
-      window.alert("Host change applied. Reboot required: `" + rebootCmd + "`");
-    }
-
     function showFormError(text) {
       if (!formErrEl) {
         return;
@@ -766,7 +758,6 @@ declare(strict_types=1);
             throw new Error(body.message || ("save failed (" + String(res.status) + ")"));
           }
           showMessage("success", body.message || (original ? "Host updated." : "Host added."));
-          showRebootAlert(body);
           var m = getModal();
           if (m) {
             m.hide();

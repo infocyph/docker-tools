@@ -13,8 +13,11 @@ set -euo pipefail
 ###############################################################################
 readonly RUNTIME_VERSIONS_DB="${RUNTIME_VERSIONS_DB:-/etc/share/runtime-versions.json}"
 readonly MAX_VERSIONS="${MAX_VERSIONS:-16}"
-readonly NGINX_TEMPLATE_DIR="${NGINX_TEMPLATE_DIR:-/etc/http-templates/nginx}"
-readonly APACHE_TEMPLATE_DIR="${APACHE_TEMPLATE_DIR:-/etc/http-templates/apache}"
+readonly HTTP_TEMPLATE_DIR="${HTTP_TEMPLATE_DIR:-/etc/http-templates}"
+readonly PHP_NGINX_TEMPLATE_DIR="${PHP_NGINX_TEMPLATE_DIR:-${HTTP_TEMPLATE_DIR}/php/nginx}"
+readonly PHP_APACHE_TEMPLATE_DIR="${PHP_APACHE_TEMPLATE_DIR:-${HTTP_TEMPLATE_DIR}/php/apache}"
+readonly NODE_NGINX_TEMPLATE_DIR="${NODE_NGINX_TEMPLATE_DIR:-${HTTP_TEMPLATE_DIR}/node/nginx}"
+readonly PROXYIP_NGINX_TEMPLATE_DIR="${PROXYIP_NGINX_TEMPLATE_DIR:-${HTTP_TEMPLATE_DIR}/proxyip/nginx}"
 readonly DOCKER_TEMPLATE_DIRECTORY="${DOCKER_TEMPLATE_DIRECTORY:-/etc/docker-templates}"
 readonly VHOST_NGINX_DIR="${VHOST_NGINX_DIR:-/etc/share/vhosts/nginx}"
 readonly VHOST_APACHE_DIR="${VHOST_APACHE_DIR:-/etc/share/vhosts/apache}"
@@ -58,17 +61,19 @@ require_versions_db() {
 
 # Preflight templates (fail fast; do NOT print template directory)
 required_tpls=(
-  "nginx:redirect.nginx.conf"
-  "nginx:http.nginx.conf"
-  "nginx:https.nginx.conf"
-  "nginx:http.node.nginx.conf"
-  "nginx:https.node.nginx.conf"
-  "nginx:proxy-http.nginx.conf"
-  "nginx:proxy-https.nginx.conf"
-  "nginx:proxy-fixedip-http.nginx.conf"
-  "nginx:proxy-fixedip-https.nginx.conf"
-  "apache:http.apache.conf"
-  "apache:https.apache.conf"
+  "php-nginx:redirect.nginx.conf"
+  "php-nginx:http.nginx.conf"
+  "php-nginx:https.nginx.conf"
+  "php-nginx:proxy-http.nginx.conf"
+  "php-nginx:proxy-https.nginx.conf"
+  "php-apache:http.apache.conf"
+  "php-apache:https.apache.conf"
+  "node-nginx:redirect.nginx.conf"
+  "node-nginx:http.node.nginx.conf"
+  "node-nginx:https.node.nginx.conf"
+  "proxyip-nginx:redirect.nginx.conf"
+  "proxyip-nginx:proxy-fixedip-http.nginx.conf"
+  "proxyip-nginx:proxy-fixedip-https.nginx.conf"
   "node:node.compose.yaml"
   "php:php.compose.yaml"
 )
@@ -79,8 +84,10 @@ preflight_templates() {
     kind="${entry%%:*}"
     f="${entry#*:}"
     case "$kind" in
-      nginx)  dir="$NGINX_TEMPLATE_DIR" ;;
-      apache) dir="$APACHE_TEMPLATE_DIR" ;;
+      php-nginx) dir="$PHP_NGINX_TEMPLATE_DIR" ;;
+      php-apache) dir="$PHP_APACHE_TEMPLATE_DIR" ;;
+      node-nginx) dir="$NODE_NGINX_TEMPLATE_DIR" ;;
+      proxyip-nginx) dir="$PROXYIP_NGINX_TEMPLATE_DIR" ;;
       node|php) dir="$DOCKER_TEMPLATE_DIRECTORY" ;;
       *) err "Error: invalid template kind: $kind"; exit 1 ;;
     esac
@@ -779,12 +786,16 @@ create_configuration() {
     env_set "APACHE_ACTIVE" ""
     # Nginx-only: php via fastcgi, node via proxy, proxyip via pinned upstream proxy
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then
-      render_template "${NGINX_TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
+      case "$APP_TYPE" in
+        node)    render_template "${NODE_NGINX_TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf" ;;
+        proxyip) render_template "${PROXYIP_NGINX_TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf" ;;
+        *)       render_template "${PHP_NGINX_TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf" ;;
+      esac
     elif [[ "$KEEP_HTTP" == "y" || "$ENABLE_HTTPS" == "n" ]]; then
       case "$APP_TYPE" in
-        node)    render_template "${NGINX_TEMPLATE_DIR}/http.node.nginx.conf" "$nginx_conf" ;;
-        proxyip) render_template "${NGINX_TEMPLATE_DIR}/proxy-fixedip-http.nginx.conf" "$nginx_conf" ;;
-        *)       render_template "${NGINX_TEMPLATE_DIR}/http.nginx.conf" "$nginx_conf" ;;
+        node)    render_template "${NODE_NGINX_TEMPLATE_DIR}/http.node.nginx.conf" "$nginx_conf" ;;
+        proxyip) render_template "${PROXYIP_NGINX_TEMPLATE_DIR}/proxy-fixedip-http.nginx.conf" "$nginx_conf" ;;
+        *)       render_template "${PHP_NGINX_TEMPLATE_DIR}/http.nginx.conf" "$nginx_conf" ;;
       esac
     else
       _write_empty_conf "$nginx_conf"
@@ -795,9 +806,9 @@ create_configuration() {
       cat "$nginx_conf" >"$tmp" 2>/dev/null || true
 
       case "$APP_TYPE" in
-        node)    render_template "${NGINX_TEMPLATE_DIR}/https.node.nginx.conf" "$nginx_conf" ;;
-        proxyip) render_template "${NGINX_TEMPLATE_DIR}/proxy-fixedip-https.nginx.conf" "$nginx_conf" ;;
-        *)       render_template "${NGINX_TEMPLATE_DIR}/https.nginx.conf" "$nginx_conf" ;;
+        node)    render_template "${NODE_NGINX_TEMPLATE_DIR}/https.node.nginx.conf" "$nginx_conf" ;;
+        proxyip) render_template "${PROXYIP_NGINX_TEMPLATE_DIR}/proxy-fixedip-https.nginx.conf" "$nginx_conf" ;;
+        *)       render_template "${PHP_NGINX_TEMPLATE_DIR}/https.nginx.conf" "$nginx_conf" ;;
       esac
 
       _merge_confs "$tmp" "$nginx_conf"
@@ -808,11 +819,11 @@ create_configuration() {
     env_set "APACHE_ACTIVE" "apache"
 
     if [[ "$ENABLE_REDIRECTION" == "y" ]]; then
-      render_template "${NGINX_TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
+      render_template "${PHP_NGINX_TEMPLATE_DIR}/redirect.nginx.conf" "$nginx_conf"
       _write_empty_conf "$apache_conf"
     elif [[ "$KEEP_HTTP" == "y" || "$ENABLE_HTTPS" == "n" ]]; then
-      render_template "${NGINX_TEMPLATE_DIR}/proxy-http.nginx.conf" "$nginx_conf"
-      render_template "${APACHE_TEMPLATE_DIR}/http.apache.conf" "$apache_conf"
+      render_template "${PHP_NGINX_TEMPLATE_DIR}/proxy-http.nginx.conf" "$nginx_conf"
+      render_template "${PHP_APACHE_TEMPLATE_DIR}/http.apache.conf" "$apache_conf"
     else
       _write_empty_conf "$nginx_conf"
       _write_empty_conf "$apache_conf"
@@ -824,8 +835,8 @@ create_configuration() {
       cat "$nginx_conf"  >"$tmpn" 2>/dev/null || true
       cat "$apache_conf" >"$tmpa" 2>/dev/null || true
 
-      render_template "${NGINX_TEMPLATE_DIR}/proxy-https.nginx.conf" "$nginx_conf"
-      render_template "${APACHE_TEMPLATE_DIR}/https.apache.conf" "$apache_conf"
+      render_template "${PHP_NGINX_TEMPLATE_DIR}/proxy-https.nginx.conf" "$nginx_conf"
+      render_template "${PHP_APACHE_TEMPLATE_DIR}/https.apache.conf" "$apache_conf"
 
       _merge_confs "$tmpn" "$nginx_conf"
       _merge_confs "$tmpa" "$apache_conf"

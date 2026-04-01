@@ -50,7 +50,7 @@ A lightweight, multi-tool Docker image for:
 - `senv` provides a clean workflow around `.env` ↔ `.env.enc`
 - Supports:
   - repo-local config `./.sops.yaml` (highest priority)
-  - global fallback config/key under `/etc/share/sops/global` (mountable; back-compat: `/etc/share/sops/*`)
+  - global fallback config/key under `/etc/share/sops/global` (mountable)
   - multi-project keys (per-repo) + “shared encrypted env repo” input mount
 
 ### 4) Host notifications pipeline
@@ -153,7 +153,9 @@ This repo is designed so you can keep **all generated + persistent artifacts** i
 
 ````
 
-> Back-compat: if your `configuration/sops` already contains `age.keys` and/or `.sops.yaml` at the top level, `senv` will still detect/use them. New defaults are created under `configuration/sops/global/`.
+> Migration: move legacy top-level files into `configuration/sops/global/`:
+> - `configuration/sops/age.keys` -> `configuration/sops/global/age.keys`
+> - `configuration/sops/.sops.yaml` -> `configuration/sops/global/.sops.yaml`
 
 ### 🔗 Container mount mapping
 
@@ -166,7 +168,9 @@ This repo is designed so you can keep **all generated + persistent artifacts** i
 | `./configuration/ssl` | `/etc/mkcert` |  `certify`, `mkcert` |
 | `./configuration/certs` | `/etc/share/certs` | `certify` export dir, `status` checks |
 | `./configuration/rootCA` | `/etc/share/rootCA` |  `mkcert` (CA store) |
-| `./configuration/sops` | `/etc/share/sops` | `senv init`, `senv keygen`, `senv enc/dec/edit` |
+| `./configuration/sops/config` | `/etc/share/sops/config` | optional per-project SOPS configs |
+| `./configuration/sops/global` | `/etc/share/sops/global` | global fallback key/config for `senv` |
+| `./configuration/sops/keys` | `/etc/share/sops/keys` | per-project Age keys |
 | `./secrets-repo` | `/etc/share/vhosts/sops` |  `senv dec --in=...` (alias input source) |
 | `./logs` | `/global/log` | `status` checks, LogViewer |
 | `/var/run/docker.sock` | `/var/run/docker.sock` |  `docker`, `lazydocker` |
@@ -190,7 +194,9 @@ services:
       - ./configuration/certs:/etc/share/certs
       - ./configuration/rootCA:/etc/share/rootCA
 
-      - ./configuration/sops:/etc/share/sops
+      - ./configuration/sops/config:/etc/share/sops/config
+      - ./configuration/sops/global:/etc/share/sops/global
+      - ./configuration/sops/keys:/etc/share/sops/keys
       - ./secrets-repo:/etc/share/vhosts/sops:ro
       - ./logs:/global/log:ro
 
@@ -220,7 +226,9 @@ docker run --rm -it \
   -v "$(pwd)/configuration/ssl:/etc/mkcert" \
   -v "$(pwd)/configuration/certs:/etc/share/certs" \
   -v "$(pwd)/configuration/rootCA:/etc/share/rootCA" \
-  -v "$(pwd)/configuration/sops:/etc/share/sops" \
+  -v "$(pwd)/configuration/sops/config:/etc/share/sops/config" \
+  -v "$(pwd)/configuration/sops/global:/etc/share/sops/global" \
+  -v "$(pwd)/configuration/sops/keys:/etc/share/sops/keys" \
   -v "$(pwd)/logs:/global/log:ro" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   infocyph/tools:latest
@@ -515,7 +523,6 @@ Common env overrides:
 1. `--key <path>` or `SOPS_AGE_KEY_FILE=<path>`
 2. `--project <id>` → `/etc/share/sops/keys/<id>.age.keys`
 3. Global fallback (preferred) → `/etc/share/sops/global/age.keys`
-4. Back-compat fallback (if present) → `/etc/share/sops/age.keys`
 
 ### Config selection order
 
@@ -524,8 +531,7 @@ Common env overrides:
 1. Repo-local → `./.sops.yaml`
 2. Project config (optional) → `/etc/share/sops/config/<id>.sops.yaml`
 3. Global fallback (preferred) → `/etc/share/sops/global/.sops.yaml`
-4. Back-compat fallback (if present) → `/etc/share/sops/.sops.yaml`
-5. Override: `SOPS_CONFIG_FILE=/path/to/.sops.yaml`
+4. Override: `SOPS_CONFIG_FILE=/path/to/.sops.yaml`
 
 ### Writes & permissions
 
@@ -631,6 +637,22 @@ To bypass (not recommended unless you know what you’re doing):
 ```bash
 senv dec --unsafe --in /somewhere/file.env.enc --out /somewhere/file.env
 ```
+
+### Validation checklist
+
+Run the smoke test inside the tools container:
+
+```bash
+bash /etc/share/scripts/tests/senv-smoke.sh
+```
+
+Expected coverage:
+
+- `init` global bootstrap
+- `keygen` no-overwrite guard
+- `.env` encrypt/decrypt roundtrip
+- `push`/`pull` alias flow (`SOPS_REPO_DIR`)
+- safe-path guard and `--unsafe` override
 
 ---
 

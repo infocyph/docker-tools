@@ -148,7 +148,8 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     ADMIN_PANEL_RUNNER_CONTAINER=RUNNER \
     ADMIN_PANEL_RUNNER_SUPERVISOR_CONF=/etc/supervisor/supervisord.conf \
     GIT_CONFIG_GLOBAL=/git-config/.gitconfig \
-    BANNER_SHOWN=0
+    BANNER_SHOWN=0 \
+    HOST_OS=${HOST_OS:-linux}
 
 RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
@@ -207,6 +208,7 @@ COPY scripts/shells/monitor-alerts.sh /usr/local/bin/monitor-alerts
 COPY scripts/shells/env-store.sh /usr/local/bin/env-store
 COPY scripts/shells/profile-chooser.sh /usr/local/bin/profile-chooser
 COPY scripts/shells/init-fpm-pool-dirs.sh /usr/local/bin/init-fpm-pool-dirs
+COPY scripts/shells/git-default.sh /usr/local/bin/git-default
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/tests/ /etc/share/scripts/tests/
 COPY scripts/http-templates/ /etc/http-templates/
@@ -216,7 +218,6 @@ COPY scripts/admin-panel/ /etc/share/admin-panel
 
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner
-ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/git-default.sh /usr/local/bin/git-default
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/ChromaCat/chromacat /usr/local/bin/chromacat
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Sqlite/sqlitex /usr/local/bin/sqlitex
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Network/netx /usr/local/bin/netx

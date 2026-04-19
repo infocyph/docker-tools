@@ -164,7 +164,7 @@ This repo is designed so you can keep **all generated + persistent artifacts** i
 | `./configuration/apache` | `/etc/share/vhosts/apache` | `mkhost`, `certify` |
 | `./configuration/nginx` | `/etc/share/vhosts/nginx` |`mkhost`, `certify` |
 | `./configuration/docker-compose` | `/etc/share/vhosts/docker-compose` | `mkhost`, `rmhost`, `status` checks |
-| `./configuration/fpm` | `/etc/share/vhosts/fpm` | `mkhost`, `init-fpm-pool-dirs`, `status` checks |
+| `./configuration/fpm` | `/etc/share/vhosts/fpm` | `mkhost`, `init-php-dirs`, `status` checks |
 | `./configuration/ssl` | `/etc/mkcert` |  `certify`, `mkcert` |
 | `./configuration/certs` | `/etc/share/certs` | `certify` export dir, `status` checks |
 | `./configuration/rootCA` | `/etc/share/rootCA` |  `mkcert` (CA store) |

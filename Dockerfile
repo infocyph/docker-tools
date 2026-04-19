@@ -166,6 +166,7 @@ RUN apk add --no-cache \
       /etc/share/vhosts/nginx \
       /etc/share/vhosts/sops \
       /etc/share/vhosts/fpm \
+      /etc/share/vhosts/composer \
       /etc/share/sops/global \
       /etc/share/sops/keys \
       /etc/share/sops/config \
@@ -207,7 +208,7 @@ COPY scripts/shells/monitor-drift.sh /usr/local/bin/monitor-drift
 COPY scripts/shells/monitor-alerts.sh /usr/local/bin/monitor-alerts
 COPY scripts/shells/env-store.sh /usr/local/bin/env-store
 COPY scripts/shells/profile-chooser.sh /usr/local/bin/profile-chooser
-COPY scripts/shells/init-fpm-pool-dirs.sh /usr/local/bin/init-fpm-pool-dirs
+COPY scripts/shells/init-php-dirs.sh /usr/local/bin/init-php-dirs
 COPY scripts/shells/git-default.sh /usr/local/bin/git-default
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
 COPY scripts/tests/ /etc/share/scripts/tests/
@@ -253,10 +254,10 @@ RUN chmod +x \
       /usr/local/bin/monitor-alerts \
       /usr/local/bin/env-store \
       /usr/local/bin/profile-chooser \
-      /usr/local/bin/init-fpm-pool-dirs \
+      /usr/local/bin/init-php-dirs \
       /usr/local/bin/composer \
       /etc/share/scripts/tests/senv-smoke.sh \
-  && init-fpm-pool-dirs \
+  && init-php-dirs \
   && chmod -R 755 /etc/share/vhosts \
   && mkdir -p /etc/profile.d \
   && { \

@@ -15,6 +15,7 @@ services:
       - lds_ssl_roots:/etc/share/rootCA:ro
       - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm
       - lds_fpm_pools:/usr/local/etc/php-fpm.domains:ro
+      - lds_composer_global:/home/${USERNAME}/.composer
       - lds_git_config:/git-config:ro
       - ./docker/conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
       - ./docker/conf/openssl.cnf:/etc/ssl/openssl.cnf
@@ -43,5 +44,6 @@ services:
         LINUX_PKG: ${LINUX_PKG:-}
         WORKING_DIR: ${WORKING_DIR}
         PHP_VERSION: {{PHP_VERSION}}
+        PHP_PROFILE_KEY: {{PHP_KEY}}
         PHP_EXT_VERSIONED: ${PHP_EXT_{{PHP_KEY}}:-}
         LINUX_PKG_VERSIONED: ${LINUX_PKG_{{PHP_KEY}}:-}

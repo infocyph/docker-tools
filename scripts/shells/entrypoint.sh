@@ -3,7 +3,7 @@ set -euo pipefail
 
 HOST_OS="$(printf '%s' "${HOST_OS:-linux}" | tr '[:upper:]' '[:lower:]')" && export HOST_OS
 certify >/dev/null 2>&1 || echo "[entrypoint] Certification failed" >&2
-init-fpm-pool-dirs >/dev/null 2>&1 || echo "[entrypoint] init-fpm-pool-dirs failed" >&2
+init-php-dirs >/dev/null 2>&1 || echo "[entrypoint] init-php-dirs failed" >&2
 git-default >/dev/null 2>&1 || echo "[entrypoint] git-default failed" >&2
 
 if [[ "${ADMIN_PANEL_AUTOSTART:-1}" == "1" ]]; then

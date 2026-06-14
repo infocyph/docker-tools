@@ -159,6 +159,10 @@ if ($topbarPageTitle === '') {
             <i class="bi bi-chevron-down ap-nav-caret" aria-hidden="true"></i>
           </button>
           <div id="apNavMonitoringSubmenu" class="ap-nav-submenu <?= $monitoringActive ? 'is-open' : '' ?>" aria-label="Monitoring submenu">
+            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'logs' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('logs'), ENT_QUOTES, 'UTF-8') ?>">
+              <i class="bi bi-file-earmark-text"></i>
+              <span>File Logs</span>
+            </a>
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'docker-logs' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('docker-logs'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-terminal-split"></i>
               <span>Docker Logs</span>
@@ -174,10 +178,6 @@ if ($topbarPageTitle === '') {
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'drift-monitor' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('drift-monitor'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-sliders"></i>
               <span>Config Drift</span>
-            </a>
-            <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'logs' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('logs'), ENT_QUOTES, 'UTF-8') ?>">
-              <i class="bi bi-file-earmark-text"></i>
-              <span>File Logs</span>
             </a>
             <a class="ap-nav-link ap-nav-link-sub <?= $activePage === 'tls-monitor' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('tls-monitor'), ENT_QUOTES, 'UTF-8') ?>">
               <i class="bi bi-shield-lock"></i>

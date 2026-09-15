@@ -13,6 +13,7 @@ A lightweight, multi-tool Docker image for:
 - ✅ Cleanup vhosts (`rmhost`)
 - ✅ SOPS/Age encrypted env workflow (`senv`)
 - ✅ Host notifications pipeline (`notifierd` + `notify` + host `docknotify`)
+- ✅ Optional local AI prompts (`askai` + Ollama)
 - ✅ Docker ops + TUI (`docker-cli` + compose + `lazydocker`)
 - ✅ Network diagnostics (`netx`, `dig`, `mtr`, `traceroute`, `nmap`, etc.)
 - ✅ Daily dev/ops utilities (`git`, `jq`, `yq`, `rg`, `fd`, `sqlite`, `shellcheck`, `nano`, etc.)
@@ -96,6 +97,7 @@ A lightweight, multi-tool Docker image for:
 | `lazydocker` | Docker TUI (requires docker socket) |
 | `notify` | Send notification to `notifierd` |
 | `notifierd` | TCP → stdout bridge (for host watchers) |
+| `askai` | Ask the configured local Ollama model using text, a file, or piped input |
 | `status` | Docker compose project status and diagnostics (`--json` supported) |
 | `env-store` | JSON-backed key/value store for runtime state (`jq` managed) |
 | `profile-chooser` | Interactive profile+env collector for host-side compose flush |
@@ -106,6 +108,29 @@ A lightweight, multi-tool Docker image for:
 | `sqlitex` | SQLite helper CLI |
 | `netx` | Networking helper wrapper |
 | `composer` | PHP dependency manager |
+
+---
+
+## 🤖 Optional local AI
+
+Ollama remains disabled while `AI_MODEL_NAME` is empty. Set it to start Ollama and
+pull the selected model when the container starts:
+
+```yaml
+environment:
+  AI_MODEL_NAME: qwen2.5-coder:3b
+```
+
+Ask directly, analyze piped output, or provide a file with an instruction:
+
+```bash
+askai Hello there
+docker logs application-name --tail 150 | askai Troubleshoot this error
+askai path/to/file.py Identify bugs and optimization opportunities
+```
+
+`ASKAI_CONTEXT_MIN`, `ASKAI_CONTEXT_MAX`, and `ASKAI_HTTP_TIMEOUT` can override
+the client defaults. The command always uses the container-local Ollama API.
 
 ---
 

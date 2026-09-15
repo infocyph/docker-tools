@@ -150,12 +150,17 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     GIT_CONFIG_GLOBAL=/git-config/.gitconfig \
     BANNER_SHOWN=0 \
     HOST_OS=${HOST_OS:-linux}
+    AI_MODEL_NAME="" \
+    OLLAMA_AUTOSTART=1 \
+    OLLAMA_READY_TIMEOUT=120 \
+    OLLAMA_API_URL=http://127.0.0.1:11434 \
+    OLLAMA_HOST=0.0.0.0:11434
 
 RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
-      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep gzip \
+      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep gzip libstdc++ zlib gcompat zstd \
       lnav multitail less php php-mbstring php-curl php-zip php-phar php-openssl php-common \
   && update-ca-certificates \
   && mkdir -p \
@@ -178,6 +183,7 @@ RUN apk add --no-cache \
       /etc/share/certs \
       /git-config \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
+  && curl -fsSL https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64.tar.zst | zstd -d | tar -x -C /usr/local \
   && rm -rf /tmp/* /var/tmp/*
 
 SHELL ["/bin/bash", "-c"]
@@ -193,6 +199,7 @@ COPY scripts/shells/rmhost.sh /usr/local/bin/rmhost
 COPY scripts/shells/es-policy.sh /usr/local/bin/es-policy
 COPY scripts/shells/notifierd.sh /usr/local/bin/notifierd
 COPY scripts/shells/notify.sh /usr/local/bin/notify
+COPY scripts/shells/askai.sh /usr/local/bin/askai
 COPY scripts/shells/senv.sh /usr/local/bin/senv
 COPY scripts/shells/domain-which.sh /usr/local/bin/domain-which
 COPY scripts/shells/status.sh /usr/local/bin/status
@@ -235,6 +242,7 @@ RUN chmod +x \
       /usr/local/bin/netx \
       /usr/local/bin/notifierd \
       /usr/local/bin/notify \
+      /usr/local/bin/askai \
       /usr/local/bin/entrypoint \
       /usr/local/bin/mkcert \
       /usr/local/bin/lazydocker \
@@ -284,5 +292,6 @@ RUN chmod +x \
   } >> /root/.bashrc
 
 WORKDIR /app
+EXPOSE 11434
 ENTRYPOINT ["/usr/local/bin/entrypoint"]
 CMD ["/usr/local/bin/notifierd"]

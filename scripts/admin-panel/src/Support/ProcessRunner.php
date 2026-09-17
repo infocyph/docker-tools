@@ -58,6 +58,7 @@ final class ProcessRunner
         $stderr = '';
         $timedOut = false;
         $outputLimited = false;
+        $observedExitCode = null;
         $deadline = microtime(true) + $timeoutSeconds;
 
         @stream_set_blocking($pipes[1], false);
@@ -94,6 +95,12 @@ final class ProcessRunner
             $status = proc_get_status($proc);
             $running = is_array($status) && (bool)($status['running'] ?? false);
             if (!$running) {
+                if (is_array($status)) {
+                    $reported = $status['exitcode'] ?? null;
+                    if (is_int($reported) && $reported >= 0) {
+                        $observedExitCode = $reported;
+                    }
+                }
                 break;
             }
 
@@ -133,7 +140,8 @@ final class ProcessRunner
 
         fclose($pipes[1]);
         fclose($pipes[2]);
-        $exitCode = (int)@proc_close($proc);
+        $closedExitCode = (int)@proc_close($proc);
+        $exitCode = $closedExitCode >= 0 ? $closedExitCode : ($observedExitCode ?? $closedExitCode);
         $stderr = trim($stderr);
 
         if ($outputLimited) {

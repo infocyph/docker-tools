@@ -14,6 +14,7 @@ final class HostTransactionService
     private const DEFAULT_STATE_FILE = '/etc/share/state/env-store.json';
     private const DEFAULT_CERT_DIR = '/etc/mkcert';
     private const DEFAULT_EXPORT_DIR = '/etc/share/certs';
+    private const DEFAULT_PROJECT = 'LocalDevStack';
     private const LOCK_FILE = '/run/host-manager.lock';
 
     private HostManagerService $hosts;
@@ -52,7 +53,11 @@ final class HostTransactionService
             if (is_resource($lock)) {
                 @fclose($lock);
             }
-            return ['ok' => false, 'error' => 'host_mutation_busy', 'message' => 'Another host mutation is already in progress.'];
+            return [
+                'ok' => false,
+                'error' => 'host_mutation_busy',
+                'message' => 'Another host mutation is already in progress.',
+            ];
         }
 
         $stage = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'lds-host-stage-' . bin2hex(random_bytes(8));
@@ -60,9 +65,12 @@ final class HostTransactionService
         $liveRoot = $this->vhostRoot();
         $liveState = $this->stateFile();
         $changes = [];
+        $certSnapshot = [];
+        $exportSnapshot = [];
 
         try {
             $this->createStage($stage, $liveRoot, $liveState);
+            $this->prepareStageCommands($stage);
             $this->applyStageEnvironment($stage);
 
             $result = $operation($this->hosts);
@@ -80,20 +88,40 @@ final class HostTransactionService
             $this->restoreEnvironment($envBefore);
             $this->applyChanges($changes);
 
+            $validation = $this->validateLiveWebServers();
+            if (!(bool)($validation['ok'] ?? false)) {
+                $this->rollbackChanges($changes);
+                return [
+                    'ok' => false,
+                    'error' => 'host_runtime_validation_failed',
+                    'message' => (string)($validation['message'] ?? 'Generated web-server configuration failed validation.'),
+                    'validation' => $validation,
+                    'transaction' => 'rolled_back',
+                ];
+            }
+
+            $certSnapshot = $this->snapshotTree($this->certDir());
+            $exportSnapshot = $this->snapshotTree($this->exportDir());
             $cert = ProcessRunner::run(['certify'], 120, null, 262144);
             if (!(bool)($cert['ok'] ?? false)) {
                 $this->rollbackChanges($changes);
+                $this->restoreTreeSnapshot($this->certDir(), $certSnapshot);
+                $this->restoreTreeSnapshot($this->exportDir(), $exportSnapshot);
                 return [
                     'ok' => false,
                     'error' => 'host_certify_failed',
                     'message' => 'Host mutation was rolled back because certificate refresh failed.',
                     'detail' => trim((string)($cert['stderr'] ?? '')),
+                    'transaction' => 'rolled_back',
                 ];
             }
 
             $liveList = $this->hosts->listHosts();
             $result['transaction'] = 'committed';
-            $result['host'] = isset($result['domain']) ? $this->findHost($liveList, (string)$result['domain']) : ($result['host'] ?? null);
+            $result['validation'] = $validation;
+            if (isset($result['domain'])) {
+                $result['host'] = $this->findHost($liveList, (string)$result['domain']);
+            }
             $result['summary'] = $liveList['summary'] ?? ($result['summary'] ?? []);
             return $result;
         } catch (RuntimeException $e) {
@@ -101,7 +129,18 @@ final class HostTransactionService
             if ($changes !== []) {
                 $this->rollbackChanges($changes);
             }
-            return ['ok' => false, 'error' => 'host_transaction_failed', 'message' => $e->getMessage()];
+            if ($certSnapshot !== []) {
+                $this->restoreTreeSnapshot($this->certDir(), $certSnapshot);
+            }
+            if ($exportSnapshot !== []) {
+                $this->restoreTreeSnapshot($this->exportDir(), $exportSnapshot);
+            }
+            return [
+                'ok' => false,
+                'error' => 'host_transaction_failed',
+                'message' => $e->getMessage(),
+                'transaction' => 'rolled_back',
+            ];
         } finally {
             $this->restoreEnvironment($envBefore);
             $this->removeTree($stage);
@@ -114,6 +153,7 @@ final class HostTransactionService
     private function captureEnvironment(): array
     {
         $keys = [
+            'PATH',
             'VHOST_ROOT', 'VHOST_NGINX_DIR', 'VHOST_APACHE_DIR', 'VHOST_FPM_DIR',
             'VHOST_DOCKER_COMPOSE_DIR', 'NGINX_DIR', 'APACHE_DIR', 'FPM_DIR', 'COMPOSE_DIR',
             'ENV_STORE_JSON', 'CERT_DIR', 'VHOST_DIR', 'EXPORT_DIR', 'LDS_USER_P12_ENABLED',
@@ -138,9 +178,26 @@ final class HostTransactionService
         }
     }
 
+    private function prepareStageCommands(string $stage): void
+    {
+        $binDir = $stage . '/bin';
+        if (!@mkdir($binDir, 0700, true) && !is_dir($binDir)) {
+            throw new RuntimeException('Unable to create host staging command directory.');
+        }
+
+        foreach (['mkhost', 'rmhost', 'env-store'] as $command) {
+            $source = '/usr/local/bin/' . $command;
+            $target = $binDir . DIRECTORY_SEPARATOR . $command;
+            if (!is_file($source) || !@symlink($source, $target)) {
+                throw new RuntimeException('Required host-management command is unavailable: ' . $command);
+            }
+        }
+    }
+
     private function applyStageEnvironment(string $stage): void
     {
         $vhosts = $stage . '/vhosts';
+        putenv('PATH=' . $stage . '/bin:/usr/bin:/bin');
         putenv('VHOST_ROOT=' . $vhosts);
         putenv('VHOST_NGINX_DIR=' . $vhosts . '/nginx');
         putenv('VHOST_APACHE_DIR=' . $vhosts . '/apache');
@@ -216,27 +273,23 @@ final class HostTransactionService
     /** @return array<string,mixed> */
     private function makeChange(?string $stageFile, string $liveFile): array
     {
-        $backup = null;
-        if (is_file($liveFile)) {
-            $content = @file_get_contents($liveFile);
-            if (!is_string($content)) {
-                throw new RuntimeException('Unable to snapshot live host configuration.');
-            }
-            $perms = @fileperms($liveFile);
-            $backup = ['content' => $content, 'mode' => is_int($perms) ? ($perms & 0777) : 0644];
-        }
-
-        $replacement = null;
-        if ($stageFile !== null && is_file($stageFile)) {
-            $content = @file_get_contents($stageFile);
-            if (!is_string($content)) {
-                throw new RuntimeException('Unable to read staged host configuration.');
-            }
-            $perms = @fileperms($stageFile);
-            $replacement = ['content' => $content, 'mode' => is_int($perms) ? ($perms & 0777) : 0644];
-        }
-
+        $backup = $this->snapshotFile($liveFile);
+        $replacement = $stageFile !== null ? $this->snapshotFile($stageFile) : null;
         return ['path' => $liveFile, 'backup' => $backup, 'replacement' => $replacement, 'applied' => false];
+    }
+
+    /** @return array{content:string,mode:int}|null */
+    private function snapshotFile(string $path): ?array
+    {
+        if (!is_file($path)) {
+            return null;
+        }
+        $content = @file_get_contents($path);
+        if (!is_string($content)) {
+            throw new RuntimeException('Unable to snapshot file: ' . $path);
+        }
+        $perms = @fileperms($path);
+        return ['content' => $content, 'mode' => is_int($perms) ? ($perms & 0777) : 0644];
     }
 
     /** @param list<array<string,mixed>> $changes */
@@ -252,24 +305,7 @@ final class HostTransactionService
                 $changes[$index]['applied'] = true;
                 continue;
             }
-
-            $dir = dirname($path);
-            if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
-                throw new RuntimeException('Unable to create live host configuration directory.');
-            }
-            $tmp = @tempnam($dir, '.lds-host-commit-');
-            if (!is_string($tmp) || $tmp === '') {
-                throw new RuntimeException('Unable to stage live host configuration replacement.');
-            }
-            if (@file_put_contents($tmp, (string)$replacement['content'], LOCK_EX) === false) {
-                @unlink($tmp);
-                throw new RuntimeException('Unable to write live host configuration replacement.');
-            }
-            @chmod($tmp, (int)$replacement['mode']);
-            if (!@rename($tmp, $path)) {
-                @unlink($tmp);
-                throw new RuntimeException('Unable to atomically replace live host configuration.');
-            }
+            $this->atomicWrite($path, (string)$replacement['content'], (int)$replacement['mode']);
             $changes[$index]['applied'] = true;
         }
     }
@@ -288,20 +324,114 @@ final class HostTransactionService
                 @unlink($path);
                 continue;
             }
-            $dir = dirname($path);
-            if (!is_dir($dir)) {
-                @mkdir($dir, 0775, true);
+            try {
+                $this->atomicWrite($path, (string)$backup['content'], (int)$backup['mode']);
+            } catch (RuntimeException) {
+                // Best-effort rollback; preserve the original failure for the caller.
             }
-            $tmp = @tempnam($dir, '.lds-host-rollback-');
-            if (!is_string($tmp) || $tmp === '') {
+        }
+    }
+
+    private function atomicWrite(string $path, string $content, int $mode): void
+    {
+        $dir = dirname($path);
+        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+            throw new RuntimeException('Unable to create configuration directory: ' . $dir);
+        }
+        $tmp = @tempnam($dir, '.lds-atomic-');
+        if (!is_string($tmp) || $tmp === '') {
+            throw new RuntimeException('Unable to stage atomic configuration replacement.');
+        }
+        if (@file_put_contents($tmp, $content, LOCK_EX) === false) {
+            @unlink($tmp);
+            throw new RuntimeException('Unable to write staged configuration replacement.');
+        }
+        @chmod($tmp, $mode);
+        if (!@rename($tmp, $path)) {
+            @unlink($tmp);
+            throw new RuntimeException('Unable to atomically replace configuration file.');
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function validateLiveWebServers(): array
+    {
+        $project = trim((string)getenv('COMPOSE_PROJECT_NAME'));
+        if ($project === '') {
+            $project = self::DEFAULT_PROJECT;
+        }
+
+        $checks = [];
+        foreach ([
+            ['service' => 'nginx', 'command' => ['nginx', '-t']],
+            ['service' => 'apache', 'command' => ['httpd', '-t']],
+        ] as $spec) {
+            $container = $this->findProjectContainer($project, (string)$spec['service']);
+            if ($container === null) {
+                $checks[] = ['service' => $spec['service'], 'status' => 'not_running'];
                 continue;
             }
-            if (@file_put_contents($tmp, (string)$backup['content'], LOCK_EX) === false) {
-                @unlink($tmp);
-                continue;
+            $command = array_merge(['docker', 'exec', $container], $spec['command']);
+            $res = ProcessRunner::run($command, 20, null, 131072);
+            if (!(bool)($res['ok'] ?? false)) {
+                return [
+                    'ok' => false,
+                    'project' => $project,
+                    'service' => $spec['service'],
+                    'message' => trim((string)($res['stderr'] ?? '')) ?: ((string)$spec['service'] . ' configuration validation failed.'),
+                    'checks' => $checks,
+                ];
             }
-            @chmod($tmp, (int)$backup['mode']);
-            @rename($tmp, $path);
+            $checks[] = ['service' => $spec['service'], 'status' => 'valid'];
+        }
+
+        return ['ok' => true, 'project' => $project, 'checks' => $checks];
+    }
+
+    private function findProjectContainer(string $project, string $service): ?string
+    {
+        $res = ProcessRunner::run([
+            'docker', 'ps',
+            '--filter', 'label=com.docker.compose.project=' . $project,
+            '--filter', 'label=com.docker.compose.service=' . $service,
+            '--format', '{{.ID}}',
+        ], 10, null, 32768);
+        if (!(bool)($res['ok'] ?? false)) {
+            return null;
+        }
+        $lines = preg_split('/\R+/', trim((string)($res['stdout'] ?? ''))) ?: [];
+        $id = trim((string)($lines[0] ?? ''));
+        return $id !== '' ? $id : null;
+    }
+
+    /** @return array<string,array{content:string,mode:int}> */
+    private function snapshotTree(string $root): array
+    {
+        $snapshot = [];
+        foreach ($this->fileMap($root) as $relative => $path) {
+            $file = $this->snapshotFile($path);
+            if ($file !== null) {
+                $snapshot[$relative] = $file;
+            }
+        }
+        return $snapshot;
+    }
+
+    /** @param array<string,array{content:string,mode:int}> $snapshot */
+    private function restoreTreeSnapshot(string $root, array $snapshot): void
+    {
+        if (!is_dir($root)) {
+            @mkdir($root, 0755, true);
+        }
+        foreach ($this->fileMap($root) as $path) {
+            @unlink($path);
+        }
+        foreach ($snapshot as $relative => $file) {
+            try {
+                $this->atomicWrite(rtrim($root, '/\\') . DIRECTORY_SEPARATOR . $relative, $file['content'], $file['mode']);
+            } catch (RuntimeException) {
+                // Best-effort certificate rollback.
+            }
         }
     }
 
@@ -387,5 +517,17 @@ final class HostTransactionService
     {
         $path = trim((string)getenv('ENV_STORE_JSON'));
         return $path !== '' ? $path : self::DEFAULT_STATE_FILE;
+    }
+
+    private function certDir(): string
+    {
+        $path = trim((string)getenv('CERT_DIR'));
+        return $path !== '' ? $path : self::DEFAULT_CERT_DIR;
+    }
+
+    private function exportDir(): string
+    {
+        $path = trim((string)getenv('EXPORT_DIR'));
+        return $path !== '' ? $path : self::DEFAULT_EXPORT_DIR;
     }
 }

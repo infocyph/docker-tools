@@ -183,6 +183,9 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     LDS_AI_MAX_RESPONSE_BYTES=2097152 \
     LDS_AI_CACHE_DIR=/run/lds-ai \
     LDS_AI_PROVIDER_LIB=/usr/local/lib/docker-tools/ai-provider.sh \
+    LDS_AIOPS_COLLECT_TIMEOUT=15 \
+    ADMIN_PANEL_AIOPS_BIN=/usr/local/bin/aiops \
+    ADMIN_PANEL_ASKAI_BIN=/usr/local/bin/askai \
     ADMIN_PANEL_AUTOSTART=1 \
     ADMIN_PANEL_PORT=9911 \
     ADMIN_PANEL_BIND=0.0.0.0 \
@@ -240,6 +243,7 @@ COPY --from=fetch /out/runtime-versions.json /etc/share/runtime-versions.json
 
 COPY scripts/lib/ai-provider.sh /usr/local/lib/docker-tools/ai-provider.sh
 COPY scripts/shells/askai.sh /usr/local/bin/askai
+COPY scripts/shells/aiops.sh /usr/local/bin/aiops
 COPY scripts/shells/gitx-wrapper.sh /tmp/gitx-wrapper
 COPY scripts/shells/certify.sh /usr/local/bin/certify
 COPY scripts/shells/mkhost.sh /usr/local/bin/mkhost
@@ -295,6 +299,7 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
   && chmod +x \
       /usr/local/bin/gitx \
       /usr/local/bin/askai \
+      /usr/local/bin/aiops \
       /usr/local/bin/git-default \
       /usr/local/bin/certify \
       /usr/local/bin/mkhost \
@@ -357,8 +362,10 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
     } >> /root/.bashrc \
   && bash -n /usr/local/lib/docker-tools/ai-provider.sh \
   && bash -n /usr/local/bin/askai \
+  && bash -n /usr/local/bin/aiops \
   && bash -n /usr/local/bin/gitx \
   && askai --help >/dev/null \
+  && aiops --help >/dev/null \
   && bash -n /usr/local/bin/entrypoint \
   && bash -n /usr/local/bin/tools-healthcheck \
   && php -l /etc/share/scripts/tests/fake-ollama-router.php >/dev/null \

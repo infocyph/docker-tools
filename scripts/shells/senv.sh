@@ -546,7 +546,7 @@ do_enc() {
   keyf="$(choose_key_file)"
   yaml="$(choose_sops_yaml)"
 
-  SOPS_AGE_KEY_FILE="$keyf" sops --config "$yaml" -e "$in" >"$out"
+  SOPS_AGE_KEY_FILE="$keyf" sops --config "$yaml" --filename-override "$out" -e "$in" >"$out"
   chmod 600 "$out" 2>/dev/null || true
 
   printf "%s %s\n" "$(_tag enc)" "$(_ok "ok")"

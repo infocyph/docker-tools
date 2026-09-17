@@ -2,6 +2,45 @@
 set -euo pipefail
 
 HOST_OS="$(printf '%s' "${HOST_OS:-linux}" | tr '[:upper:]' '[:lower:]')" && export HOST_OS
+
+init_project_scope() {
+  local project="${STATUS_PROJECT:-${LDS_COMPOSE_PROJECT:-${COMPOSE_PROJECT_NAME:-}}}"
+  local candidate detected=""
+  local project_env_file="${LDS_PROJECT_ENV_FILE:-${BASH_ENV:-/run/lds-project.env}}"
+
+  project="$(printf '%s' "$project" | xargs 2>/dev/null || true)"
+
+  if [[ -z "$project" ]] && command -v docker >/dev/null 2>&1; then
+    for candidate in "${HOSTNAME:-}" "${TOOLS_CONTAINER_NAME:-SERVER_TOOLS}" SERVER_TOOLS; do
+      [[ -n "$candidate" ]] || continue
+      detected="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$candidate" 2>/dev/null || true)"
+      detected="$(printf '%s' "$detected" | xargs 2>/dev/null || true)"
+      if [[ -n "$detected" && "$detected" != '<no value>' ]]; then
+        project="$detected"
+        break
+      fi
+    done
+  fi
+
+  # An unresolved stack is a bounded degraded state, never permission to survey
+  # unrelated Compose projects on the host daemon.
+  [[ -n "$project" ]] || project="unknown"
+
+  STATUS_PROJECT="$project"
+  LDS_COMPOSE_PROJECT="$project"
+  export STATUS_PROJECT LDS_COMPOSE_PROJECT
+
+  mkdir -p "$(dirname "$project_env_file")"
+  umask 022
+  {
+    printf 'export STATUS_PROJECT=%q\n' "$STATUS_PROJECT"
+    printf 'export LDS_COMPOSE_PROJECT=%q\n' "$LDS_COMPOSE_PROJECT"
+  } >"$project_env_file"
+  chmod 0644 "$project_env_file"
+}
+
+init_project_scope
+
 certify >/dev/null 2>&1 || echo "[entrypoint] Certification failed" >&2
 init-php-dirs >/dev/null 2>&1 || echo "[entrypoint] init-php-dirs failed" >&2
 git-default >/dev/null 2>&1 || echo "[entrypoint] git-default failed" >&2

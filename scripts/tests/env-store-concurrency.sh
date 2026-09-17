@@ -17,6 +17,8 @@ fail() {
   exit 1
 }
 
+command -v flock >/dev/null 2>&1 || fail 'flock command is required for this test'
+
 run_store reset >/dev/null
 chmod 0640 "$STORE"
 
@@ -38,10 +40,19 @@ done
 mode="$(stat -c '%a' "$STORE")"
 [[ "$mode" == '640' ]] || fail "store mode changed after atomic replacement: $mode"
 
-mkdir "${STORE}.lock"
-printf '999999\n' >"${STORE}.lock/pid"
-run_store set STALE_LOCK recovered >/dev/null
-[[ "$(run_store get STALE_LOCK)" == 'recovered' ]] || fail 'stale lock was not recovered'
+# Hold the kernel advisory lock and prove writers fail boundedly rather than corrupting state.
+exec 9>"${STORE}.lock"
+flock -n 9 || fail 'unable to acquire test lock'
+if ENV_STORE_JSON="$STORE" ENV_STORE_LOCK_TIMEOUT_MS=150 bash "$ENV_STORE" set LOCKED blocked >/dev/null 2>&1; then
+  fail 'writer unexpectedly bypassed held advisory lock'
+fi
+jq -e '.data | has("LOCKED") | not' "$STORE" >/dev/null || fail 'blocked writer modified the store'
+
+# Releasing/closing the descriptor must make the lock immediately recoverable, with no stale PID cleanup.
+flock -u 9
+exec 9>&-
+run_store set RECOVERED yes >/dev/null
+[[ "$(run_store get RECOVERED)" == 'yes' ]] || fail 'store did not recover after advisory lock release'
 
 BAD="$TMP/malformed.json"
 printf '{not-json\n' >"$BAD"

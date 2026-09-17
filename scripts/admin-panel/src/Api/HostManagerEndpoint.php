@@ -4,14 +4,17 @@ declare(strict_types=1);
 namespace AdminPanel\Api;
 
 use AdminPanel\Service\HostManagerService;
+use AdminPanel\Service\HostTransactionService;
 
 final class HostManagerEndpoint
 {
     private HostManagerService $service;
+    private HostTransactionService $transactions;
 
-    public function __construct(?HostManagerService $service = null)
+    public function __construct(?HostManagerService $service = null, ?HostTransactionService $transactions = null)
     {
         $this->service = $service ?? new HostManagerService();
+        $this->transactions = $transactions ?? new HostTransactionService($this->service);
     }
 
     /**
@@ -36,14 +39,14 @@ final class HostManagerEndpoint
             }
         } elseif ($method === 'POST') {
             $body = $this->readJsonBody();
-            $payload = $this->service->addHost($body);
+            $payload = $this->transactions->addHost($body);
         } elseif ($method === 'PUT' || $method === 'PATCH') {
             $body = $this->readJsonBody();
-            $payload = $this->service->editHost($body);
+            $payload = $this->transactions->editHost($body);
         } elseif ($method === 'DELETE') {
             $body = $this->readJsonBody();
             $domain = trim((string)($query['domain'] ?? $body['domain'] ?? ''));
-            $payload = $this->service->deleteHost($domain);
+            $payload = $this->transactions->deleteHost($domain);
         } else {
             $payload = [
                 'ok' => false,
@@ -55,7 +58,13 @@ final class HostManagerEndpoint
         $status = 200;
         if (!(bool)($payload['ok'] ?? false)) {
             $error = (string)($payload['error'] ?? '');
-            $status = str_starts_with($error, 'validation_') || $error === 'unknown_method' ? 400 : 500;
+            if (str_starts_with($error, 'validation_') || $error === 'unknown_method') {
+                $status = 400;
+            } elseif ($error === 'host_mutation_busy') {
+                $status = 409;
+            } else {
+                $status = 500;
+            }
         }
 
         if (!headers_sent()) {
@@ -67,26 +76,18 @@ final class HostManagerEndpoint
         echo json_encode($payload, JSON_UNESCAPED_SLASHES);
     }
 
-    /**
-     * @return array<string,mixed>
-     */
+    /** @return array<string,mixed> */
     private function readJsonBody(): array
     {
         $raw = file_get_contents('php://input');
         if (!is_string($raw)) {
             return [];
         }
-
         $raw = trim($raw);
         if ($raw === '') {
             return [];
         }
-
         $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            return [];
-        }
-
-        return $decoded;
+        return is_array($decoded) ? $decoded : [];
     }
 }

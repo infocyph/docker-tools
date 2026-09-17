@@ -170,6 +170,19 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     SOPS_CFG_DIR=/etc/share/sops/config \
     SOPS_GLOBAL_DIR=/etc/share/sops/global \
     SOPS_REPO_DIR=/etc/share/vhosts/sops \
+    LDS_AI_ENABLED=auto \
+    LDS_AI_PROVIDER=ollama \
+    LDS_AI_URL=http://llm-sm:11434 \
+    LDS_AI_MODEL= \
+    LDS_AI_CONNECT_TIMEOUT=2 \
+    LDS_AI_PREFLIGHT_TIMEOUT=5 \
+    LDS_AI_TIMEOUT=600 \
+    LDS_AI_AVAILABILITY_TTL=5 \
+    LDS_AI_MAX_CONTEXT_BYTES=524288 \
+    LDS_AI_MAX_REQUEST_BYTES=1048576 \
+    LDS_AI_MAX_RESPONSE_BYTES=2097152 \
+    LDS_AI_CACHE_DIR=/run/lds-ai \
+    LDS_AI_PROVIDER_LIB=/usr/local/lib/docker-tools/ai-provider.sh \
     ADMIN_PANEL_AUTOSTART=1 \
     ADMIN_PANEL_PORT=9911 \
     ADMIN_PANEL_BIND=0.0.0.0 \
@@ -195,6 +208,8 @@ RUN apk add --no-cache \
       lnav multitail less php php-mbstring php-curl php-zip php-phar php-openssl php-common \
   && update-ca-certificates \
   && mkdir -p \
+      /usr/local/lib/docker-tools \
+      /usr/local/libexec \
       /etc/mkcert \
       /etc/share/rootCA \
       /etc/share/vhosts/docker-compose \
@@ -223,6 +238,9 @@ COPY --from=fetch /out/lazydocker /usr/local/bin/lazydocker
 COPY --from=fetch /out/composer /usr/local/bin/composer
 COPY --from=fetch /out/runtime-versions.json /etc/share/runtime-versions.json
 
+COPY scripts/lib/ai-provider.sh /usr/local/lib/docker-tools/ai-provider.sh
+COPY scripts/shells/askai.sh /usr/local/bin/askai
+COPY scripts/shells/gitx-wrapper.sh /tmp/gitx-wrapper
 COPY scripts/shells/certify.sh /usr/local/bin/certify
 COPY scripts/shells/mkhost.sh /usr/local/bin/mkhost
 COPY scripts/shells/rmhost.sh /usr/local/bin/rmhost
@@ -264,13 +282,19 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
   && test -s /tmp/toolset-install.sh \
   && bash -n /tmp/toolset-install.sh \
   && bash /tmp/toolset-install.sh --prefix /usr/local/bin gitx chromacat sqlitex netx \
-  && gitx --version \
+  && /usr/local/bin/gitx --version \
   && chromacat --version \
   && sqlitex --version \
   && netx --version \
+  && mkdir -p /usr/local/libexec \
+  && mv /usr/local/bin/gitx /usr/local/libexec/gitx-toolset \
+  && install -m 0755 /tmp/gitx-wrapper /usr/local/bin/gitx \
+  && rm -f /tmp/gitx-wrapper \
+  && gitx --version \
   && rm -f /tmp/toolset-install.sh \
   && chmod +x \
       /usr/local/bin/gitx \
+      /usr/local/bin/askai \
       /usr/local/bin/git-default \
       /usr/local/bin/certify \
       /usr/local/bin/mkhost \
@@ -304,6 +328,8 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
       /usr/local/bin/init-php-dirs \
       /usr/local/bin/composer \
       /etc/share/scripts/tests/senv-smoke.sh \
+      /etc/share/scripts/tests/ai-provider-smoke.sh \
+  && chmod 0644 /usr/local/lib/docker-tools/ai-provider.sh \
   && init-php-dirs \
   && chmod -R 755 /etc/share/vhosts \
   && mkdir -p /etc/profile.d \
@@ -329,8 +355,13 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
       echo '  show-banner "Tools"'; \
       echo 'fi'; \
     } >> /root/.bashrc \
+  && bash -n /usr/local/lib/docker-tools/ai-provider.sh \
+  && bash -n /usr/local/bin/askai \
+  && bash -n /usr/local/bin/gitx \
+  && askai --help >/dev/null \
   && bash -n /usr/local/bin/entrypoint \
   && bash -n /usr/local/bin/tools-healthcheck \
+  && php -l /etc/share/scripts/tests/fake-ollama-router.php >/dev/null \
   && php -l /etc/share/admin-panel/index.php >/dev/null \
   && php -l /etc/share/admin-panel/app/bootstrap.php >/dev/null \
   && find /etc/share/admin-panel/src -type f -name '*.php' -exec php -l {} \; >/dev/null

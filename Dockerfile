@@ -154,6 +154,8 @@ LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.authors="infocyph,abmmhasan"
 
 ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
+    BASH_ENV=/run/lds-project.env \
+    LDS_PROJECT_ENV_FILE=/run/lds-project.env \
     CAROOT=/etc/share/rootCA \
     NOTIFY_FIFO=/run/notify.fifo \
     NOTIFY_TCP_PORT=9901 \

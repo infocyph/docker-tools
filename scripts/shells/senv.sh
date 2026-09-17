@@ -184,7 +184,7 @@ write_yaml_template() {
   local out="$1" pub="${2:-AGE_PUBLIC_KEY_HERE}"
   cat >"$out" <<YAML
 creation_rules:
-  - path_regex: \\.env(\\..+)?\\.enc\$
+  - path_regex: \.env(\..+)?\.enc$
     age:
       - "$pub"
 YAML
@@ -278,6 +278,7 @@ ensure_project_default() {
     inferred="$(derive_project_from_git 2>/dev/null || true)"
     [[ -n "$inferred" ]] && SENV_PROJECT="$inferred"
   fi
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

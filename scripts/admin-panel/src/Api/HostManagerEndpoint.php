@@ -8,6 +8,15 @@ use AdminPanel\Service\HostTransactionService;
 
 final class HostManagerEndpoint
 {
+    private const RESERVED_HOSTS = [
+        'admin.localhost',
+        'webmail.localhost',
+        'db.localhost',
+        'ri.localhost',
+        'me.localhost',
+        'llm.localhost',
+    ];
+
     private HostManagerService $service;
     private HostTransactionService $transactions;
 
@@ -39,14 +48,15 @@ final class HostManagerEndpoint
             }
         } elseif ($method === 'POST') {
             $body = $this->readJsonBody();
-            $payload = $this->transactions->addHost($body);
+            $payload = $this->reservedHostError((string)($body['domain'] ?? '')) ?? $this->transactions->addHost($body);
         } elseif ($method === 'PUT' || $method === 'PATCH') {
             $body = $this->readJsonBody();
-            $payload = $this->transactions->editHost($body);
+            $payload = $this->reservedHostError((string)($body['domain'] ?? '')) ?? $this->transactions->editHost($body);
         } elseif ($method === 'DELETE') {
             $body = $this->readJsonBody();
             $domain = trim((string)($query['domain'] ?? $body['domain'] ?? ''));
-            $payload = $this->transactions->deleteHost($domain);
+            $reserved = $this->reservedHostError($domain);
+            $payload = $reserved ?? $this->transactions->deleteHost($domain);
         } else {
             $payload = [
                 'ok' => false,
@@ -58,7 +68,7 @@ final class HostManagerEndpoint
         $status = 200;
         if (!(bool)($payload['ok'] ?? false)) {
             $error = (string)($payload['error'] ?? '');
-            if (str_starts_with($error, 'validation_') || $error === 'unknown_method') {
+            if (str_starts_with($error, 'validation_') || $error === 'unknown_method' || $error === 'reserved_host') {
                 $status = 400;
             } elseif ($error === 'host_mutation_busy') {
                 $status = 409;
@@ -74,6 +84,20 @@ final class HostManagerEndpoint
         }
 
         echo json_encode($payload, JSON_UNESCAPED_SLASHES);
+    }
+
+    /** @return array<string,mixed>|null */
+    private function reservedHostError(string $domain): ?array
+    {
+        $domain = strtolower(rtrim(trim($domain), '.'));
+        if (!in_array($domain, self::RESERVED_HOSTS, true)) {
+            return null;
+        }
+        return [
+            'ok' => false,
+            'error' => 'reserved_host',
+            'message' => $domain . ' is reserved by LocalDevStack and cannot be managed as an application host.',
+        ];
     }
 
     /** @return array<string,mixed> */

@@ -39,7 +39,28 @@ init_project_scope() {
   chmod 0644 "$project_env_file"
 }
 
+init_ai_env() {
+  local provider_lib="${LDS_AI_PROVIDER_LIB:-/usr/local/lib/docker-tools/ai-provider.sh}"
+  if [[ ! -r "$provider_lib" ]]; then
+    echo "[entrypoint] AI provider library missing: $provider_lib" >&2
+    exit 70
+  fi
+
+  # shellcheck source=/dev/null
+  source "$provider_lib"
+  if ! ai_config_init; then
+    echo '[entrypoint] Invalid LDS_AI_* configuration' >&2
+    exit 64
+  fi
+
+  export LDS_AI_ENABLED LDS_AI_PROVIDER LDS_AI_URL LDS_AI_MODEL
+  export LDS_AI_CONNECT_TIMEOUT LDS_AI_PREFLIGHT_TIMEOUT LDS_AI_TIMEOUT
+  export LDS_AI_AVAILABILITY_TTL LDS_AI_MAX_CONTEXT_BYTES LDS_AI_MAX_REQUEST_BYTES LDS_AI_MAX_RESPONSE_BYTES
+  export LDS_AI_CACHE_DIR LDS_AI_PROVIDER_LIB
+}
+
 init_project_scope
+init_ai_env
 
 certify >/dev/null 2>&1 || echo "[entrypoint] Certification failed" >&2
 init-php-dirs >/dev/null 2>&1 || echo "[entrypoint] init-php-dirs failed" >&2

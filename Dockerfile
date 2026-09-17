@@ -190,7 +190,7 @@ RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
-      bind-tools iproute2 traceroute mtr netcat-openbsd gzip \
+      bind-tools iproute2 traceroute mtr netcat-openbsd gzip flock \
       lnav multitail less php php-mbstring php-curl php-zip php-phar php-openssl php-common \
   && update-ca-certificates \
   && mkdir -p \
@@ -301,39 +301,14 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
       /usr/local/bin/env-store \
       /usr/local/bin/profile-chooser \
       /usr/local/bin/init-php-dirs \
-      /usr/local/bin/composer \
-      /etc/share/scripts/tests/senv-smoke.sh \
-  && init-php-dirs \
-  && chmod -R 755 /etc/share/vhosts \
-  && mkdir -p /etc/profile.d \
-  && { \
-      echo 'set linenumbers'; \
-      echo 'set softwrap'; \
-      echo 'set tabsize 2'; \
-      if [ -d /usr/share/nano ] && ls /usr/share/nano/*.nanorc >/dev/null 2>&1; then \
-        echo 'include "/usr/share/nano/*.nanorc"'; \
-      fi; \
-    } > /etc/nanorc \
-  && { \
-      echo '#!/bin/sh'; \
-      echo 'if [ "${BANNER_SHOWN:-0}" = "0" ] && [ -n "$PS1" ]; then'; \
-      echo '  export BANNER_SHOWN=1'; \
-      echo '  show-banner "Tools"'; \
-      echo 'fi'; \
-    } > /etc/profile.d/banner-hook.sh \
-  && chmod +x /etc/profile.d/banner-hook.sh \
-  && { \
-      echo 'if [ "${BANNER_SHOWN:-0}" = "0" ] && [ -n "$PS1" ]; then'; \
-      echo '  export BANNER_SHOWN=1'; \
-      echo '  show-banner "Tools"'; \
-      echo 'fi'; \
-  } >> /root/.bashrc
+  && bash -n /usr/local/bin/entrypoint \
+  && bash -n /usr/local/bin/tools-healthcheck \
+  && php -l /etc/share/admin-panel/index.php >/dev/null \
+  && php -l /etc/share/admin-panel/app/bootstrap.php >/dev/null \
+  && find /etc/share/admin-panel/src -type f -name '*.php' -exec php -l {} \; >/dev/null \
+  && mkdir -p /root/.nanorc.d \
+  && printf 'include "/usr/share/nano/*.nanorc"\n' > /root/.nanorc
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD ["tools-healthcheck"]
-
-STOPSIGNAL SIGTERM
-
-WORKDIR /app
-ENTRYPOINT ["/usr/local/bin/entrypoint"]
-CMD ["/usr/local/bin/notifierd"]
+ENTRYPOINT ["entrypoint"]
+HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=3 CMD ["tools-healthcheck"]
+CMD ["notifierd"]

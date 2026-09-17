@@ -11,6 +11,7 @@ final class AutomationManagerService
     private const DEFAULT_SUPERVISOR_DIR = '/etc/share/scheduler/supervisor';
     private const DEFAULT_APP_SCAN_DIR = '/app';
     private const DEFAULT_RUNNER_CONTAINER = 'RUNNER';
+    private const DEFAULT_TOOLS_CONTAINER = 'SERVER_TOOLS';
     private const DEFAULT_SUPERVISOR_CTL_CONF = '/etc/supervisor/supervisord.conf';
     private const CONTENT_MAX_BYTES = 262144;
 
@@ -25,22 +26,13 @@ final class AutomationManagerService
         return [
             'ok' => true,
             'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
-            'paths' => [
-                'cron' => $cronDir,
-                'supervisor' => $supervisorDir,
-            ],
+            'paths' => ['cron' => $cronDir, 'supervisor' => $supervisorDir],
             'writable' => [
                 'cron' => $this->isDirWritable($cronDir),
                 'supervisor' => $this->isDirWritable($supervisorDir),
             ],
-            'summary' => [
-                'cron' => count($cronItems),
-                'supervisor' => count($supervisorItems),
-            ],
-            'items' => [
-                'cron' => $cronItems,
-                'supervisor' => $supervisorItems,
-            ],
+            'summary' => ['cron' => count($cronItems), 'supervisor' => count($supervisorItems)],
+            'items' => ['cron' => $cronItems, 'supervisor' => $supervisorItems],
         ];
     }
 
@@ -52,10 +44,7 @@ final class AutomationManagerService
         $phpArgSuggestions = $this->phpArgSuggestions();
 
         return [
-            'containers' => [
-                'all' => $allContainers,
-                'php' => $phpContainers,
-            ],
+            'containers' => ['all' => $allContainers, 'php' => $phpContainers],
             'cron' => [
                 'schedule_modes' => [
                     ['value' => 'every_minute', 'label' => 'Every minute'],
@@ -112,49 +101,90 @@ final class AutomationManagerService
         if (trim($content) === '') {
             return ['ok' => false, 'error' => 'validation_content', 'message' => 'Config content cannot be empty.'];
         }
+        if (strlen($content) > self::CONTENT_MAX_BYTES || str_contains($content, "\0")) {
+            return ['ok' => false, 'error' => 'validation_content', 'message' => 'Config content is invalid or too large.'];
+        }
+
+        $validation = $this->validateConfigContent($kind, $content);
+        if (!(bool)($validation['ok'] ?? false)) {
+            return $validation;
+        }
 
         $dir = $this->dirForKind($kind);
-        if (!$this->ensureDir($dir)) {
+        if (!$this->ensureDir($dir) || !$this->isDirWritable($dir)) {
             return ['ok' => false, 'error' => 'config_dir_unavailable', 'message' => 'Failed to create or access config directory: ' . $dir];
         }
 
         $targetPath = $dir . DIRECTORY_SEPARATOR . $name;
-        $oldPath = '';
-        if ($originalName !== '' && $originalName !== $name) {
-            $oldPath = $dir . DIRECTORY_SEPARATOR . $originalName;
+        $oldPath = ($originalName !== '' && $originalName !== $name)
+            ? $dir . DIRECTORY_SEPARATOR . $originalName
+            : '';
+        $targetSnapshot = $this->snapshotFile($targetPath);
+        $oldSnapshot = $oldPath !== '' ? $this->snapshotFile($oldPath) : null;
+
+        $stage = @tempnam($dir, '.lds-stage-');
+        if (!is_string($stage) || $stage === '') {
+            return ['ok' => false, 'error' => 'write_failed', 'message' => 'Unable to create staged config.'];
         }
 
-        $bytes = @file_put_contents($targetPath, $content, LOCK_EX);
-        if (!is_int($bytes) || $bytes < 0) {
-            return ['ok' => false, 'error' => 'write_failed', 'message' => 'Unable to write config file: ' . $name];
-        }
-        @chmod($targetPath, 0644);
+        try {
+            $bytes = @file_put_contents($stage, $content, LOCK_EX);
+            if (!is_int($bytes) || $bytes !== strlen($content)) {
+                return ['ok' => false, 'error' => 'write_failed', 'message' => 'Unable to stage config file: ' . $name];
+            }
+            @chmod($stage, $targetSnapshot['mode'] ?? 0644);
 
-        if ($oldPath !== '' && is_file($oldPath)) {
-            @unlink($oldPath);
-        }
+            if (!@rename($stage, $targetPath)) {
+                return ['ok' => false, 'error' => 'write_failed', 'message' => 'Unable to install config file atomically: ' . $name];
+            }
+            $stage = '';
 
-        $reload = null;
-        $message = ucfirst($kind) . ' config saved.';
-        if ($kind === 'supervisor') {
-            $reload = $this->reloadSupervisor();
-            if (!(bool)($reload['ok'] ?? false)) {
-                $message .= ' File saved, but supervisor reload failed.';
-            } else {
+            $reload = null;
+            if ($kind === 'supervisor') {
+                $reload = $this->reloadSupervisor();
+                if (!(bool)($reload['ok'] ?? false)) {
+                    $this->restoreFile($targetPath, $targetSnapshot);
+                    if ($oldPath !== '') {
+                        $this->restoreFile($oldPath, $oldSnapshot);
+                    }
+                    $this->reloadSupervisor();
+                    return [
+                        'ok' => false,
+                        'error' => 'supervisor_reload_failed',
+                        'message' => 'Supervisor rejected the update; previous config restored.',
+                        'reload' => $reload,
+                    ];
+                }
+            }
+
+            if ($oldPath !== '' && is_file($oldPath) && !@unlink($oldPath)) {
+                $this->restoreFile($targetPath, $targetSnapshot);
+                $this->restoreFile($oldPath, $oldSnapshot);
+                if ($kind === 'supervisor') {
+                    $this->reloadSupervisor();
+                }
+                return ['ok' => false, 'error' => 'rename_cleanup_failed', 'message' => 'Unable to remove previous config name; previous state restored.'];
+            }
+
+            $message = ucfirst($kind) . ' config saved.';
+            if ($kind === 'supervisor') {
                 $message .= ' Supervisor reread/update applied.';
             }
+            $list = $this->listConfigs();
+            return [
+                'ok' => true,
+                'message' => $message,
+                'kind' => $kind,
+                'name' => $name,
+                'reload' => $reload,
+                'item' => $this->findItem($list, $kind, $name),
+                'summary' => $list['summary'] ?? [],
+            ];
+        } finally {
+            if (is_string($stage) && $stage !== '' && is_file($stage)) {
+                @unlink($stage);
+            }
         }
-
-        $list = $this->listConfigs();
-        return [
-            'ok' => true,
-            'message' => $message,
-            'kind' => $kind,
-            'name' => $name,
-            'reload' => $reload,
-            'item' => $this->findItem($list, $kind, $name),
-            'summary' => $list['summary'] ?? [],
-        ];
     }
 
     /** @return array<string,mixed> */
@@ -174,21 +204,36 @@ final class AutomationManagerService
             return ['ok' => false, 'error' => 'not_found', 'message' => 'Config file not found: ' . $name];
         }
 
-        if (!@unlink($path)) {
-            return ['ok' => false, 'error' => 'delete_failed', 'message' => 'Failed to delete config file: ' . $name];
+        $snapshot = $this->snapshotFile($path);
+        $backup = dirname($path) . DIRECTORY_SEPARATOR . '.lds-delete-' . bin2hex(random_bytes(6));
+        if (!@rename($path, $backup)) {
+            return ['ok' => false, 'error' => 'delete_failed', 'message' => 'Failed to stage config deletion: ' . $name];
         }
 
         $reload = null;
-        $message = ucfirst($kind) . ' config deleted.';
         if ($kind === 'supervisor') {
             $reload = $this->reloadSupervisor();
             if (!(bool)($reload['ok'] ?? false)) {
-                $message .= ' File deleted, but supervisor reload failed.';
-            } else {
-                $message .= ' Supervisor reread/update applied.';
+                @rename($backup, $path);
+                $this->restoreFile($path, $snapshot);
+                $this->reloadSupervisor();
+                return [
+                    'ok' => false,
+                    'error' => 'supervisor_reload_failed',
+                    'message' => 'Supervisor rejected the deletion; previous config restored.',
+                    'reload' => $reload,
+                ];
             }
         }
 
+        if (is_file($backup)) {
+            @unlink($backup);
+        }
+
+        $message = ucfirst($kind) . ' config deleted.';
+        if ($kind === 'supervisor') {
+            $message .= ' Supervisor reread/update applied.';
+        }
         $list = $this->listConfigs();
         return [
             'ok' => true,
@@ -206,7 +251,6 @@ final class AutomationManagerService
         if (!is_dir($dir)) {
             return [];
         }
-
         $entries = @scandir($dir);
         if (!is_array($entries)) {
             return [];
@@ -222,7 +266,6 @@ final class AutomationManagerService
             if (!is_file($path)) {
                 continue;
             }
-
             $content = $this->readContent($path);
             $mtime = @filemtime($path);
             $items[] = [
@@ -278,6 +321,71 @@ final class AutomationManagerService
         return $content;
     }
 
+    /** @return array<string,mixed> */
+    private function validateConfigContent(string $kind, string $content): array
+    {
+        if ($kind === 'supervisor') {
+            $container = $this->runnerContainer();
+            $script = 'tmp=$(mktemp); trap '\''rm -f "$tmp"'\'' EXIT; cat >"$tmp"; supervisord -t -c "$tmp" >/dev/null';
+            $res = ProcessRunner::run(['docker', 'exec', '-i', $container, 'sh', '-c', $script], 15, $content, 131072);
+            if (!(bool)($res['ok'] ?? false)) {
+                return [
+                    'ok' => false,
+                    'error' => 'validation_supervisor',
+                    'message' => trim((string)($res['stderr'] ?? 'Supervisor config validation failed.')) ?: 'Supervisor config validation failed.',
+                ];
+            }
+            return ['ok' => true];
+        }
+
+        $lines = preg_split('/\n/', $content) ?: [];
+        foreach ($lines as $line) {
+            $line = trim((string)$line);
+            if ($line === '' || str_starts_with($line, '#') || preg_match('/^[A-Za-z_][A-Za-z0-9_]*=/', $line) === 1) {
+                continue;
+            }
+            $parts = preg_split('/\s+/', $line, 7) ?: [];
+            if (count($parts) < 7) {
+                return ['ok' => false, 'error' => 'validation_cron', 'message' => 'Cron entries must use /etc/cron.d format: five schedule fields, user, and command.'];
+            }
+        }
+        return ['ok' => true];
+    }
+
+    /** @return array{content:string,mode:int}|null */
+    private function snapshotFile(string $path): ?array
+    {
+        if (!is_file($path)) {
+            return null;
+        }
+        $content = @file_get_contents($path);
+        if (!is_string($content)) {
+            return null;
+        }
+        $perms = @fileperms($path);
+        return ['content' => $content, 'mode' => is_int($perms) ? ($perms & 0777) : 0644];
+    }
+
+    /** @param array{content:string,mode:int}|null $snapshot */
+    private function restoreFile(string $path, ?array $snapshot): void
+    {
+        if ($snapshot === null) {
+            @unlink($path);
+            return;
+        }
+        $dir = dirname($path);
+        $tmp = @tempnam($dir, '.lds-restore-');
+        if (!is_string($tmp) || $tmp === '') {
+            return;
+        }
+        if (@file_put_contents($tmp, $snapshot['content'], LOCK_EX) === false) {
+            @unlink($tmp);
+            return;
+        }
+        @chmod($tmp, $snapshot['mode']);
+        @rename($tmp, $path);
+    }
+
     private function normalizeName(string $value): string
     {
         return trim($value);
@@ -296,10 +404,7 @@ final class AutomationManagerService
 
     private function ensureDir(string $dir): bool
     {
-        if (is_dir($dir)) {
-            return true;
-        }
-        return @mkdir($dir, 0775, true);
+        return is_dir($dir) || @mkdir($dir, 0775, true);
     }
 
     private function isDirWritable(string $dir): bool
@@ -325,6 +430,12 @@ final class AutomationManagerService
         return $env !== '' ? $env : self::DEFAULT_RUNNER_CONTAINER;
     }
 
+    private function toolsContainer(): string
+    {
+        $env = trim((string)getenv('ADMIN_PANEL_TOOLS_CONTAINER'));
+        return $env !== '' ? $env : self::DEFAULT_TOOLS_CONTAINER;
+    }
+
     private function supervisorCtlConf(): string
     {
         $env = trim((string)getenv('ADMIN_PANEL_RUNNER_SUPERVISOR_CONF'));
@@ -334,13 +445,12 @@ final class AutomationManagerService
     private function normalizeKind(string $kind): ?string
     {
         $k = strtolower(trim($kind));
-        if ($k === 'cron') {
-            return 'cron';
-        }
-        if ($k === 'supervisor') {
-            return 'supervisor';
-        }
-        return null;
+        return in_array($k, ['cron', 'supervisor'], true) ? $k : null;
+    }
+
+    private function dirForKind(string $kind): string
+    {
+        return $kind === 'cron' ? $this->cronDir() : $this->supervisorDir();
     }
 
     /** @param array<string,mixed> $list @return array<string,mixed>|null */
@@ -365,41 +475,23 @@ final class AutomationManagerService
     /** @return array<string,mixed> */
     private function reloadSupervisor(): array
     {
-        $container = $this->runnerContainer();
-        $supervisorConf = $this->supervisorCtlConf();
-        $base = ['docker', 'exec', $container, 'supervisorctl', '-c', $supervisorConf];
-
+        $base = ['docker', 'exec', $this->runnerContainer(), 'supervisorctl', '-c', $this->supervisorCtlConf()];
         $reread = $this->runCommand(array_merge($base, ['reread']));
         if (!(bool)($reread['ok'] ?? false)) {
-            return [
-                'ok' => false,
-                'step' => 'reread',
-                'exit_code' => $reread['exit_code'] ?? 1,
-                'message' => trim((string)($reread['stderr'] ?? 'supervisor reread failed')),
-            ];
+            return ['ok' => false, 'step' => 'reread', 'exit_code' => $reread['exit_code'] ?? 1, 'message' => trim((string)($reread['stderr'] ?? 'supervisor reread failed'))];
         }
-
         $update = $this->runCommand(array_merge($base, ['update']));
         if (!(bool)($update['ok'] ?? false)) {
-            return [
-                'ok' => false,
-                'step' => 'update',
-                'exit_code' => $update['exit_code'] ?? 1,
-                'message' => trim((string)($update['stderr'] ?? 'supervisor update failed')),
-            ];
+            return ['ok' => false, 'step' => 'update', 'exit_code' => $update['exit_code'] ?? 1, 'message' => trim((string)($update['stderr'] ?? 'supervisor update failed'))];
         }
-
         $out = trim(((string)($reread['stdout'] ?? '')) . "\n" . ((string)($update['stdout'] ?? '')));
-        return [
-            'ok' => true,
-            'message' => $out !== '' ? $out : 'Supervisor reread/update completed.',
-        ];
+        return ['ok' => true, 'message' => $out !== '' ? $out : 'Supervisor reread/update completed.'];
     }
 
-    /** @param list<string> $command @return array{ok:bool,stdout:string,stderr:string,exit_code:int,timed_out?:bool} */
+    /** @param list<string> $command @return array{ok:bool,stdout:string,stderr:string,exit_code:int,timed_out?:bool,output_limited?:bool} */
     private function runCommand(array $command): array
     {
-        return ProcessRunner::run($command, 30, null);
+        return ProcessRunner::run($command, 30, null, 262144);
     }
 
     private function appScanDir(): string
@@ -408,10 +500,26 @@ final class AutomationManagerService
         return $env !== '' ? $env : self::DEFAULT_APP_SCAN_DIR;
     }
 
+    private function composeProject(): string
+    {
+        foreach (['LDS_COMPOSE_PROJECT', 'COMPOSE_PROJECT_NAME'] as $key) {
+            $value = trim((string)getenv($key));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+        $res = $this->runCommand(['docker', 'inspect', '--format', '{{ index .Config.Labels "com.docker.compose.project" }}', $this->toolsContainer()]);
+        return (bool)($res['ok'] ?? false) ? trim((string)($res['stdout'] ?? '')) : '';
+    }
+
     /** @return array<int,string> */
     private function listRunningContainers(): array
     {
-        $res = $this->runCommand(['docker', 'ps', '--format', '{{.Names}}']);
+        $project = $this->composeProject();
+        if ($project === '') {
+            return [];
+        }
+        $res = $this->runCommand(['docker', 'ps', '--filter', 'label=com.docker.compose.project=' . $project, '--format', '{{.Names}}']);
         if (!(bool)($res['ok'] ?? false)) {
             return [];
         }
@@ -434,19 +542,13 @@ final class AutomationManagerService
         return $items;
     }
 
-    /**
-     * @param array<int,string> $containers
-     * @return array<int,string>
-     */
+    /** @param array<int,string> $containers @return array<int,string> */
     private function listPhpContainers(array $containers): array
     {
         $out = [];
         foreach ($containers as $name) {
             $n = strtolower(trim($name));
-            if ($n === '') {
-                continue;
-            }
-            if (preg_match('/^php[_-]/i', $name) === 1 || str_contains($n, 'php')) {
+            if ($n !== '' && (preg_match('/^php[_-]/i', $name) === 1 || str_contains($n, 'php'))) {
                 $out[] = $name;
             }
         }
@@ -459,13 +561,11 @@ final class AutomationManagerService
     {
         $base = rtrim($this->appScanDir(), '/\\');
         $candidates = [];
-
         $add = static function (array &$arr, string $value): void {
             $v = trim($value);
-            if ($v === '' || in_array($v, $arr, true)) {
-                return;
+            if ($v !== '' && !in_array($v, $arr, true)) {
+                $arr[] = $v;
             }
-            $arr[] = $v;
         };
 
         if (is_file($base . '/artisan')) {
@@ -483,7 +583,6 @@ final class AutomationManagerService
         if (is_file($base . '/think')) {
             $add($candidates, 'think queue:work');
         }
-
         if ($candidates === []) {
             $candidates = [
                 'artisan schedule:run',
@@ -491,7 +590,6 @@ final class AutomationManagerService
                 'bin/console messenger:consume async --time-limit=3600',
             ];
         }
-
         return $candidates;
     }
 }

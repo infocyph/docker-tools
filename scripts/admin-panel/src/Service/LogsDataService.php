@@ -21,9 +21,7 @@ final class LogsDataService
     /** @var list<string> */
     private array $logRoots;
 
-    /**
-     * @param list<string>|null $roots
-     */
+    /** @param list<string>|null $roots */
     public function __construct(?array $roots = null)
     {
         if ($roots !== null && $roots !== []) {
@@ -48,27 +46,7 @@ final class LogsDataService
         $this->logRoots = $configuredRoots;
     }
 
-    /**
-     * @return array{
-     *   rootsText:string,
-     *   services:list<array{key:string,label:string}>,
-     *   domains:array<string,array<string,int>>,
-     *   files:list<array{
-     *     token:string,
-     *     name:string,
-     *     path:string,
-     *     size:string,
-     *     sizeBytes:int,
-     *     mtime:string,
-     *     mtimeTs:int,
-     *     service:string,
-     *     serviceKey:string,
-     *     domain:string,
-     *     isEmpty:bool
-     *   }>,
-     *   activeToken:string
-     * }
-     */
+    /** @return array<string,mixed> */
     public function listFilesPayload(string $selectedToken = ''): array
     {
         $scan = $this->scan();
@@ -78,35 +56,21 @@ final class LogsDataService
             $selectedToken = '';
         }
 
-        $activeToken = $this->resolveActiveToken($files, $selectedToken);
-
         return [
             'rootsText' => $scan['rootsText'],
             'services' => $scan['services'],
             'domains' => $scan['domains'],
             'files' => $files,
-            'activeToken' => $activeToken,
+            'activeToken' => $this->resolveActiveToken($files, $selectedToken),
         ];
     }
 
-    /**
-     * @return array{
-     *   found:bool,
-     *   file:?array{token:string,name:string,size:string,sizeBytes:int,mtime:string,mtimeTs:int,service:string,serviceKey:string,domain:string},
-     *   rows:list<array{level:string,time:string,description:string,line:string,raw:string}>,
-     *   levelCounts:array{Debug:int,Info:int,Warning:int,Error:int}
-     * }
-     */
+    /** @return array<string,mixed> */
     public function entriesPayload(string $token): array
     {
         $token = strtolower(trim($token));
         if (preg_match('/^[a-f0-9]{40}$/', $token) !== 1) {
-            return [
-                'found' => false,
-                'file' => null,
-                'rows' => [],
-                'levelCounts' => ['Debug' => 0, 'Info' => 0, 'Warning' => 0, 'Error' => 0],
-            ];
+            return $this->emptyEntries();
         }
 
         $scan = $this->scan();
@@ -117,32 +81,24 @@ final class LogsDataService
                 break;
             }
         }
-
         if (!is_array($selectedFile)) {
-            return [
-                'found' => false,
-                'file' => null,
-                'rows' => [],
-                'levelCounts' => ['Debug' => 0, 'Info' => 0, 'Warning' => 0, 'Error' => 0],
-            ];
+            return $this->emptyEntries();
         }
 
         $lines = $this->readTailLines((string)$selectedFile['path'], 250, 3 * 1024 * 1024);
         $rows = [];
         $lineIndex = count($lines);
-        for ($i = count($lines) - 1; $i >= 0; $i--) {
+        for ($i = count($lines) - 1; $i >= 0; --$i) {
             $raw = trim((string)$lines[$i]);
             if ($raw === '') {
-                $lineIndex--;
+                --$lineIndex;
                 continue;
             }
-
             $level = $this->detectLevel($raw);
             $time = $this->extractTime($raw);
             if ($time === '') {
                 $time = (string)$selectedFile['mtime'];
             }
-
             $rows[] = [
                 'level' => $level,
                 'time' => $time,
@@ -150,14 +106,14 @@ final class LogsDataService
                 'line' => number_format(max($lineIndex, 1)),
                 'raw' => $raw,
             ];
-            $lineIndex--;
+            --$lineIndex;
         }
 
         $levelCounts = ['Debug' => 0, 'Info' => 0, 'Warning' => 0, 'Error' => 0];
         foreach ($rows as $row) {
             $level = (string)($row['level'] ?? 'Info');
             if (isset($levelCounts[$level])) {
-                $levelCounts[$level]++;
+                ++$levelCounts[$level];
             }
         }
 
@@ -179,26 +135,18 @@ final class LogsDataService
         ];
     }
 
-    /**
-     * @return array{
-     *   rootsText:string,
-     *   services:list<array{key:string,label:string}>,
-     *   domains:array<string,array<string,int>>,
-     *   files:list<array{
-     *     token:string,
-     *     name:string,
-     *     path:string,
-     *     size:string,
-     *     sizeBytes:int,
-     *     mtime:string,
-     *     mtimeTs:int,
-     *     service:string,
-     *     serviceKey:string,
-     *     domain:string,
-     *     isEmpty:bool
-     *   }>
-     * }
-     */
+    /** @return array<string,mixed> */
+    private function emptyEntries(): array
+    {
+        return [
+            'found' => false,
+            'file' => null,
+            'rows' => [],
+            'levelCounts' => ['Debug' => 0, 'Info' => 0, 'Warning' => 0, 'Error' => 0],
+        ];
+    }
+
+    /** @return array<string,mixed> */
     private function scan(): array
     {
         $serviceMap = [];
@@ -242,10 +190,7 @@ final class LogsDataService
                     if (isset($this->domainScopedServices[$currentServiceKey])) {
                         $domain = (string)($this->extractDomain($name) ?? '');
                         if ($domain !== '') {
-                            if (!isset($serviceDomains[$currentServiceKey][$domain])) {
-                                $serviceDomains[$currentServiceKey][$domain] = 0;
-                            }
-                            $serviceDomains[$currentServiceKey][$domain]++;
+                            $serviceDomains[$currentServiceKey][$domain] = (int)($serviceDomains[$currentServiceKey][$domain] ?? 0) + 1;
                         }
                     }
 
@@ -274,30 +219,23 @@ final class LogsDataService
         foreach ($serviceMap as $key => $label) {
             $services[] = ['key' => $key, 'label' => $label];
         }
-
         foreach ($serviceDomains as $service => $domainsMap) {
             uksort($domainsMap, static fn(string $a, string $b): int => strnatcasecmp($a, $b));
             $serviceDomains[$service] = $domainsMap;
         }
-
         usort($files, static function (array $a, array $b): int {
-            return ((int)$b['mtimeTs'] <=> (int)$a['mtimeTs'])
-                ?: strnatcasecmp((string)$a['name'], (string)$b['name']);
+            return ((int)$b['mtimeTs'] <=> (int)$a['mtimeTs']) ?: strnatcasecmp((string)$a['name'], (string)$b['name']);
         });
 
-        $rootsText = $activeRoots === [] ? '/global/log' : implode(', ', array_keys($activeRoots));
-
         return [
-            'rootsText' => $rootsText,
+            'rootsText' => $activeRoots === [] ? '/global/log' : implode(', ', array_keys($activeRoots)),
             'services' => $services,
             'domains' => $serviceDomains,
             'files' => $files,
         ];
     }
 
-    /**
-     * @param list<array{token:string,isEmpty:bool}> $files
-     */
+    /** @param list<array{token:string,isEmpty:bool}> $files */
     private function resolveActiveToken(array $files, string $selectedToken): string
     {
         if ($selectedToken !== '') {
@@ -307,13 +245,11 @@ final class LogsDataService
                 }
             }
         }
-
         foreach ($files as $file) {
             if (!(bool)$file['isEmpty']) {
                 return (string)$file['token'];
             }
         }
-
         return isset($files[0]['token']) ? (string)$files[0]['token'] : '';
     }
 
@@ -322,7 +258,6 @@ final class LogsDataService
         if ($bytes < 1024) {
             return $bytes . ' B';
         }
-
         $units = ['KB', 'MB', 'GB', 'TB'];
         $size = (float)$bytes;
         foreach ($units as $index => $unit) {
@@ -331,7 +266,6 @@ final class LogsDataService
                 return number_format($size, 2) . ' ' . $unit;
             }
         }
-
         return number_format($size, 2) . ' TB';
     }
 
@@ -340,105 +274,53 @@ final class LogsDataService
         if ($sizeBytes <= 0) {
             return true;
         }
-        if (preg_match('/\\.gz$/i', $name) === 1 && $sizeBytes <= 20) {
-            return true;
-        }
-        return false;
+        return preg_match('/\.gz$/i', $name) === 1 && $sizeBytes <= 20;
     }
 
     private function serviceLabel(string $raw): string
     {
-        $clean = preg_replace('/[^a-zA-Z0-9]+/', ' ', $raw) ?? $raw;
-        $clean = trim($clean);
-        if ($clean === '') {
-            return 'UNKNOWN';
-        }
-        return strtoupper($clean);
+        $clean = trim((string)(preg_replace('/[^a-zA-Z0-9]+/', ' ', $raw) ?? $raw));
+        return $clean === '' ? 'UNKNOWN' : strtoupper($clean);
     }
 
     private function serviceKey(string $raw): string
     {
-        $clean = preg_replace('/[^a-zA-Z0-9]+/', '-', $raw) ?? $raw;
-        $clean = strtolower(trim($clean, '-'));
+        $clean = strtolower(trim((string)(preg_replace('/[^a-zA-Z0-9]+/', '-', $raw) ?? $raw), '-'));
         return $clean !== '' ? $clean : 'unknown';
     }
 
     private function extractDomain(string $fileName): ?string
     {
-        $normalized = preg_replace('/\\.gz$/i', '', strtolower(trim($fileName))) ?? strtolower(trim($fileName));
+        $normalized = preg_replace('/\.gz$/i', '', strtolower(trim($fileName))) ?? strtolower(trim($fileName));
         if ($normalized === '') {
             return null;
         }
-
-        if (preg_match('/^(.+)\\.(access|error)\\.log(?:[-.].*)?$/i', $normalized, $matches) === 1) {
+        if (preg_match('/^(.+)\.(access|error)\.log(?:[-.].*)?$/i', $normalized, $matches) === 1) {
             $domain = trim((string)$matches[1], '.- ');
             return $domain !== '' ? $domain : null;
         }
-
-        if (preg_match('/^(.+)\\.log(?:[-.].*)?$/i', $normalized, $matches) === 1) {
+        if (preg_match('/^(.+)\.log(?:[-.].*)?$/i', $normalized, $matches) === 1) {
             $domain = trim((string)$matches[1], '.- ');
             if ($domain === '' || in_array($domain, ['access', 'error'], true)) {
                 return null;
             }
             return $domain;
         }
-
         return null;
     }
 
-    /**
-     * @return list<string>
-     */
+    /** @return list<string> */
     private function findFiles(string $dir, int $minDepth, int $maxDepth): array
     {
         $dir = rtrim($dir, DIRECTORY_SEPARATOR);
         if ($dir === '' || !is_dir($dir)) {
             return [];
         }
-
         $minDepth = max(0, $minDepth);
         $maxDepth = max($minDepth, $maxDepth);
-
-        $cmd = [
-            'find',
-            $dir,
-            '-mindepth', (string)$minDepth,
-            '-maxdepth', (string)$maxDepth,
-            '-type', 'f',
-            '-print0',
-        ];
-
-        $descriptors = [
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
-        ];
-
-        $proc = @proc_open($cmd, $descriptors, $pipes);
-        if (is_resource($proc)) {
-            $out = stream_get_contents($pipes[1]) ?: '';
-            fclose($pipes[1]);
-
-            $stderr = stream_get_contents($pipes[2]) ?: '';
-            fclose($pipes[2]);
-            unset($stderr);
-
-            @proc_close($proc);
-
-            if ($out !== '') {
-                $parts = explode("\0", $out);
-                $res = [];
-                foreach ($parts as $p) {
-                    if ($p === '' || !is_file($p)) {
-                        continue;
-                    }
-                    $res[] = $p;
-                }
-                return $res;
-            }
-        }
-
         $res = [];
         $rootLen = strlen($dir);
+
         try {
             $iterator = new RecursiveIteratorIterator(
                 new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
@@ -466,38 +348,30 @@ final class LogsDataService
         return $res;
     }
 
-    /**
-     * @return list<string>
-     */
+    /** @return list<string> */
     private function readTailLines(string $path, int $maxLines = 250, int $maxBytes = 2097152): array
     {
         if (!is_file($path) || !is_readable($path)) {
             return [];
         }
-
-        if (preg_match('/\\.gz$/i', $path) === 1) {
+        if (preg_match('/\.gz$/i', $path) === 1) {
             return $this->readGzipTailLines($path, $maxLines, $maxBytes);
         }
-
         return $this->readRegularTailLines($path, $maxLines, $maxBytes);
     }
 
-    /**
-     * @return list<string>
-     */
+    /** @return list<string> */
     private function readRegularTailLines(string $path, int $maxLines, int $maxBytes): array
     {
         $fh = @fopen($path, 'rb');
         if (!is_resource($fh)) {
             return [];
         }
-
         $chunkSize = 8192;
         $buffer = '';
         $bytesRead = 0;
         @fseek($fh, 0, SEEK_END);
         $position = (int)@ftell($fh);
-
         while ($position > 0 && substr_count($buffer, "\n") <= $maxLines && $bytesRead < $maxBytes) {
             $readSize = min($chunkSize, $position);
             $position -= $readSize;
@@ -509,49 +383,37 @@ final class LogsDataService
             $buffer = $chunk . $buffer;
             $bytesRead += strlen($chunk);
         }
-
         @fclose($fh);
-
         return $this->splitTailBuffer($buffer, $maxLines);
     }
 
-    /**
-     * @return list<string>
-     */
+    /** @return list<string> */
     private function readGzipTailLines(string $path, int $maxLines, int $maxBytes): array
     {
         if (!function_exists('gzopen')) {
             return [];
         }
-
         $fh = @gzopen($path, 'rb');
         if (!is_resource($fh)) {
             return [];
         }
-
         $chunkSize = 8192;
         $buffer = '';
-
         while (!gzeof($fh)) {
             $chunk = (string)@gzread($fh, $chunkSize);
             if ($chunk === '') {
                 break;
             }
-
             $buffer .= $chunk;
             if (strlen($buffer) > $maxBytes) {
                 $buffer = (string)substr($buffer, -$maxBytes);
             }
         }
-
         @gzclose($fh);
-
         return $this->splitTailBuffer($buffer, $maxLines);
     }
 
-    /**
-     * @return list<string>
-     */
+    /** @return list<string> */
     private function splitTailBuffer(string $buffer, int $maxLines): array
     {
         $lines = preg_split('/\r\n|\r|\n/', $buffer) ?: [];
@@ -561,7 +423,6 @@ final class LogsDataService
         if (count($lines) > $maxLines) {
             $lines = array_slice($lines, -$maxLines);
         }
-
         return $lines;
     }
 
@@ -604,9 +465,6 @@ final class LogsDataService
         if ($desc === '') {
             return '(empty message)';
         }
-        if (strlen($desc) > 320) {
-            return substr($desc, 0, 317) . '...';
-        }
-        return $desc;
+        return strlen($desc) > 320 ? substr($desc, 0, 317) . '...' : $desc;
     }
 }

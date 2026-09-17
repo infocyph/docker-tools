@@ -53,6 +53,9 @@ jobs:
       - name: Dependency and architecture contracts
         run: bash scripts/tests/dependency-contract.sh
 
+      - name: Publication contracts
+        run: bash scripts/tests/release-contract.sh
+
       - name: Existing helper smoke tests
         run: bash scripts/tests/senv-smoke.sh
 
@@ -122,8 +125,7 @@ jobs:
           trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
           docker run -d --name "$name" infocyph/tools:ci >/dev/null
           for _ in $(seq 1 30); do
-            if docker exec "$name" sh -lc 'wget -qO- http://127.0.0.1:9911/ >/dev/null'; then
-              docker exec "$name" pgrep -f notifierd >/dev/null
+            if docker exec "$name" sh -lc 'wget -qO- http://127.0.0.1:9911/ >/dev/null && tr "\0" " " </proc/1/cmdline | grep -q notifierd'; then
               exit 0
             fi
             sleep 1

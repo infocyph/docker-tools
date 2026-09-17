@@ -256,17 +256,22 @@ ai_redact() {
 ai_sensitive_path() {
   local path
   path="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
-  [[ "$path" =~ (^|/)(\.env($|\.)|id_rsa$|id_ed25519$|credentials?($|\.)|secrets?($|\.)|[^/]+\.(pem|key|p12|pfx|keystore)$) ]]
+  [[ "$path" =~ (^|/)(\.env($|[./])|\.ssh($|/)|id_rsa$|id_ed25519$|credentials?($|[./])|secrets?($|[./])|[^/]+\.(pem|key|p12|pfx|keystore)$) ]]
 }
 
 ai_assert_safe_file() {
-  local path="${1:-}"
+  local path="${1:-}" canonical=''
   [[ -n "$path" && -f "$path" && -r "$path" ]] || { ai_error "file is not readable: $path"; return 66; }
-  if ai_sensitive_path "$path"; then
+  canonical="$(readlink -f -- "$path" 2>/dev/null || true)"
+  if ai_sensitive_path "$path" || { [[ -n "$canonical" ]] && ai_sensitive_path "$canonical"; }; then
     ai_error "refusing sensitive-looking file input: $path"
     return 77
   fi
-  if [[ -s "$path" ]] && ! LC_ALL=C grep -Iq . "$path"; then
+  if LC_ALL=C grep -Eq '^-----BEGIN .*PRIVATE KEY-----|^AGE-SECRET-KEY-' "$path"; then
+    ai_error "refusing private-key content: $path"
+    return 77
+  fi
+  if [[ -s "$path" ]] && ! LC_ALL=C grep -Iq '' "$path"; then
     ai_error "refusing binary file input: $path"
     return 77
   fi

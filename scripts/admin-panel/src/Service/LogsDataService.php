@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace AdminPanel\Service;
 
+use AdminPanel\Support\ProcessRunner;
 use DateTimeImmutable;
 use FilesystemIterator;
 use RecursiveDirectoryIterator;
@@ -318,9 +319,38 @@ final class LogsDataService
         }
         $minDepth = max(0, $minDepth);
         $maxDepth = max($minDepth, $maxDepth);
+
+        $native = ProcessRunner::run(
+            [
+                'find',
+                $dir,
+                '-mindepth', (string)$minDepth,
+                '-maxdepth', (string)$maxDepth,
+                '-type', 'f',
+                '-print0',
+            ],
+            5,
+            null,
+            16 * 1024 * 1024
+        );
+
+        if ($native['ok']) {
+            $out = (string)$native['stdout'];
+            if ($out === '') {
+                return [];
+            }
+
+            $res = [];
+            foreach (explode("\0", $out) as $path) {
+                if ($path !== '' && is_file($path)) {
+                    $res[] = $path;
+                }
+            }
+            return $res;
+        }
+
         $res = [];
         $rootLen = strlen($dir);
-
         try {
             $iterator = new RecursiveIteratorIterator(
                 new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),

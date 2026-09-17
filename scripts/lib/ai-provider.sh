@@ -125,6 +125,7 @@ ai__fetch_tags() {
   if code="$(curl --silent --show-error \
     --connect-timeout "$LDS_AI_CONNECT_TIMEOUT" \
     --max-time "$LDS_AI_PREFLIGHT_TIMEOUT" \
+    --max-filesize "$LDS_AI_MAX_RESPONSE_BYTES" \
     --retry 1 --retry-delay 0 --retry-connrefused \
     --proto '=http,https' \
     --output "$tmp" --write-out '%{http_code}' \
@@ -265,6 +266,10 @@ ai_assert_safe_file() {
     ai_error "refusing sensitive-looking file input: $path"
     return 77
   fi
+  if [[ -s "$path" ]] && ! LC_ALL=C grep -Iq . "$path"; then
+    ai_error "refusing binary file input: $path"
+    return 77
+  fi
   return 0
 }
 
@@ -377,6 +382,7 @@ ai__generate_nonstream() {
   if code="$(curl --silent --show-error \
     --connect-timeout "$LDS_AI_CONNECT_TIMEOUT" \
     --max-time "$LDS_AI_TIMEOUT" \
+    --max-filesize "$LDS_AI_MAX_RESPONSE_BYTES" \
     --proto '=http,https' \
     -H 'Content-Type: application/json' \
     --data-binary @"$request" \
@@ -434,7 +440,7 @@ ai_generate_json() {
 }
 
 ai_stream() {
-  local prompt="${1:-}" system="${2:-}" json_mode="${3:-0}" request fifo pid total=0 limited=0 line chunk rc
+  local prompt="${1:-}" system="${2:-}" json_mode="${3:-0}" request fifo pid total=0 limited=0 line line_bytes chunk rc
   ai_config_init || return $?
   [[ "$LDS_AI_ENABLED" != 0 ]] || { ai_error 'AI is disabled by LDS_AI_ENABLED=0'; return 69; }
 
@@ -462,7 +468,15 @@ ai_stream() {
   pid=$!
 
   while IFS= read -r line || [[ -n "$line" ]]; do
-    total=$((total + ${#line} + 1))
+    line_bytes="$(printf '%s\n' "$line" | wc -c | tr -d '[:space:]')"
+    if ! ai_is_uint "$line_bytes"; then
+      kill "$pid" >/dev/null 2>&1 || true
+      wait "$pid" >/dev/null 2>&1 || true
+      rm -f -- "$request" "$fifo"
+      ai_error 'unable to determine streaming response size; generation was not retried'
+      return 65
+    fi
+    total=$((total + 10#$line_bytes))
     if ((total > 10#$LDS_AI_MAX_RESPONSE_BYTES)); then
       limited=1
       kill "$pid" >/dev/null 2>&1 || true

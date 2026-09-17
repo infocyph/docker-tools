@@ -12,11 +12,27 @@ if [[ "${ADMIN_PANEL_AUTOSTART:-1}" == "1" ]]; then
   : "${ADMIN_PANEL_DOCROOT:=/etc/share/admin-panel}"
   : "${ADMIN_PANEL_PHP_SERVER_LOG:=/tmp/admin-panel-php-server.log}"
   : "${ADMIN_PANEL_PID_FILE:=/run/admin-panel.pid}"
+  : "${ADMIN_PANEL_TOKEN_FILE:=/run/admin-panel.token}"
 
   [[ "$ADMIN_PANEL_PORT" =~ ^[0-9]{1,5}$ ]] || {
     echo "[entrypoint] Invalid admin panel port: $ADMIN_PANEL_PORT" >&2
     exit 1
   }
+
+  umask 077
+  if [[ -z "${ADMIN_PANEL_TOKEN:-}" ]]; then
+    if [[ -s "$ADMIN_PANEL_TOKEN_FILE" ]]; then
+      ADMIN_PANEL_TOKEN="$(tr -d '\r\n' <"$ADMIN_PANEL_TOKEN_FILE")"
+    else
+      ADMIN_PANEL_TOKEN="$(openssl rand -hex 32)"
+      printf '%s\n' "$ADMIN_PANEL_TOKEN" >"$ADMIN_PANEL_TOKEN_FILE"
+    fi
+  else
+    printf '%s\n' "$ADMIN_PANEL_TOKEN" >"$ADMIN_PANEL_TOKEN_FILE"
+  fi
+  chmod 0600 "$ADMIN_PANEL_TOKEN_FILE"
+  export ADMIN_PANEL_TOKEN ADMIN_PANEL_TOKEN_FILE
+  umask 022
 
   rm -f -- "$ADMIN_PANEL_PID_FILE"
 
@@ -35,7 +51,7 @@ if [[ "${ADMIN_PANEL_AUTOSTART:-1}" == "1" ]]; then
     fi
   fi
 else
-  rm -f -- "${ADMIN_PANEL_PID_FILE:-/run/admin-panel.pid}"
+  rm -f -- "${ADMIN_PANEL_PID_FILE:-/run/admin-panel.pid}" "${ADMIN_PANEL_TOKEN_FILE:-/run/admin-panel.token}"
 fi
 
 exec "$@"

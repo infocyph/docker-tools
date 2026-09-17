@@ -23,6 +23,8 @@ use AdminPanel\Routing\Router;
 
 final class Kernel
 {
+    private const CONTROL_COOKIE = 'lds_admin';
+
     private string $pagesDir;
     private string $layoutTop;
     private string $layoutBottom;
@@ -61,8 +63,7 @@ final class Kernel
         ?VolumeMonitorEndpoint $volumeMonitorEndpoint = null,
         ?LogsFilesEndpoint $logsFilesEndpoint = null,
         ?LogsEntriesEndpoint $logsEntriesEndpoint = null
-    )
-    {
+    ) {
         $this->pagesDir = $appDir . '/pages';
         $this->layoutTop = $this->pagesDir . '/_layout_top.php';
         $this->layoutBottom = $this->pagesDir . '/_layout_bottom.php';
@@ -91,6 +92,12 @@ final class Kernel
     public function handle(array $server, array $query): void
     {
         $path = $this->normalizePath($server);
+        $this->applySecurityHeaders();
+        $this->issueControlCookieForPage($path, $server);
+        if (!$this->authorizeRequest($path, $server, $query)) {
+            return;
+        }
+
         if ($path === '/api/live-stats') {
             $this->liveStatsEndpoint->handle();
             return;
@@ -180,9 +187,133 @@ final class Kernel
         require $this->layoutBottom;
     }
 
+    private function applySecurityHeaders(): void
+    {
+        if (headers_sent()) {
+            return;
+        }
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        header('X-Content-Type-Options: nosniff');
+        header('X-Frame-Options: DENY');
+        header('Referrer-Policy: no-referrer');
+        header("Content-Security-Policy: default-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+    }
+
+    /** @param array<string,mixed> $server */
+    private function issueControlCookieForPage(string $path, array $server): void
+    {
+        $method = strtoupper((string)($server['REQUEST_METHOD'] ?? 'GET'));
+        if ($method !== 'GET' || str_starts_with($path, '/api/')) {
+            return;
+        }
+        $token = trim((string)getenv('ADMIN_PANEL_TOKEN'));
+        if ($token === '' || headers_sent()) {
+            return;
+        }
+
+        $forwardedProto = strtolower(trim((string)($server['HTTP_X_FORWARDED_PROTO'] ?? '')));
+        $https = strtolower(trim((string)($server['HTTPS'] ?? '')));
+        $secure = $forwardedProto === 'https' || ($https !== '' && $https !== 'off' && $https !== '0');
+        setcookie(self::CONTROL_COOKIE, $token, [
+            'expires' => 0,
+            'path' => '/',
+            'secure' => $secure,
+            'httponly' => true,
+            'samesite' => 'Strict',
+        ]);
+    }
+
     /**
      * @param array<string,mixed> $server
+     * @param array<string,mixed> $query
      */
+    private function authorizeRequest(string $path, array $server, array $query): bool
+    {
+        $method = strtoupper((string)($server['REQUEST_METHOD'] ?? 'GET'));
+        $mutation = !in_array($method, ['GET', 'HEAD', 'OPTIONS'], true);
+        $sensitiveDownload = $path === '/api/tls-cert-artifact'
+            && strtolower(trim((string)($query['kind'] ?? ''))) === 'mtls';
+
+        if (!$mutation && !$sensitiveDownload) {
+            return true;
+        }
+
+        $token = trim((string)getenv('ADMIN_PANEL_TOKEN'));
+        $cookie = $this->cookieValue($server, self::CONTROL_COOKIE);
+        if ($token === '' || $cookie === '' || !hash_equals($token, $cookie)) {
+            $this->denyControlRequest('control_auth_required');
+            return false;
+        }
+
+        if ($mutation && !$this->isSameOrigin($server)) {
+            $this->denyControlRequest('same_origin_required');
+            return false;
+        }
+
+        return true;
+    }
+
+    /** @param array<string,mixed> $server */
+    private function cookieValue(array $server, string $name): string
+    {
+        $header = (string)($server['HTTP_COOKIE'] ?? '');
+        if ($header === '') {
+            return '';
+        }
+        foreach (explode(';', $header) as $part) {
+            $part = trim($part);
+            if (!str_contains($part, '=')) {
+                continue;
+            }
+            [$key, $value] = explode('=', $part, 2);
+            if (trim($key) === $name) {
+                return urldecode(trim($value));
+            }
+        }
+        return '';
+    }
+
+    /** @param array<string,mixed> $server */
+    private function isSameOrigin(array $server): bool
+    {
+        $host = strtolower(trim((string)($server['HTTP_HOST'] ?? '')));
+        if ($host === '') {
+            return false;
+        }
+
+        foreach (['HTTP_ORIGIN', 'HTTP_REFERER'] as $key) {
+            $value = trim((string)($server[$key] ?? ''));
+            if ($value === '') {
+                continue;
+            }
+            $candidate = parse_url($value, PHP_URL_HOST);
+            if (!is_string($candidate) || $candidate === '') {
+                return false;
+            }
+            $port = parse_url($value, PHP_URL_PORT);
+            $candidateHost = strtolower($candidate . (is_int($port) ? ':' . $port : ''));
+            return hash_equals($host, $candidateHost);
+        }
+
+        $fetchSite = strtolower(trim((string)($server['HTTP_SEC_FETCH_SITE'] ?? '')));
+        return in_array($fetchSite, ['same-origin', 'same-site', 'none'], true);
+    }
+
+    private function denyControlRequest(string $error): void
+    {
+        if (!headers_sent()) {
+            http_response_code(403);
+            header('Content-Type: application/json; charset=UTF-8');
+        }
+        echo json_encode([
+            'ok' => false,
+            'error' => $error,
+            'message' => 'Admin control-plane authorization failed.',
+        ], JSON_UNESCAPED_SLASHES);
+    }
+
+    /** @param array<string,mixed> $server */
     private function normalizePath(array $server): string
     {
         $requestUri = (string)($server['REQUEST_URI'] ?? '/');

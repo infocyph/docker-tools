@@ -40,6 +40,18 @@ assert_present 'def version_parts: split\("\."\) \| map\(tonumber\);' Dockerfile
 assert_present 'netcat-openbsd gzip flock' Dockerfile
 assert_present 'need_cmd flock' scripts/shells/env-store.sh
 
+# Preserve baseline image/runtime behavior while hardening lifecycle and health.
+assert_present '/usr/local/bin/composer' Dockerfile
+assert_present '/etc/share/scripts/tests/senv-smoke\.sh' Dockerfile
+assert_present '&& init-php-dirs' Dockerfile
+assert_present 'chmod -R 755 /etc/share/vhosts' Dockerfile
+assert_present '/etc/profile\.d/banner-hook\.sh' Dockerfile
+assert_present 'WORKDIR /app' Dockerfile
+assert_present 'STOPSIGNAL SIGTERM' Dockerfile
+assert_present 'ENTRYPOINT \["/usr/local/bin/entrypoint"\]' Dockerfile
+assert_present 'CMD \["/usr/local/bin/notifierd"\]' Dockerfile
+assert_present 'CMD \["/usr/local/bin/tools-healthcheck"\]' Dockerfile
+
 ripgrep_count="$(grep -oE '(^|[[:space:]])ripgrep([[:space:]\\]|$)' Dockerfile | wc -l | tr -d ' ')"
 [[ "$ripgrep_count" == '1' ]] || fail "expected ripgrep exactly once in apk package list, found $ripgrep_count"
 

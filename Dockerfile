@@ -1,40 +1,71 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 1: fetch mkcert + lazydocker + runtime versions json
+# Stage 1: fetch native tools + Composer + runtime versions metadata
 # ─────────────────────────────────────────────────────────────────────────────
 FROM alpine:latest AS fetch
 SHELL ["/bin/sh", "-euo", "pipefail", "-c"]
 
+ARG TARGETOS=linux
+ARG TARGETARCH
+
 ENV DIR=/usr/local/bin
 
 COPY scripts/shells/composer-setup.sh /tmp/composer-setup
-RUN apk add --no-cache curl bash ca-certificates jq php php-phar php-common php-openssl php-mbstring \
+RUN apk add --no-cache curl bash ca-certificates jq file php php-phar php-common php-openssl php-mbstring \
   && update-ca-certificates \
   && mkdir -p /out \
-  && curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" \
+  && case "${TARGETOS}/${TARGETARCH}" in \
+       linux/amd64|linux/arm64) ;; \
+       *) echo "Unsupported target: ${TARGETOS}/${TARGETARCH}" >&2; exit 1 ;; \
+     esac \
+  && curl -fsSJL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 \
+       -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=${TARGETOS}/${TARGETARCH}" \
+  && test -s /out/mkcert \
   && chmod +x /out/mkcert \
-  && curl -fsSL "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash \
-  && cp /usr/local/bin/lazydocker /out/lazydocker \
-  && chmod +x /out/lazydocker \
+  && file /out/mkcert | grep -q 'ELF' \
+  && /out/mkcert -version \
+  && tmp="$(mktemp -d)" \
+  && release_json="$(curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 https://api.github.com/repos/jesseduffield/lazydocker/releases/latest)" \
+  && lazy_tag="$(printf '%s' "$release_json" | jq -er '.tag_name')" \
+  && lazy_version="${lazy_tag#v}" \
+  && case "$TARGETARCH" in amd64) lazy_arch=x86_64 ;; arm64) lazy_arch=arm64 ;; esac \
+  && lazy_asset="lazydocker_${lazy_version}_Linux_${lazy_arch}.tar.gz" \
+  && lazy_url="$(printf '%s' "$release_json" | jq -er --arg name "$lazy_asset" '.assets[] | select(.name == $name) | .browser_download_url')" \
+  && checksum_url="$(printf '%s' "$release_json" | jq -er '.assets[] | select(.name == "checksums.txt") | .browser_download_url')" \
+  && curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 -o "$tmp/$lazy_asset" "$lazy_url" \
+  && curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 -o "$tmp/checksums.txt" "$checksum_url" \
+  && expected="$(awk -v asset="$lazy_asset" '$2 == asset {print $1}' "$tmp/checksums.txt")" \
+  && test -n "$expected" \
+  && printf '%s  %s\n' "$expected" "$tmp/$lazy_asset" | sha256sum -c - \
+  && tar -xzf "$tmp/$lazy_asset" -C "$tmp" lazydocker \
+  && install -m 0755 "$tmp/lazydocker" /out/lazydocker \
+  && /out/lazydocker --version \
+  && rm -rf "$tmp" \
   && chmod +x /tmp/composer-setup \
-  && COMPOSER_INSTALL_DIR=/out COMPOSER_FILENAME=composer /tmp/composer-setup
+  && COMPOSER_INSTALL_DIR=/out COMPOSER_FILENAME=composer /tmp/composer-setup \
+  && php /out/composer --version --no-ansi
 
 RUN <<'SH'
 set -euo pipefail
 
 tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 
-curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
+curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 \
   "https://endoflife.date/api/v1/products/php/" \
   -o "$tmp/php.json"
 
-curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
+curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 \
   "https://endoflife.date/api/v1/products/nodejs/" \
   -o "$tmp/node.json"
 
+jq -e '.result.releases | type == "array" and length > 0' "$tmp/php.json" >/dev/null
+jq -e '.result.releases | type == "array" and length > 0' "$tmp/node.json" >/dev/null
+
 cat > "$tmp/build-versions.jq" <<'JQ'
 def nowiso: (now | todateiso8601);
+def version_parts: split(".") | map(tonumber);
 def sort_node: sort_by(.version|tonumber) | reverse;
-def sort_php:  sort_by(.version) | reverse;
+def sort_php:  sort_by(.version|version_parts) | reverse;
 
 def php_releases:  ($php[0].result.releases // []);
 def node_releases: ($node[0].result.releases // []);
@@ -105,14 +136,17 @@ JQ
 jq -n --slurpfile php "$tmp/php.json" --slurpfile node "$tmp/node.json" \
   -f "$tmp/build-versions.jq" > /out/runtime-versions.json
 
+jq -e '.php.active | type == "array" and length > 0' /out/runtime-versions.json >/dev/null
+jq -e '.node.active | type == "array" and length > 0' /out/runtime-versions.json >/dev/null
 chmod 644 /out/runtime-versions.json
-rm -rf "$tmp"
 SH
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: runtime/tools image
 # ─────────────────────────────────────────────────────────────────────────────
 FROM alpine:latest
+
+ARG SCRIPTOMATIC_REF=main
 
 LABEL org.opencontainers.image.source="https://github.com/infocyph/docker-tools"
 LABEL org.opencontainers.image.description="Tools"
@@ -155,7 +189,7 @@ RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
-      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep gzip \
+      bind-tools iproute2 traceroute mtr netcat-openbsd gzip \
       lnav multitail less php php-mbstring php-curl php-zip php-phar php-openssl php-common \
   && update-ca-certificates \
   && mkdir -p \
@@ -180,7 +214,7 @@ RUN apk add --no-cache \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*
 
-SHELL ["/bin/bash", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 COPY --from=fetch /out/mkcert /usr/local/bin/mkcert
 COPY --from=fetch /out/lazydocker /usr/local/bin/lazydocker
@@ -217,13 +251,22 @@ COPY scripts/docker-templates/ /etc/docker-templates/
 COPY scripts/fpm-templates/ /etc/fpm-templates/
 COPY scripts/admin-panel/ /etc/share/admin-panel
 
-ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
-ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner
-ADD https://raw.githubusercontent.com/infocyph/Toolset/main/ChromaCat/chromacat /usr/local/bin/chromacat
-ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Sqlite/sqlitex /usr/local/bin/sqlitex
-ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Network/netx /usr/local/bin/netx
-
-RUN chmod +x \
+RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 \
+      "https://raw.githubusercontent.com/infocyph/Scriptomatic/${SCRIPTOMATIC_REF}/bash/banner.sh" \
+      -o /usr/local/bin/show-banner \
+  && test -s /usr/local/bin/show-banner \
+  && bash -n /usr/local/bin/show-banner \
+  && curl -fsSLo /tmp/toolset-install.sh \
+      "https://github.com/infocyph/Toolset/releases/latest/download/install.sh" \
+  && test -s /tmp/toolset-install.sh \
+  && bash -n /tmp/toolset-install.sh \
+  && bash /tmp/toolset-install.sh --prefix /usr/local/bin gitx chromacat sqlitex netx \
+  && gitx --version \
+  && chromacat --version \
+  && sqlitex --version \
+  && netx --version \
+  && rm -f /tmp/toolset-install.sh \
+  && chmod +x \
       /usr/local/bin/gitx \
       /usr/local/bin/git-default \
       /usr/local/bin/certify \

@@ -37,6 +37,8 @@ assert_present 'Scriptomatic/\$\{SCRIPTOMATIC_REF\}/bash/banner\.sh' Dockerfile
 assert_present 'lazydocker/releases/latest' Dockerfile
 assert_present 'checksums\.txt' Dockerfile
 assert_present 'def version_parts: split\("\."\) \| map\(tonumber\);' Dockerfile
+assert_present 'netcat-openbsd gzip flock' Dockerfile
+assert_present 'need_cmd flock' scripts/shells/env-store.sh
 
 ripgrep_count="$(grep -oE '(^|[[:space:]])ripgrep([[:space:]\\]|$)' Dockerfile | wc -l | tr -d ' ')"
 [[ "$ripgrep_count" == '1' ]] || fail "expected ripgrep exactly once in apk package list, found $ripgrep_count"

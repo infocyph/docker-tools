@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace AdminPanel\App;
 
+use AdminPanel\Api\AiAssistantEndpoint;
 use AdminPanel\Api\AutomationManagerEndpoint;
 use AdminPanel\Api\DockerLogsEndpoint;
 use AdminPanel\Api\DbHealthEndpoint;
@@ -37,6 +38,7 @@ final class Kernel
     private LogHeatmapEndpoint $logHeatmapEndpoint;
     private DriftMonitorEndpoint $driftMonitorEndpoint;
     private HostManagerEndpoint $hostManagerEndpoint;
+    private AiAssistantEndpoint $aiAssistantEndpoint;
     private AutomationManagerEndpoint $automationManagerEndpoint;
     private RuntimeEventsEndpoint $runtimeEventsEndpoint;
     private TlsCertArtifactEndpoint $tlsCertArtifactEndpoint;
@@ -57,6 +59,7 @@ final class Kernel
         ?DriftMonitorEndpoint $driftMonitorEndpoint = null,
         ?HostManagerEndpoint $hostManagerEndpoint = null,
         ?AutomationManagerEndpoint $automationManagerEndpoint = null,
+        ?AiAssistantEndpoint $aiAssistantEndpoint = null,
         ?RuntimeEventsEndpoint $runtimeEventsEndpoint = null,
         ?TlsCertArtifactEndpoint $tlsCertArtifactEndpoint = null,
         ?TlsMonitorEndpoint $tlsMonitorEndpoint = null,
@@ -77,6 +80,7 @@ final class Kernel
         $this->driftMonitorEndpoint = $driftMonitorEndpoint ?? new DriftMonitorEndpoint();
         $this->hostManagerEndpoint = $hostManagerEndpoint ?? new HostManagerEndpoint();
         $this->automationManagerEndpoint = $automationManagerEndpoint ?? new AutomationManagerEndpoint();
+        $this->aiAssistantEndpoint = $aiAssistantEndpoint ?? new AiAssistantEndpoint();
         $this->runtimeEventsEndpoint = $runtimeEventsEndpoint ?? new RuntimeEventsEndpoint();
         $this->tlsCertArtifactEndpoint = $tlsCertArtifactEndpoint ?? new TlsCertArtifactEndpoint();
         $this->tlsMonitorEndpoint = $tlsMonitorEndpoint ?? new TlsMonitorEndpoint();
@@ -128,6 +132,10 @@ final class Kernel
         }
         if ($path === '/api/automation-manager') {
             $this->automationManagerEndpoint->handle($query, $server);
+            return;
+        }
+        if ($path === '/api/ai-assistant') {
+            $this->aiAssistantEndpoint->handle($query, $server);
             return;
         }
         if ($path === '/api/runtime-events') {

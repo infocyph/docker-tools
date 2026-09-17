@@ -326,7 +326,7 @@ final class AutomationManagerService
     {
         if ($kind === 'supervisor') {
             $container = $this->runnerContainer();
-            $script = 'tmp=$(mktemp); trap '\''rm -f "$tmp"'\'' EXIT; cat >"$tmp"; supervisord -t -c "$tmp" >/dev/null';
+            $script = "tmp=\$(mktemp); cat >\"\$tmp\"; supervisord -t -c \"\$tmp\" >/dev/null; rc=\$?; rm -f \"\$tmp\"; exit \$rc";
             $res = ProcessRunner::run(['docker', 'exec', '-i', $container, 'sh', '-c', $script], 15, $content, 131072);
             if (!(bool)($res['ok'] ?? false)) {
                 return [

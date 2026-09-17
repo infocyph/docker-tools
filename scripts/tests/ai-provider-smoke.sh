@@ -106,6 +106,18 @@ ai_assert_safe_file "$tmp/.env" >"$tmp/out" 2>"$tmp/err"
 rc=$?
 set -e
 [[ "$rc" -eq 77 ]] || fail "sensitive file returned $rc instead of 77"
+ln -s "$tmp/.env" "$tmp/alias.txt"
+set +e
+ai_assert_safe_file "$tmp/alias.txt" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+[[ "$rc" -eq 77 ]] || fail "sensitive symlink returned $rc instead of 77"
+printf '%s\n' '-----BEGIN PRIVATE KEY-----' 'secret-material' '-----END PRIVATE KEY-----' >"$tmp/generic.txt"
+set +e
+ai_assert_safe_file "$tmp/generic.txt" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+[[ "$rc" -eq 77 ]] || fail "generic private-key content returned $rc instead of 77"
 printf 'text\0binary\n' >"$tmp/binary.dat"
 set +e
 ai_assert_safe_file "$tmp/binary.dat" >"$tmp/out" 2>"$tmp/err"
@@ -113,6 +125,8 @@ rc=$?
 set -e
 [[ "$rc" -eq 77 ]] || fail "binary file returned $rc instead of 77"
 grep -q 'binary file input' "$tmp/err" || fail 'binary file refusal message missing'
+printf '\n\n' >"$tmp/blank.txt"
+ai_assert_safe_file "$tmp/blank.txt" || fail 'blank text file was misclassified as binary'
 
 printf '7/10 context + response limits\n'
 export LDS_AI_MAX_CONTEXT_BYTES=32

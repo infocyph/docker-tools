@@ -6,10 +6,11 @@ STORE_FILE="${ENV_STORE_JSON:-/etc/share/state/env-store.json}"
 STORE_DB="${ENV_STORE_DB:-/etc/share/state/env-store.db}"
 SQLITE_BIN="${ENV_STORE_SQLITE_BIN:-sqlite3}"
 LOCK_TIMEOUT_MS="${ENV_STORE_LOCK_TIMEOUT_MS:-5000}"
-LOCK_DIR="${STORE_FILE}.lock"
+LOCK_FILE="${STORE_FILE}.lock"
+JSON_LOCK_FD=""
 
 die() {
-  printf "Error: %s\n" "$*" >&2
+  printf 'Error: %s\n' "$*" >&2
   exit 1
 }
 
@@ -18,8 +19,8 @@ need_cmd() {
 }
 
 json_compact() {
-  local in="${1-}" out=""
-  out="$(printf '%s' "$in" | jq -c . 2>/dev/null || true)"
+  local input="${1-}" out=""
+  out="$(printf '%s' "$input" | jq -c . 2>/dev/null || true)"
   [[ -n "$out" ]] || return 1
   printf '%s' "$out"
 }
@@ -39,11 +40,11 @@ storage_to_json() {
 }
 
 print_value_human_from_json() {
-  local j="${1-}"
-  if printf '%s' "$j" | jq -e 'type=="string"' >/dev/null 2>&1; then
-    printf '%s\n' "$(printf '%s' "$j" | jq -r '.')"
+  local json="${1-}"
+  if printf '%s' "$json" | jq -e 'type=="string"' >/dev/null 2>&1; then
+    printf '%s\n' "$(printf '%s' "$json" | jq -r '.')"
   else
-    printf '%s\n' "$(printf '%s' "$j" | jq -c '.')"
+    printf '%s\n' "$(printf '%s' "$json" | jq -c '.')"
   fi
 }
 
@@ -53,27 +54,28 @@ now_iso() {
 
 json_lock_acquire() {
   [[ "$LOCK_TIMEOUT_MS" =~ ^[0-9]+$ ]] || LOCK_TIMEOUT_MS=5000
-  local waited=0 owner=""
   mkdir -p "$(dirname "$STORE_FILE")"
+  need_cmd flock
 
-  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
-    owner="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
-    if [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null; then
-      rm -rf -- "$LOCK_DIR"
-      continue
-    fi
+  exec {JSON_LOCK_FD}>"$LOCK_FILE"
+
+  local waited=0
+  while ! flock -n "$JSON_LOCK_FD"; do
     if (( waited >= LOCK_TIMEOUT_MS )); then
-      die "Timed out waiting for env-store lock: $LOCK_DIR"
+      exec {JSON_LOCK_FD}>&-
+      JSON_LOCK_FD=""
+      die "Timed out waiting for env-store lock: $LOCK_FILE"
     fi
     sleep 0.05
     ((waited += 50))
   done
-
-  printf '%s\n' "$$" >"$LOCK_DIR/pid"
 }
 
 json_lock_release() {
-  rm -rf -- "$LOCK_DIR"
+  [[ -n "$JSON_LOCK_FD" ]] || return 0
+  flock -u "$JSON_LOCK_FD" 2>/dev/null || true
+  exec {JSON_LOCK_FD}>&-
+  JSON_LOCK_FD=""
 }
 
 preserve_store_metadata() {
@@ -88,6 +90,23 @@ preserve_store_metadata() {
 
 validate_store_json() {
   jq -e 'type=="object" and (.data|type=="object")' "$1" >/dev/null 2>&1
+}
+
+json_atomic_replace() {
+  local source="$1" tmp
+  local dir
+  dir="$(dirname "$STORE_FILE")"
+  tmp="$(mktemp "$dir/.env-store.replace.XXXXXX")"
+
+  if ! cat "$source" >"$tmp"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  preserve_store_metadata "$tmp"
+  if ! mv -f -- "$tmp" "$STORE_FILE"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
 }
 
 ensure_store() {
@@ -112,7 +131,11 @@ ensure_store_json() {
       die "Failed to initialize store: $STORE_FILE"
     fi
     preserve_store_metadata "$tmp"
-    mv -f -- "$tmp" "$STORE_FILE"
+    if ! mv -f -- "$tmp" "$STORE_FILE"; then
+      rm -f -- "$tmp"
+      json_lock_release
+      die "Failed to initialize store atomically: $STORE_FILE"
+    fi
     json_lock_release
     return 0
   fi
@@ -168,7 +191,7 @@ key_ok() {
 }
 
 write_with_filter() {
-  (( $# >= 1 )) || die "Internal error: missing jq filter"
+  (( $# >= 1 )) || die 'Internal error: missing jq filter'
   local filter="${!#}"
   local -a jq_args=()
   if (( $# > 1 )); then
@@ -209,7 +232,7 @@ write_with_filter() {
 cmd_get() {
   local key="${1:-}" def_set=0 def=""
   shift || true
-  [[ -n "$key" ]] || die "get <KEY> [--default VALUE]"
+  [[ -n "$key" ]] || die 'get <KEY> [--default VALUE]'
   key_ok "$key" || die "Invalid key: $key"
 
   while [[ "${1:-}" ]]; do
@@ -226,41 +249,41 @@ cmd_get() {
 
   if [[ "$BACKEND" == "json" ]]; then
     if jq -e --arg k "$key" '.data | has($k)' "$STORE_FILE" >/dev/null 2>&1; then
-      local vj
-      vj="$(jq -c --arg k "$key" '.data[$k]' "$STORE_FILE")"
-      print_value_human_from_json "$vj"
+      local value_json
+      value_json="$(jq -c --arg k "$key" '.data[$k]' "$STORE_FILE")"
+      print_value_human_from_json "$value_json"
       return 0
     fi
   else
-    local out vj
+    local out value_json
     out="$("$SQLITE_BIN" -noheader "$STORE_DB" "SELECT v FROM kv WHERE k=$(sql_quote "$key") LIMIT 1;" 2>/dev/null || true)"
     if [[ -n "$out" ]] || "$SQLITE_BIN" -noheader "$STORE_DB" "SELECT 1 FROM kv WHERE k=$(sql_quote "$key") LIMIT 1;" | grep -qx '1'; then
-      vj="$(storage_to_json "$out")"
-      print_value_human_from_json "$vj"
+      value_json="$(storage_to_json "$out")"
+      print_value_human_from_json "$value_json"
       return 0
     fi
   fi
 
-  if ((def_set)); then
-    printf "%s\n" "$def"
+  if (( def_set )); then
+    printf '%s\n' "$def"
   fi
 }
 
 cmd_set() {
   local key="${1:-}" value="${2-}"
-  [[ -n "$key" ]] || die "set <KEY> <VALUE>"
+  [[ -n "$key" ]] || die 'set <KEY> <VALUE>'
   key_ok "$key" || die "Invalid key: $key"
   shift || true
   shift || true
-  [[ -z "${1:-}" ]] || die "set accepts exactly 2 arguments"
+  [[ -z "${1:-}" ]] || die 'set accepts exactly 2 arguments'
 
-  local vjson
-  vjson="$(json_string_value "$value")"
+  local value_json
+  value_json="$(json_string_value "$value")"
 
   if [[ "$BACKEND" == "json" ]]; then
     write_with_filter \
       --arg k "$key" \
-      --argjson v "$vjson" \
+      --argjson v "$value_json" \
       --arg ts "$(now_iso)" \
       '.data[$k]=$v | .updated_at=$ts'
   else
@@ -268,7 +291,7 @@ cmd_set() {
     ts="$(now_iso)"
     "$SQLITE_BIN" "$STORE_DB" "
       INSERT OR REPLACE INTO kv(k,v,updated_at)
-      VALUES($(sql_quote "$key"),$(sql_quote "$vjson"),$(sql_quote "$ts"));
+      VALUES($(sql_quote "$key"),$(sql_quote "$value_json"),$(sql_quote "$ts"));
       INSERT OR REPLACE INTO meta(k,v)
       VALUES('updated_at',$(sql_quote "$ts"));
     " >/dev/null
@@ -278,16 +301,16 @@ cmd_set() {
 cmd_get_json() {
   local key="${1:-}" def_set=0 def_json='null'
   shift || true
-  [[ -n "$key" ]] || die "get-json <KEY> [--default-json JSON]"
+  [[ -n "$key" ]] || die 'get-json <KEY> [--default-json JSON]'
   key_ok "$key" || die "Invalid key: $key"
 
   while [[ "${1:-}" ]]; do
     case "$1" in
       --default-json)
         shift || true
-        [[ -n "${1:-}" ]] || die "Missing value for --default-json"
+        [[ -n "${1:-}" ]] || die 'Missing value for --default-json'
         def_json="$(json_compact "$1" || true)"
-        [[ -n "$def_json" ]] || die "Invalid JSON for --default-json"
+        [[ -n "$def_json" ]] || die 'Invalid JSON for --default-json'
         def_set=1
         shift || true
         ;;
@@ -310,7 +333,7 @@ cmd_get_json() {
     fi
   fi
 
-  if ((def_set)); then
+  if (( def_set )); then
     printf '%s\n' "$def_json"
     return 0
   fi
@@ -318,20 +341,20 @@ cmd_get_json() {
 }
 
 cmd_set_json() {
-  local key="${1:-}" raw="${2-}" vjson
-  [[ -n "$key" ]] || die "set-json <KEY> <JSON>"
+  local key="${1:-}" raw="${2-}" value_json
+  [[ -n "$key" ]] || die 'set-json <KEY> <JSON>'
   key_ok "$key" || die "Invalid key: $key"
   shift || true
   shift || true
-  [[ -z "${1:-}" ]] || die "set-json accepts exactly 2 arguments"
+  [[ -z "${1:-}" ]] || die 'set-json accepts exactly 2 arguments'
 
-  vjson="$(json_compact "$raw" || true)"
-  [[ -n "$vjson" ]] || die "Invalid JSON value"
+  value_json="$(json_compact "$raw" || true)"
+  [[ -n "$value_json" ]] || die 'Invalid JSON value'
 
   if [[ "$BACKEND" == "json" ]]; then
     write_with_filter \
       --arg k "$key" \
-      --argjson v "$vjson" \
+      --argjson v "$value_json" \
       --arg ts "$(now_iso)" \
       '.data[$k]=$v | .updated_at=$ts'
   else
@@ -339,7 +362,7 @@ cmd_set_json() {
     ts="$(now_iso)"
     "$SQLITE_BIN" "$STORE_DB" "
       INSERT OR REPLACE INTO kv(k,v,updated_at)
-      VALUES($(sql_quote "$key"),$(sql_quote "$vjson"),$(sql_quote "$ts"));
+      VALUES($(sql_quote "$key"),$(sql_quote "$value_json"),$(sql_quote "$ts"));
       INSERT OR REPLACE INTO meta(k,v)
       VALUES('updated_at',$(sql_quote "$ts"));
     " >/dev/null
@@ -348,7 +371,7 @@ cmd_set_json() {
 
 cmd_unset() {
   local key="${1:-}"
-  [[ -n "$key" ]] || die "unset <KEY>"
+  [[ -n "$key" ]] || die 'unset <KEY>'
   key_ok "$key" || die "Invalid key: $key"
 
   if [[ "$BACKEND" == "json" ]]; then
@@ -364,7 +387,7 @@ cmd_unset() {
 
 cmd_has() {
   local key="${1:-}"
-  [[ -n "$key" ]] || die "has <KEY>"
+  [[ -n "$key" ]] || die 'has <KEY>'
   key_ok "$key" || die "Invalid key: $key"
   if [[ "$BACKEND" == "json" ]]; then
     jq -e --arg k "$key" '.data | has($k)' "$STORE_FILE" >/dev/null
@@ -378,14 +401,14 @@ cmd_list() {
     jq -r '.data | to_entries | sort_by(.key) | .[] | if (.value|type)=="string" then "\(.key)=\(.value)" else "\(.key)=\(.value|tojson)" end' "$STORE_FILE"
   else
     "$SQLITE_BIN" -noheader -separator $'\t' "$STORE_DB" "SELECT k,v FROM kv ORDER BY k;" 2>/dev/null |
-      while IFS=$'\t' read -r k v; do
-        [[ -n "$k" ]] || continue
-        local vj
-        vj="$(storage_to_json "${v:-}")"
-        if printf '%s' "$vj" | jq -e 'type=="string"' >/dev/null 2>&1; then
-          printf "%s=%s\n" "$k" "$(printf '%s' "$vj" | jq -r '.')"
+      while IFS=$'\t' read -r key value; do
+        [[ -n "$key" ]] || continue
+        local value_json
+        value_json="$(storage_to_json "${value:-}")"
+        if printf '%s' "$value_json" | jq -e 'type=="string"' >/dev/null 2>&1; then
+          printf '%s=%s\n' "$key" "$(printf '%s' "$value_json" | jq -r '.')"
         else
-          printf "%s=%s\n" "$k" "$(printf '%s' "$vj" | jq -c '.')"
+          printf '%s=%s\n' "$key" "$(printf '%s' "$value_json" | jq -c '.')"
         fi
       done
   fi
@@ -395,68 +418,84 @@ cmd_keys() {
   if [[ "$BACKEND" == "json" ]]; then
     jq -r '.data | keys[]' "$STORE_FILE"
   else
-    "$SQLITE_BIN" -noheader "$STORE_DB" "SELECT k FROM kv ORDER BY k;" 2>/dev/null
+    "$SQLITE_BIN" -noheader "$STORE_DB" 'SELECT k FROM kv ORDER BY k;' 2>/dev/null
   fi
 }
 
 cmd_json() {
   if [[ "$BACKEND" == "json" ]]; then
     jq -c '.' "$STORE_FILE"
-  else
-    local version updated entries data
-    version="$(sqlite_meta_get "version")"
-    updated="$(sqlite_meta_get "updated_at")"
-    [[ "$version" =~ ^[0-9]+$ ]] || version="1"
-    [[ -n "$updated" ]] || updated=""
-
-    entries="$("$SQLITE_BIN" -noheader -separator $'\t' "$STORE_DB" "SELECT k,v FROM kv ORDER BY k;" 2>/dev/null || true)"
-    data='{}'
-    local k v vj
-    while IFS=$'\t' read -r k v; do
-      [[ -n "$k" ]] || continue
-      vj="$(storage_to_json "${v:-}")"
-      data="$(jq -cn --argjson d "$data" --arg kk "$k" --argjson vv "$vj" '$d + {($kk):$vv}')"
-    done <<<"$entries"
-    jq -cn --argjson ver "$version" --arg updated "$updated" --argjson data "${data:-{}}" \
-      '{version:$ver,updated_at:$updated,data:$data}'
+    return 0
   fi
+
+  local version updated entries data key value value_json
+  version="$(sqlite_meta_get version)"
+  updated="$(sqlite_meta_get updated_at)"
+  [[ "$version" =~ ^[0-9]+$ ]] || version=1
+  [[ -n "$updated" ]] || updated=""
+
+  entries="$("$SQLITE_BIN" -noheader -separator $'\t' "$STORE_DB" 'SELECT k,v FROM kv ORDER BY k;' 2>/dev/null || true)"
+  data='{}'
+  while IFS=$'\t' read -r key value; do
+    [[ -n "$key" ]] || continue
+    value_json="$(storage_to_json "${value:-}")"
+    data="$(jq -cn --argjson d "$data" --arg k "$key" --argjson v "$value_json" '$d + {($k):$v}')"
+  done <<<"$entries"
+
+  jq -cn --argjson version "$version" --arg updated "$updated" --argjson data "$data" \
+    '{version:$version,updated_at:$updated,data:$data}'
 }
 
 cmd_reset() {
   if [[ "$BACKEND" == "json" ]]; then
-    write_with_filter \
-      --arg ts "$(now_iso)" \
-      '{version:1,updated_at:$ts,data:{}}'
-  else
-    local ts
-    ts="$(now_iso)"
-    "$SQLITE_BIN" "$STORE_DB" "
-      DELETE FROM kv;
-      INSERT OR REPLACE INTO meta(k,v) VALUES('version','1');
-      INSERT OR REPLACE INTO meta(k,v) VALUES('updated_at',$(sql_quote "$ts"));
-    " >/dev/null
+    local dir tmp
+    dir="$(dirname "$STORE_FILE")"
+    mkdir -p "$dir"
+    json_lock_acquire
+    tmp="$(mktemp "$dir/.env-store.reset.XXXXXX")"
+    if ! jq -cn --arg ts "$(now_iso)" '{version:1,updated_at:$ts,data:{}}' >"$tmp"; then
+      rm -f -- "$tmp"
+      json_lock_release
+      die "Failed to reset store: $STORE_FILE"
+    fi
+    preserve_store_metadata "$tmp"
+    if ! mv -f -- "$tmp" "$STORE_FILE"; then
+      rm -f -- "$tmp"
+      json_lock_release
+      die "Failed to reset store atomically: $STORE_FILE"
+    fi
+    json_lock_release
+    return 0
   fi
+
+  local ts
+  ts="$(now_iso)"
+  "$SQLITE_BIN" "$STORE_DB" "
+    DELETE FROM kv;
+    INSERT OR REPLACE INTO meta(k,v) VALUES('version','1');
+    INSERT OR REPLACE INTO meta(k,v) VALUES('updated_at',$(sql_quote "$ts"));
+  " >/dev/null
 }
 
 cmd_import() {
-  local kv key val
-  [[ "${1:-}" ]] || die "import <KEY=VALUE...>"
-  for kv in "$@"; do
-    [[ "$kv" == *=* ]] || die "Invalid pair: $kv"
-    key="${kv%%=*}"
-    val="${kv#*=}"
+  local pair key value
+  [[ "${1:-}" ]] || die 'import <KEY=VALUE...>'
+  for pair in "$@"; do
+    [[ "$pair" == *=* ]] || die "Invalid pair: $pair"
+    key="${pair%%=*}"
+    value="${pair#*=}"
     key_ok "$key" || die "Invalid key: $key"
-    cmd_set "$key" "$val"
+    cmd_set "$key" "$value"
   done
 }
 
 cmd_import_json() {
-  local kv key raw
-  [[ "${1:-}" ]] || die "import-json <KEY=JSON...>"
-  for kv in "$@"; do
-    [[ "$kv" == *=* ]] || die "Invalid pair: $kv"
-    key="${kv%%=*}"
-    raw="${kv#*=}"
+  local pair key raw
+  [[ "${1:-}" ]] || die 'import-json <KEY=JSON...>'
+  for pair in "$@"; do
+    [[ "$pair" == *=* ]] || die "Invalid pair: $pair"
+    key="${pair%%=*}"
+    raw="${pair#*=}"
     key_ok "$key" || die "Invalid key: $key"
     cmd_set_json "$key" "$raw"
   done
@@ -506,16 +545,16 @@ main() {
   if [[ "$BACKEND" == "sqlite" ]]; then
     need_cmd "$SQLITE_BIN"
   fi
-  local cmd="${1:-}"
-  shift || true
 
-  case "${cmd:-}" in
-    -h|--help|"") usage; exit 0 ;;
+  local command="${1:-}"
+  shift || true
+  case "$command" in
+    -h|--help|'') usage; exit 0 ;;
   esac
 
   ensure_store
 
-  case "$cmd" in
+  case "$command" in
     get|read) cmd_get "$@" ;;
     get-json|read-json) cmd_get_json "$@" ;;
     set|write|modify) cmd_set "$@" ;;
@@ -528,7 +567,7 @@ main() {
     import) cmd_import "$@" ;;
     import-json) cmd_import_json "$@" ;;
     reset) cmd_reset "$@" ;;
-    *) die "Unknown command: $cmd" ;;
+    *) die "Unknown command: $command" ;;
   esac
 }
 

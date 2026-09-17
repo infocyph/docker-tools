@@ -61,9 +61,6 @@ jobs:
       - name: Env-store concurrency and corruption recovery
         run: bash scripts/tests/env-store-concurrency.sh
 
-      - name: Existing helper smoke tests
-        run: bash scripts/tests/senv-smoke.sh
-
       - name: Install actionlint
         env:
           GOBIN: ${{ runner.temp }}/bin
@@ -113,6 +110,7 @@ jobs:
             command -v netx >/dev/null &&
             command -v notifierd >/dev/null &&
             command -v tools-healthcheck >/dev/null &&
+            command -v flock >/dev/null &&
             command -v php >/dev/null &&
             mkcert -version >/dev/null &&
             lazydocker --version >/dev/null &&
@@ -123,6 +121,11 @@ jobs:
             jq -e ".php.active | type == \"array\" and length > 0" "$RUNTIME_VERSIONS_DB" >/dev/null &&
             jq -e ".node.active | type == \"array\" and length > 0" "$RUNTIME_VERSIONS_DB" >/dev/null
           '
+
+      - name: SOPS environment helper smoke
+        run: |
+          docker run --rm --entrypoint bash infocyph/tools:ci -lc \
+            'bash /etc/share/scripts/tests/senv-smoke.sh'
 
       - name: Tools health and admin lifecycle smoke
         run: |
@@ -188,6 +191,7 @@ jobs:
           docker run --rm --platform linux/arm64 --entrypoint bash infocyph/tools:ci-arm64 -lc '
             test "$(uname -m)" = "aarch64" &&
             command -v tools-healthcheck >/dev/null &&
+            command -v flock >/dev/null &&
             mkcert -version >/dev/null &&
             lazydocker --version >/dev/null &&
             gitx --version >/dev/null &&

@@ -174,6 +174,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     ADMIN_PANEL_BIND=0.0.0.0 \
     ADMIN_PANEL_DOCROOT=/etc/share/admin-panel \
     ADMIN_PANEL_PHP_SERVER_LOG=/tmp/admin-panel-php-server.log \
+    ADMIN_PANEL_PID_FILE=/run/admin-panel.pid \
     ADMIN_PANEL_PRODUCT_NAME=LocalDevStack \
     ADMIN_PANEL_BRAND_NAME=docker-tools \
     ADMIN_PANEL_COMPANY_NAME=infocyph \
@@ -245,6 +246,7 @@ COPY scripts/shells/profile-chooser.sh /usr/local/bin/profile-chooser
 COPY scripts/shells/init-php-dirs.sh /usr/local/bin/init-php-dirs
 COPY scripts/shells/git-default.sh /usr/local/bin/git-default
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
+COPY scripts/shells/tools-healthcheck.sh /usr/local/bin/tools-healthcheck
 COPY scripts/tests/ /etc/share/scripts/tests/
 COPY scripts/http-templates/ /etc/http-templates/
 COPY scripts/docker-templates/ /etc/docker-templates/
@@ -279,6 +281,7 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
       /usr/local/bin/notifierd \
       /usr/local/bin/notify \
       /usr/local/bin/entrypoint \
+      /usr/local/bin/tools-healthcheck \
       /usr/local/bin/mkcert \
       /usr/local/bin/lazydocker \
       /usr/local/bin/es-policy \
@@ -325,6 +328,11 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
       echo '  show-banner "Tools"'; \
       echo 'fi'; \
   } >> /root/.bashrc
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD ["tools-healthcheck"]
+
+STOPSIGNAL SIGTERM
 
 WORKDIR /app
 ENTRYPOINT ["/usr/local/bin/entrypoint"]

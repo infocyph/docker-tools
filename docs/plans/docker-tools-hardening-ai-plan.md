@@ -549,3 +549,182 @@ Add only after the provider layer is stable:
 - admin-panel AI actions.
 
 Each feature should remain small and reuse the same provider library.
+
+---
+
+# 14. Additive extension — whole-ecosystem contract audit
+
+This section is **additive only**. Sections 1–13 above remain unchanged and retain their original requirements and priority. The requirements below were found by reviewing the current `docker-tools` codebase together with the connected `infocyph/docker-runner`, `infocyph/docker-nginx`, `infocyph/docker-apache`, `infocyph/docker-llm-sm`, and LocalDevStack integration contracts.
+
+## 14.1 Treat connected images as one tested contract surface
+
+`docker-tools` is not an isolated utility image. It generates configuration and control-plane state consumed by other LocalDevStack images, so CI must freeze the interfaces between them.
+
+Maintain an explicit compatibility matrix covering:
+
+- Tools -> Nginx: generated vhosts, TLS paths, FPM socket assumptions, proxy include names, streaming/WebSocket behavior and reserved localhost routes;
+- Tools -> Apache: generated vhosts, `/app`, log paths, TLS/mTLS certificate paths, HTTP/2 and PHP-FPM proxy behavior;
+- Tools -> Runner: cron/supervisor directories, generated config format and safe reload behavior;
+- Tools -> `llm-sm`: HTTP client contract at `http://llm-sm:11434`, with no lifecycle ownership;
+- Tools -> LocalDevStack: canonical service catalog, mounted state/config paths, network/service names, image compatibility and product-level orchestration ownership.
+
+Compatibility tests should use the actual hardened sibling images or explicit tested refs, not reimplement their syntax/contracts with local mocks. Floating `latest` may still exist operationally, but a LocalDevStack release should record which image versions/digests were compatibility-tested together.
+
+## 14.2 Docker socket/project-scope hardening
+
+Tools currently has enough Docker access to inspect the entire host daemon. LocalDevStack-owned commands must default to the current LocalDevStack Compose project rather than silently falling back to all host containers.
+
+Requirements:
+
+- resolve the target stack primarily from `com.docker.compose.project` / `com.docker.compose.service` labels and the canonical LocalDevStack catalog;
+- scope monitor discovery, status discovery and certificate SAN discovery to the current project/network by default;
+- do not fall back to `docker ps -a` across the entire daemon merely because the project could not be inferred;
+- provide an explicit `--all`/diagnostic opt-in only where host-wide inspection is genuinely useful;
+- avoid inspecting unrelated containers for environment variables, credentials, aliases or mounted paths;
+- prefer labels/catalog metadata over fuzzy container-name/image-substring matching;
+- treat inability to determine the LocalDevStack project as a bounded degraded state rather than permission to widen scope.
+
+Database/queue probes must not guess credentials. In particular, remove fixed credential fallbacks; missing credentials should result in a clear `not_configured`/`probe_unavailable` state. Secrets obtained for a probe must never appear in JSON output, logs or AI context.
+
+## 14.3 TLS and key-material separation across images
+
+Tools remains the certificate issuer, but the current shared-volume model should be tightened so consumers receive only the material required for their role.
+
+Requirements:
+
+- preserve the consumer-visible public trust path `/etc/share/rootCA/rootCA.pem`, but separate the mkcert private CA store from the public root export so Nginx/Apache/Mailpit never receive `rootCA-key.pem`;
+- coordinate the backing-volume/mount split in LocalDevStack rather than changing the established consumer path arbitrarily;
+- move toward role-specific TLS mounts so Nginx, Apache and Mailpit do not all receive every server/client/user private key merely because they share `/etc/mkcert` today;
+- keep `lds-client-internal` available only to components that actually perform the Nginx -> Apache mTLS client role;
+- treat the human/browser `lds-client-user.p12` bundle as sensitive credential material, not as a generic public artifact;
+- place the user P12 export behind an explicit protected workflow and do not expose it through an unauthenticated admin endpoint;
+- do not generate/export a passwordless P12 by default unless the final LocalDevStack UX has a deliberate, documented local-only protection model;
+- add tests proving that private CA material is absent from consumer containers and that each consumer sees only its expected certificate/key set.
+
+## 14.4 Admin-panel control-plane trust boundary
+
+The admin panel can mutate hosts and Runner automation and can currently expose certificate artifacts. Treat it as a privileged local control-plane UI, not a passive dashboard.
+
+Requirements:
+
+- introduce a lightweight LocalDevStack-scoped authorization boundary for mutating APIs and sensitive downloads; a per-stack token/session contract is sufficient if it stays simple;
+- require same-origin/CSRF protection for browser-triggered mutations;
+- keep mutating operations on explicit POST/PUT/PATCH/DELETE paths and require visible confirmation for destructive actions;
+- protect mTLS/P12 downloads separately from public root-CA downloads;
+- centralize external process execution through one audited runner abstraction;
+- eliminate direct `shell_exec()` and duplicate `proc_open()` implementations from pages/services once the shared runner is capable enough;
+- add stdout/stderr byte caps to the process runner so a noisy command cannot exhaust the admin PHP process;
+- make timeout termination clean up the complete spawned command where practical rather than only the immediate process;
+- add baseline response hardening (`no-store`, content-type protection and appropriate frame/referrer/CSP policy) without turning this into a full web-framework project;
+- never make the admin panel accessible through a host-published raw port by default; the intended user route remains the LocalDevStack/Nginx convenience route.
+
+AI actions in the panel inherit this same authorization boundary and remain user-triggered only.
+
+## 14.5 Transactional control-plane writes and rollback
+
+Control-plane edits must not destroy the last valid state before the replacement has been rendered and validated.
+
+### Host/vhost edits
+
+Current host editing removes the existing host before the replacement is known-good. Change the implementation flow to:
+
+1. normalize/validate the requested model;
+2. render replacement artifacts into staging paths;
+3. validate generated Compose/Nginx/Apache/FPM artifacts using the real target runtimes;
+4. atomically replace the previous artifacts only after validation succeeds;
+5. retain/restore the previous valid set if commit or downstream reload fails.
+
+Create/edit/delete/recreate tests must cover partial failure and rollback.
+
+### Runner automation edits
+
+Cron/supervisor changes should similarly be staged before replacing active files. Validate the staged content, atomically install it, invoke the Runner reload contract, and restore the previous version if the reload rejects the new configuration.
+
+### `env-store`
+
+The JSON backend needs real concurrent-writer safety:
+
+- create temporary files in the destination directory rather than generic `/tmp`, so the final rename is same-filesystem and atomic;
+- use a bounded lock around read-modify-write operations;
+- preserve intended ownership/mode when replacing the file;
+- test simultaneous CLI/admin writes and malformed-store recovery behavior.
+
+Also classify `/etc/share/state` explicitly. Ephemeral diagnostic/cache state may remain container-local; durable product configuration must live in a LocalDevStack-owned persisted/mounted location or the canonical service/config catalog rather than disappearing with a Tools container recreation.
+
+## 14.6 Multi-architecture native artifact correctness
+
+The publication plan requires amd64 + arm64, but every downloaded native executable must be architecture-aware before that can be trusted.
+
+Requirements:
+
+- use BuildKit `TARGETARCH`/`TARGETOS` (with explicit upstream-name mapping where required) for mkcert and any other downloaded native binary;
+- remove the hard-coded `linux/amd64` mkcert fetch from the multi-arch path;
+- verify release checksums/signatures where upstream provides them;
+- verify the downloaded binary architecture and execute a version/smoke command inside each candidate architecture;
+- make multi-arch publication fail if any native asset falls back to the wrong architecture;
+- include resolved native tool versions and checksums in publication summaries alongside rolling base/dependency resolution.
+
+Runtime metadata generation should also sort PHP/Node versions semantically/numerically rather than by plain string order so future versions such as `8.10` cannot be ordered incorrectly relative to `8.9`.
+
+## 14.7 Reserved LocalDevStack routes are an ecosystem ABI
+
+The hardened Nginx image owns predefined convenience routes such as `admin.localhost` and `llm.localhost`. `mkhost` must not allow generated user hosts to shadow reserved product routes.
+
+Requirements:
+
+- reject collisions with LocalDevStack-reserved convenience hostnames during host creation/edit;
+- source the reserved-route list from the canonical LocalDevStack catalog/route contract when that contract becomes available rather than maintaining another permanent hard-coded copy in Tools;
+- keep `llm.localhost` fully Nginx-owned; Tools does not generate a competing LLM vhost;
+- add a CI guard that renders every maintained Tools Nginx template against the actual hardened Nginx image and verifies every referenced include exists (`proxy_params`, timeout/buffer/streaming/WebSocket/H2/FastCGI snippets, etc.);
+- validate Apache templates against the hardened Apache image and its loaded-module/TLS/mTLS contract;
+- validate Runner scheduler paths against the hardened Runner image rather than assuming path compatibility.
+
+## 14.8 AI provider safety, latency and deterministic behavior
+
+Extend the provider layer with the following operational rules:
+
+- separate a short provider/DNS/connect timeout from the potentially long generation timeout;
+- cache positive/negative availability briefly so a missing optional `llm-sm` does not add repeated connection latency to every command/panel render;
+- bound request bytes, response bytes and diagnostic/context bytes independently;
+- retry safe reachability/preflight requests only; do not blindly replay a generation after partial streamed output;
+- if `LDS_AI_MODEL` is empty, auto-select only when the provider state makes the choice deterministic; if multiple installed models are plausible, return a clear ambiguity error rather than silently choosing the first result;
+- treat repository files, logs, diffs, config and monitor text as untrusted **data**, not as trusted provider/system instructions; prompt construction must keep the instruction boundary explicit;
+- make redaction deterministic and test it with credential/token/URL/header/.env fixtures before any content reaches the provider;
+- do not persist raw prompts/responses by default; optional debug telemetry should contain redacted metadata such as provider, model, duration, byte counts and a safe request/context hash rather than secret-bearing payloads;
+- admin-panel generations should support streaming/cancellation or another bounded UX rather than tying up a PHP request for the full maximum generation timeout;
+- keep fake-provider tests as the normal Tools CI path and add lightweight protocol/schema compatibility coverage for the `llm-sm` API without requiring a real model download in every Tools check.
+
+## 14.9 Tools-owned service health and lifecycle
+
+Add a small Tools health contract that checks only services owned by this image.
+
+The healthcheck should:
+
+- verify the main notifier/control process is alive and its FIFO/runtime state is sane;
+- verify the admin panel only when `ADMIN_PANEL_AUTOSTART=1`;
+- surface a dead background admin process instead of leaving the container permanently "healthy" because `notifierd` is still PID 1;
+- remain independent of Docker daemon reachability, database availability and `llm-sm` availability;
+- keep AI strictly optional, so an absent LLM can never make Tools unhealthy.
+
+The notifier TCP listener should remain an internal LocalDevStack transport by default. Do not publish it to the host unless explicitly requested; if future external exposure is supported, require authentication rather than relying on the current optional empty token.
+
+## 14.10 Additional CI/acceptance gates from this audit
+
+In addition to Sections 9 and 12, add focused gates for:
+
+1. amd64 and arm64 native-tool execution (`mkcert`, lazydocker where applicable, Toolset commands);
+2. isolation from an unrelated Docker Compose project running on the same daemon;
+3. certificate SAN collection excluding unrelated host containers;
+4. absence of `rootCA-key.pem` from Nginx/Apache/Mailpit consumer mounts;
+5. protected admin mutation and sensitive-artifact endpoints;
+6. centralized process execution with bounded output;
+7. host-edit failure rollback preserving the previous working host;
+8. cron/supervisor invalid-update rollback preserving the previous Runner config;
+9. concurrent `env-store` writers without lost/corrupt updates;
+10. rejection of reserved LocalDevStack hostnames including `llm.localhost`;
+11. actual Nginx include/template ABI validation against the hardened Nginx image;
+12. actual Apache/FPM/TLS template validation against the hardened Apache/runtime contract;
+13. AI-disabled, provider-unreachable, ambiguous-model, redaction, oversized-context, timeout and interrupted-stream behavior;
+14. Tools health remaining green with AI disabled/unavailable while failing when an enabled Tools-owned admin process dies.
+
+These gates should be assigned to the existing implementation batches according to the component they protect rather than creating a separate fifth hardening phase.

@@ -27,7 +27,7 @@ grep -q 'Content-Security-Policy' scripts/admin-panel/src/App/Kernel.php || fail
 grep -q "'samesite' => 'Strict'" scripts/admin-panel/src/App/Kernel.php || fail 'SameSite=Strict control cookie missing'
 grep -q 'hash_equals' scripts/admin-panel/src/App/Kernel.php || fail 'admin token comparison missing'
 grep -q 'sensitiveDownload' scripts/admin-panel/src/App/Kernel.php || fail 'mTLS artifact protection missing'
-grep -q 'sameOrigin' scripts/admin-panel/src/App/Kernel.php || fail 'same-origin mutation guard missing'
+grep -q 'isSameOrigin' scripts/admin-panel/src/App/Kernel.php || fail 'same-origin mutation guard missing'
 
 # Docker project scope and credential safety.
 grep -q 'label=com.docker.compose.project=' scripts/shells/certify.sh || fail 'certificate Docker discovery is not project-scoped'

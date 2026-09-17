@@ -541,6 +541,7 @@ do_enc() {
     out="$(resolve_alias_path "$out_raw")"
   fi
   ensure_safe_path_or_die "$out" "Output"
+  mkdir -p -- "$(dirname "$out")" || die "Cannot create output directory: $(dirname "$out")"
 
   local keyf yaml
   keyf="$(choose_key_file)"

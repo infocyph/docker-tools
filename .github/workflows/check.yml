@@ -50,6 +50,9 @@ jobs:
             php -l "$file" >/dev/null
           done < <(find scripts/admin-panel -type f -name '*.php' -print0)
 
+      - name: Dependency and architecture contracts
+        run: bash scripts/tests/dependency-contract.sh
+
       - name: Existing helper smoke tests
         run: bash scripts/tests/senv-smoke.sh
 
@@ -92,6 +95,7 @@ jobs:
       - name: Verify image commands and generated metadata
         run: |
           docker run --rm --entrypoint bash infocyph/tools:ci -lc '
+            test "$(uname -m)" = "x86_64" &&
             command -v composer >/dev/null &&
             command -v mkcert >/dev/null &&
             command -v lazydocker >/dev/null &&
@@ -101,8 +105,14 @@ jobs:
             command -v netx >/dev/null &&
             command -v notifierd >/dev/null &&
             command -v php >/dev/null &&
-            jq -e ".php.active | type == \"array\"" "$RUNTIME_VERSIONS_DB" >/dev/null &&
-            jq -e ".node.active | type == \"array\"" "$RUNTIME_VERSIONS_DB" >/dev/null
+            mkcert -version >/dev/null &&
+            lazydocker --version >/dev/null &&
+            gitx --version >/dev/null &&
+            chromacat --version >/dev/null &&
+            sqlitex --version >/dev/null &&
+            netx --version >/dev/null &&
+            jq -e ".php.active | type == \"array\" and length > 0" "$RUNTIME_VERSIONS_DB" >/dev/null &&
+            jq -e ".node.active | type == \"array\" and length > 0" "$RUNTIME_VERSIONS_DB" >/dev/null
           '
 
       - name: Admin-panel startup smoke
@@ -122,10 +132,10 @@ jobs:
           exit 1
 
   arm64:
-    name: arm64 image build
+    name: arm64 image smoke
     needs: static
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -145,8 +155,22 @@ jobs:
         with:
           context: .
           platforms: linux/arm64
+          load: true
           pull: true
           push: false
           tags: infocyph/tools:ci-arm64
           cache-from: type=gha,scope=check-arm64
           cache-to: type=gha,scope=check-arm64,mode=max
+
+      - name: Verify arm64 native tools
+        run: |
+          docker run --rm --platform linux/arm64 --entrypoint bash infocyph/tools:ci-arm64 -lc '
+            test "$(uname -m)" = "aarch64" &&
+            mkcert -version >/dev/null &&
+            lazydocker --version >/dev/null &&
+            gitx --version >/dev/null &&
+            chromacat --version >/dev/null &&
+            sqlitex --version >/dev/null &&
+            netx --version >/dev/null &&
+            jq -e ".php.active | type == \"array\" and length > 0" "$RUNTIME_VERSIONS_DB" >/dev/null
+          '

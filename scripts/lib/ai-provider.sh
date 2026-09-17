@@ -271,7 +271,7 @@ ai_assert_safe_file() {
     ai_error "refusing private-key content: $path"
     return 77
   fi
-  if [[ -s "$path" ]] && rg -a -q '\\x00' -- "$path"; then
+  if [[ -s "$path" ]] && rg -a -q '\x00' -- "$path"; then
     ai_error "refusing binary file input: $path"
     return 77
   fi

@@ -63,11 +63,17 @@ jobs:
       - name: AI architecture contracts
         run: bash scripts/tests/ai-contract.sh
 
+      - name: AI intelligence contracts
+        run: bash scripts/tests/ai-intelligence-contract.sh
+
       - name: AI provider fake-endpoint smoke
         run: bash scripts/tests/ai-provider-smoke.sh
 
       - name: AI client and gitx policy smoke
         run: bash scripts/tests/ai-client-smoke.sh
+
+      - name: AI intelligence and admin smoke
+        run: bash scripts/tests/ai-intelligence-smoke.sh
 
       - name: Env-store concurrency and corruption recovery
         run: bash scripts/tests/env-store-concurrency.sh
@@ -120,6 +126,7 @@ jobs:
             command -v lazydocker >/dev/null &&
             command -v gitx >/dev/null &&
             command -v askai >/dev/null &&
+            command -v aiops >/dev/null &&
             command -v chromacat >/dev/null &&
             command -v sqlitex >/dev/null &&
             command -v netx >/dev/null &&
@@ -135,6 +142,7 @@ jobs:
             lazydocker --version >/dev/null &&
             gitx --version >/dev/null &&
             askai --help >/dev/null &&
+            aiops --help >/dev/null &&
             chromacat --version >/dev/null &&
             sqlitex --version >/dev/null &&
             netx --version >/dev/null &&
@@ -152,7 +160,13 @@ jobs:
             AI_GITX_WRAPPER=/usr/local/bin/gitx \
             AI_PROVIDER_LIB=/usr/local/lib/docker-tools/ai-provider.sh \
             AI_FAKE_ROUTER=/etc/share/scripts/tests/fake-ollama-router.php \
-            bash /etc/share/scripts/tests/ai-client-smoke.sh
+            bash /etc/share/scripts/tests/ai-client-smoke.sh &&
+            AI_AIOPS_BIN=/usr/local/bin/aiops \
+            AI_ASKAI_BIN=/usr/local/bin/askai \
+            AI_PROVIDER_LIB=/usr/local/lib/docker-tools/ai-provider.sh \
+            AI_FAKE_ROUTER=/etc/share/scripts/tests/fake-ollama-router.php \
+            AI_ADMIN_BOOTSTRAP=/etc/share/admin-panel/app/bootstrap.php \
+            bash /etc/share/scripts/tests/ai-intelligence-smoke.sh
           '
 
       - name: SOPS environment helper smoke
@@ -246,6 +260,7 @@ jobs:
             test "$(uname -m)" = "aarch64" &&
             command -v tools-healthcheck >/dev/null &&
             command -v askai >/dev/null &&
+            command -v aiops >/dev/null &&
             command -v flock >/dev/null &&
             test -x /usr/local/libexec/gitx-toolset &&
             test -r "$LDS_AI_PROVIDER_LIB" &&
@@ -254,6 +269,7 @@ jobs:
             lazydocker --version >/dev/null &&
             gitx --version >/dev/null &&
             askai --help >/dev/null &&
+            aiops --help >/dev/null &&
             chromacat --version >/dev/null &&
             sqlitex --version >/dev/null &&
             netx --version >/dev/null &&

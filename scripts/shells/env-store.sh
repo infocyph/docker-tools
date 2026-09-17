@@ -5,6 +5,8 @@ BACKEND="${ENV_STORE_BACKEND:-json}"
 STORE_FILE="${ENV_STORE_JSON:-/etc/share/state/env-store.json}"
 STORE_DB="${ENV_STORE_DB:-/etc/share/state/env-store.db}"
 SQLITE_BIN="${ENV_STORE_SQLITE_BIN:-sqlite3}"
+LOCK_TIMEOUT_MS="${ENV_STORE_LOCK_TIMEOUT_MS:-5000}"
+LOCK_DIR="${STORE_FILE}.lock"
 
 die() {
   printf "Error: %s\n" "$*" >&2
@@ -49,6 +51,45 @@ now_iso() {
   date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || printf ''
 }
 
+json_lock_acquire() {
+  [[ "$LOCK_TIMEOUT_MS" =~ ^[0-9]+$ ]] || LOCK_TIMEOUT_MS=5000
+  local waited=0 owner=""
+  mkdir -p "$(dirname "$STORE_FILE")"
+
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    owner="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+    if [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null; then
+      rm -rf -- "$LOCK_DIR"
+      continue
+    fi
+    if (( waited >= LOCK_TIMEOUT_MS )); then
+      die "Timed out waiting for env-store lock: $LOCK_DIR"
+    fi
+    sleep 0.05
+    ((waited += 50))
+  done
+
+  printf '%s\n' "$$" >"$LOCK_DIR/pid"
+}
+
+json_lock_release() {
+  rm -rf -- "$LOCK_DIR"
+}
+
+preserve_store_metadata() {
+  local tmp="$1"
+  if [[ -f "$STORE_FILE" ]]; then
+    chmod --reference="$STORE_FILE" "$tmp"
+    chown --reference="$STORE_FILE" "$tmp" 2>/dev/null || true
+  else
+    chmod 0600 "$tmp"
+  fi
+}
+
+validate_store_json() {
+  jq -e 'type=="object" and (.data|type=="object")' "$1" >/dev/null 2>&1
+}
+
 ensure_store() {
   if [[ "$BACKEND" == "json" ]]; then
     ensure_store_json
@@ -58,18 +99,30 @@ ensure_store() {
 }
 
 ensure_store_json() {
-  local dir
+  local dir tmp
   dir="$(dirname "$STORE_FILE")"
   mkdir -p "$dir"
+  json_lock_acquire
 
   if [[ ! -f "$STORE_FILE" || ! -s "$STORE_FILE" ]]; then
-    jq -cn --arg ts "$(now_iso)" '{version:1,updated_at:$ts,data:{}}' >"$STORE_FILE"
+    tmp="$(mktemp "$dir/.env-store.init.XXXXXX")"
+    if ! jq -cn --arg ts "$(now_iso)" '{version:1,updated_at:$ts,data:{}}' >"$tmp"; then
+      rm -f -- "$tmp"
+      json_lock_release
+      die "Failed to initialize store: $STORE_FILE"
+    fi
+    preserve_store_metadata "$tmp"
+    mv -f -- "$tmp" "$STORE_FILE"
+    json_lock_release
     return 0
   fi
 
-  if ! jq -e 'type=="object" and (.data|type=="object")' "$STORE_FILE" >/dev/null 2>&1; then
+  if ! validate_store_json "$STORE_FILE"; then
+    json_lock_release
     die "Invalid store format: $STORE_FILE"
   fi
+
+  json_lock_release
 }
 
 ensure_store_sqlite() {
@@ -121,10 +174,36 @@ write_with_filter() {
   if (( $# > 1 )); then
     jq_args=("${@:1:$#-1}")
   fi
-  local tmp
-  tmp="$(mktemp)"
-  jq "${jq_args[@]}" "$filter" "$STORE_FILE" >"$tmp"
-  mv "$tmp" "$STORE_FILE"
+
+  local dir tmp
+  dir="$(dirname "$STORE_FILE")"
+  mkdir -p "$dir"
+  json_lock_acquire
+
+  if ! validate_store_json "$STORE_FILE"; then
+    json_lock_release
+    die "Invalid store format: $STORE_FILE"
+  fi
+
+  tmp="$(mktemp "$dir/.env-store.write.XXXXXX")"
+  if ! jq "${jq_args[@]}" "$filter" "$STORE_FILE" >"$tmp"; then
+    rm -f -- "$tmp"
+    json_lock_release
+    die "Failed to update store: $STORE_FILE"
+  fi
+  if ! validate_store_json "$tmp"; then
+    rm -f -- "$tmp"
+    json_lock_release
+    die "Refusing invalid store update: $STORE_FILE"
+  fi
+
+  preserve_store_metadata "$tmp"
+  if ! mv -f -- "$tmp" "$STORE_FILE"; then
+    rm -f -- "$tmp"
+    json_lock_release
+    die "Failed to replace store atomically: $STORE_FILE"
+  fi
+  json_lock_release
 }
 
 cmd_get() {
@@ -141,9 +220,7 @@ cmd_get() {
         def_set=1
         shift || true
         ;;
-      *)
-        die "Unknown flag for get: $1"
-        ;;
+      *) die "Unknown flag for get: $1" ;;
     esac
   done
 
@@ -214,9 +291,7 @@ cmd_get_json() {
         def_set=1
         shift || true
         ;;
-      *)
-        die "Unknown flag for get-json: $1"
-        ;;
+      *) die "Unknown flag for get-json: $1" ;;
     esac
   done
 
@@ -349,7 +424,9 @@ cmd_json() {
 
 cmd_reset() {
   if [[ "$BACKEND" == "json" ]]; then
-    jq -cn --arg ts "$(now_iso)" '{version:1,updated_at:$ts,data:{}}' >"$STORE_FILE"
+    write_with_filter \
+      --arg ts "$(now_iso)" \
+      '{version:1,updated_at:$ts,data:{}}'
   else
     local ts
     ts="$(now_iso)"
@@ -415,6 +492,7 @@ Env:
   ENV_STORE_JSON=/etc/share/state/env-store.json
   ENV_STORE_DB=/etc/share/state/env-store.db
   ENV_STORE_SQLITE_BIN=sqlite3
+  ENV_STORE_LOCK_TIMEOUT_MS=5000
 EOF
 }
 
@@ -450,9 +528,7 @@ main() {
     import) cmd_import "$@" ;;
     import-json) cmd_import_json "$@" ;;
     reset) cmd_reset "$@" ;;
-    *)
-      die "Unknown command: $cmd"
-      ;;
+    *) die "Unknown command: $cmd" ;;
   esac
 }
 

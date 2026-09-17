@@ -175,6 +175,7 @@ jobs:
 
           docker exec "$name" tools-healthcheck
           docker exec "$name" test ! -e /run/admin-panel.pid
+          docker exec "$name" bash -c 'test "$STATUS_PROJECT" = unknown && test "$LDS_COMPOSE_PROJECT" = unknown && test -s "$BASH_ENV"'
           docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
 
   arm64:

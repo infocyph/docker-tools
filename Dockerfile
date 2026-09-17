@@ -158,7 +158,6 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     NOTIFY_FIFO=/run/notify.fifo \
     NOTIFY_TCP_PORT=9901 \
     NOTIFY_PREFIX=__HOST_NOTIFY__ \
-    NOTIFY_TOKEN="" \
     RUNTIME_VERSIONS_DB=/etc/share/runtime-versions.json \
     LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8 \
@@ -184,7 +183,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     ADMIN_PANEL_RUNNER_SUPERVISOR_CONF=/etc/supervisor/supervisord.conf \
     GIT_CONFIG_GLOBAL=/git-config/.gitconfig \
     BANNER_SHOWN=0 \
-    HOST_OS=${HOST_OS:-linux}
+    HOST_OS=linux
 
 RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \

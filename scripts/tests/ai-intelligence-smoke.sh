@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${AI_TEST_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
+AIOPS="${AI_AIOPS_BIN:-$ROOT/scripts/shells/aiops.sh}"
+ASKAI="${AI_ASKAI_BIN:-$ROOT/scripts/shells/askai.sh}"
+PROVIDER="${AI_PROVIDER_LIB:-$ROOT/scripts/lib/ai-provider.sh}"
+ROUTER="${AI_FAKE_ROUTER:-$ROOT/scripts/tests/fake-ollama-router.php}"
+ADMIN_BOOTSTRAP="${AI_ADMIN_BOOTSTRAP:-$ROOT/scripts/admin-panel/app/bootstrap.php}"
+
+fail() {
+  printf 'ai-intelligence-smoke: %s\n' "$*" >&2
+  exit 1
+}
+
+for path in "$AIOPS" "$ASKAI" "$PROVIDER" "$ROUTER"; do
+  [[ -r "$path" ]] || fail "required test input missing: $path"
+done
+
+tmp="$(mktemp -d)"
+pid=''
+cleanup() {
+  [[ -z "$pid" ]] || kill "$pid" >/dev/null 2>&1 || true
+  rm -rf -- "$tmp"
+}
+trap cleanup EXIT INT TERM
+
+mode_file="$tmp/mode"
+capture_file="$tmp/capture"
+printf 'single\n' >"$mode_file"
+: >"$capture_file"
+
+port=$((40000 + RANDOM % 15000))
+FAKE_OLLAMA_MODE_FILE="$mode_file" \
+FAKE_OLLAMA_CAPTURE_FILE="$capture_file" \
+php -S "127.0.0.1:$port" "$ROUTER" >"$tmp/server.log" 2>&1 &
+pid=$!
+
+export LDS_AI_PROVIDER_LIB="$PROVIDER"
+export LDS_AI_ENABLED=1
+export LDS_AI_PROVIDER=ollama
+export LDS_AI_URL="http://127.0.0.1:$port"
+export LDS_AI_MODEL=''
+export LDS_AI_CONNECT_TIMEOUT=1
+export LDS_AI_PREFLIGHT_TIMEOUT=2
+export LDS_AI_TIMEOUT=3
+export LDS_AI_AVAILABILITY_TTL=1
+export LDS_AI_MAX_CONTEXT_BYTES=524288
+export LDS_AI_MAX_REQUEST_BYTES=1048576
+export LDS_AI_MAX_RESPONSE_BYTES=2097152
+export LDS_AI_CACHE_DIR="$tmp/cache"
+export LDS_AIOPS_COLLECT_TIMEOUT=2
+export ADMIN_PANEL_AIOPS_BIN="$AIOPS"
+export ADMIN_PANEL_ASKAI_BIN="$ASKAI"
+
+for _ in $(seq 1 30); do
+  if curl -fsS --connect-timeout 1 --max-time 1 "$LDS_AI_URL/api/tags" >/dev/null 2>&1; then
+    break
+  fi
+  kill -0 "$pid" >/dev/null 2>&1 || { cat "$tmp/server.log" >&2; fail 'fake provider exited early'; }
+  sleep 0.1
+done
+curl -fsS --connect-timeout 1 --max-time 1 "$LDS_AI_URL/api/tags" >/dev/null || fail 'fake provider did not start'
+
+mkdir -p "$tmp/bin"
+cat >"$tmp/bin/collector" <<'STUB'
+#!/usr/bin/env bash
+name="$(basename "$0")"
+case "$name" in
+  status)
+    printf '%s\n' '{"ok":true,"project":"smoke","summary":{"healthy":7,"unhealthy":1},"api_key":"super-secret-value"}'
+    ;;
+  monitor-alerts)
+    printf '%s\n' '{"ok":true,"summary":{"firing":1},"incidents":[{"id":"db_fail","firing":true}]}'
+    ;;
+  monitor-slo)
+    printf '%s\n' '{"ok":true,"summary":{"fail":1,"pass":3}}'
+    ;;
+  monitor-db)
+    printf '%s\n' '{"ok":true,"summary":{"fail":1},"items":[{"engine":"redis","level":"fail"}],"token":"secret-token-value"}'
+    ;;
+  monitor-queue)
+    printf '%s\n' '{"ok":true,"summary":{"fail":0,"warn":1}}'
+    ;;
+  monitor-tls)
+    printf '%s\n' '{"ok":true,"summary":{"fail":0,"warn":1}}'
+    ;;
+  monitor-volumes)
+    printf '%s\n' '{"ok":true,"summary":{"fail":0,"warn":1}}'
+    ;;
+  monitor-drift)
+    printf '%s\n' '{"ok":true,"summary":{"fail":0,"warn":1}}'
+    ;;
+  monitor-log-heatmap)
+    printf '%s\n' '{"ok":true,"summary":{"errors":4},"top":[{"signature":"timeout","count":4}]}'
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+STUB
+chmod 700 "$tmp/bin/collector"
+for name in status monitor-alerts monitor-slo monitor-db monitor-queue monitor-tls monitor-volumes monitor-drift monitor-log-heatmap; do
+  ln -s collector "$tmp/bin/$name"
+done
+export PATH="$tmp/bin:$PATH"
+
+printf '1/6 operational explanation + deterministic redaction\n'
+out="$(bash "$AIOPS" explain db --json)"
+jq -e '.ok == true and .source == "db" and .answer == "ok"' <<<"$out" >/dev/null || fail 'db explanation failed'
+context="$(jq -r '.context' <<<"$out")"
+grep -q '\[REDACTED\]' <<<"$context" || fail 'operational context was not redacted'
+if grep -q 'secret-token-value' <<<"$context"; then
+  fail 'secret leaked into returned AI context'
+fi
+
+printf '2/6 context-only never generates\n'
+before="$(wc -l <"$capture_file" | tr -d '[:space:]')"
+logs_context="$(bash "$AIOPS" explain logs --context-only)"
+after="$(wc -l <"$capture_file" | tr -d '[:space:]')"
+[[ "$before" == "$after" ]] || fail 'context-only unexpectedly called generation endpoint'
+grep -q '"errors":4' <<<"$logs_context" || fail 'log context missing deterministic heatmap data'
+
+printf '3/6 troubleshoot summary\n'
+troubleshoot="$(bash "$AIOPS" troubleshoot --json)"
+jq -e '.ok == true and .source == "troubleshoot" and .answer == "ok"' <<<"$troubleshoot" >/dev/null || fail 'troubleshoot analysis failed'
+jq -er '.context' <<<"$troubleshoot" | grep -q '"kind":"troubleshoot"' || fail 'troubleshoot context missing combined snapshot'
+
+printf '4/6 review + Graphify input safety\n'
+printf 'server_name app.localhost;\n' >"$tmp/nginx.conf"
+[[ "$(bash "$AIOPS" review --file "$tmp/nginx.conf")" == ok ]] || fail 'safe config review failed'
+printf '{"nodes":3,"edges":2}\n' >"$tmp/graphify.json"
+[[ "$(bash "$AIOPS" graphify --file "$tmp/graphify.json")" == ok ]] || fail 'Graphify analysis failed'
+printf 'SECRET=value\n' >"$tmp/.env"
+set +e
+bash "$AIOPS" review --file "$tmp/.env" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+[[ "$rc" -eq 77 ]] || fail "sensitive review input returned $rc instead of 77"
+
+printf '5/6 repository review is metadata-only\n'
+repo_context="$(cd "$ROOT" && bash "$AIOPS" repo-review --context-only)"
+grep -q '"kind":"repository-metadata"' <<<"$repo_context" || fail 'repo review metadata contract missing'
+if grep -q '^diff --git ' <<<"$repo_context"; then
+  fail 'repo review unexpectedly included diff content'
+fi
+
+printf '6/6 bounded admin service delegates to aiops\n'
+if [[ -r "$ADMIN_BOOTSTRAP" ]]; then
+  AI_ADMIN_BOOTSTRAP="$ADMIN_BOOTSTRAP" php <<'PHP'
+<?php
+declare(strict_types=1);
+
+require getenv('AI_ADMIN_BOOTSTRAP');
+$service = new AdminPanel\Service\AiAssistantService();
+
+$status = $service->status();
+if (($status['available'] ?? false) !== true) {
+    fwrite(STDERR, "admin AI status did not report available\n");
+    exit(1);
+}
+
+$result = $service->analyze(['source' => 'db', 'request' => 'Explain the failure.']);
+if (($result['ok'] ?? false) !== true || ($result['answer'] ?? '') !== 'ok' || !str_contains((string)($result['context'] ?? ''), '[REDACTED]')) {
+    fwrite(STDERR, "admin AI analysis contract failed\n");
+    exit(1);
+}
+
+$invalid = $service->analyze(['source' => 'not-a-source']);
+if (($invalid['error'] ?? '') !== 'validation_source') {
+    fwrite(STDERR, "admin AI validation contract failed\n");
+    exit(1);
+}
+PHP
+fi
+
+printf 'ai-intelligence-smoke: ok\n'

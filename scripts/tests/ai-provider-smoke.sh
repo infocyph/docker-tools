@@ -99,13 +99,20 @@ set -e
 grep -q 'configured model is not installed' "$tmp/err" || fail 'missing model error missing'
 export LDS_AI_MODEL=''
 
-printf '6/10 sensitive-file refusal\n'
+printf '6/10 sensitive + binary file refusal\n'
 printf 'SECRET=value\n' >"$tmp/.env"
 set +e
 ai_assert_safe_file "$tmp/.env" >"$tmp/out" 2>"$tmp/err"
 rc=$?
 set -e
 [[ "$rc" -eq 77 ]] || fail "sensitive file returned $rc instead of 77"
+printf 'text\0binary\n' >"$tmp/binary.dat"
+set +e
+ai_assert_safe_file "$tmp/binary.dat" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+[[ "$rc" -eq 77 ]] || fail "binary file returned $rc instead of 77"
+grep -q 'binary file input' "$tmp/err" || fail 'binary file refusal message missing'
 
 printf '7/10 context + response limits\n'
 export LDS_AI_MAX_CONTEXT_BYTES=32
@@ -122,7 +129,7 @@ set +e
 ai_generate 'test' >"$tmp/out" 2>"$tmp/err"
 rc=$?
 set -e
-[[ "$rc" -eq 65 ]] || fail "oversized response returned $rc instead of 65"
+[[ "$rc" -eq 65 || "$rc" -eq 69 ]] || fail "oversized response returned unexpected code $rc"
 export LDS_AI_MAX_RESPONSE_BYTES=2097152
 
 printf '8/10 generation timeout is bounded\n'

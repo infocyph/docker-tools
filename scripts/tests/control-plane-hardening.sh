@@ -30,6 +30,14 @@ grep -q 'sensitiveDownload' scripts/admin-panel/src/App/Kernel.php || fail 'mTLS
 grep -q 'isSameOrigin' scripts/admin-panel/src/App/Kernel.php || fail 'same-origin mutation guard missing'
 
 # Docker project scope and credential safety.
+grep -q 'BASH_ENV=/run/lds-project.env' Dockerfile || fail 'runtime Bash project scope env missing'
+grep -q 'init_project_scope' scripts/shells/entrypoint.sh || fail 'entrypoint project scope initialization missing'
+grep -q 'project="unknown"' scripts/shells/entrypoint.sh || fail 'unresolved project must degrade to unknown'
+grep -q 'export STATUS_PROJECT LDS_COMPOSE_PROJECT' scripts/shells/entrypoint.sh || fail 'project scope is not exported to child helpers'
+if grep -Eq 'docker ps .*compose\.project.*uniq -c' scripts/shells/entrypoint.sh; then
+  fail 'entrypoint project scope widens to host-wide project inference'
+fi
+
 grep -q 'label=com.docker.compose.project=' scripts/shells/certify.sh || fail 'certificate Docker discovery is not project-scoped'
 if grep -Eq 'docker ps -q[[:space:]]+2>/dev/null' scripts/shells/certify.sh; then
   fail 'certificate discovery still permits daemon-wide docker ps'

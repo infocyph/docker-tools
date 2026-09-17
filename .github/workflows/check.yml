@@ -48,6 +48,7 @@ jobs:
           while IFS= read -r -d '' file; do
             php -l "$file" >/dev/null
           done < <(find scripts/admin-panel -type f -name '*.php' -print0)
+          php -l scripts/tests/process-runner-smoke.php >/dev/null
 
       - name: Dependency and architecture contracts
         run: bash scripts/tests/dependency-contract.sh
@@ -60,6 +61,9 @@ jobs:
 
       - name: Env-store concurrency and corruption recovery
         run: bash scripts/tests/env-store-concurrency.sh
+
+      - name: Bounded admin process runner
+        run: php scripts/tests/process-runner-smoke.php
 
       - name: Install actionlint
         env:
@@ -153,6 +157,24 @@ jobs:
             exit 1
           fi
 
+          docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
+
+      - name: Tools health without admin panel
+        run: |
+          set -euo pipefail
+          name="tools-no-admin-${RANDOM}"
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$name" -e ADMIN_PANEL_AUTOSTART=0 infocyph/tools:ci >/dev/null
+
+          for _ in $(seq 1 30); do
+            if docker exec "$name" tools-healthcheck >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          docker exec "$name" tools-healthcheck
+          docker exec "$name" test ! -e /run/admin-panel.pid
           docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
 
   arm64:

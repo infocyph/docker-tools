@@ -19,7 +19,7 @@ for file in "$PROVIDER" "$ASKAI" "$GITX" "$ENTRYPOINT" "$HEALTH"; do
   [[ -s "$file" ]] || fail "missing AI contract input: $file"
 done
 
-if grep -REn --exclude='docker-tools-hardening-ai-plan.md' \
+if grep -REn --exclude='docker-tools-hardening-ai-plan.md' --exclude='ai-contract.sh' \
   'ollama[[:space:]]+serve|ollama[[:space:]]+pull|ollama/ollama|EXPOSE[[:space:]]+11434' \
   Dockerfile scripts .github 2>/dev/null; then
   fail 'embedded Ollama runtime/lifecycle contract reappeared'

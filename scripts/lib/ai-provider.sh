@@ -260,7 +260,7 @@ ai_sensitive_path() {
 }
 
 ai_assert_safe_file() {
-  local path="${1:-}" canonical='' total_bytes='' nonnul_bytes=''
+  local path="${1:-}" canonical=''
   [[ -n "$path" && -f "$path" && -r "$path" ]] || { ai_error "file is not readable: $path"; return 66; }
   canonical="$(readlink -f -- "$path" 2>/dev/null || true)"
   if ai_sensitive_path "$path" || { [[ -n "$canonical" ]] && ai_sensitive_path "$canonical"; }; then
@@ -271,17 +271,9 @@ ai_assert_safe_file() {
     ai_error "refusing private-key content: $path"
     return 77
   fi
-  if [[ -s "$path" ]]; then
-    total_bytes="$(wc -c <"$path" | tr -d '[:space:]')"
-    nonnul_bytes="$(LC_ALL=C tr -d '\000' <"$path" | wc -c | tr -d '[:space:]')"
-    if ! ai_is_uint "$total_bytes" || ! ai_is_uint "$nonnul_bytes"; then
-      ai_error "unable to classify file input: $path"
-      return 77
-    fi
-    if [[ "$total_bytes" != "$nonnul_bytes" ]]; then
-      ai_error "refusing binary file input: $path"
-      return 77
-    fi
+  if [[ -s "$path" ]] && rg -a -q '\\x00' -- "$path"; then
+    ai_error "refusing binary file input: $path"
+    return 77
   fi
   return 0
 }

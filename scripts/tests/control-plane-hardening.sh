@@ -19,6 +19,13 @@ while IFS= read -r file; do
   [[ -z "$file" || "$file" == 'scripts/admin-panel/src/Support/ProcessRunner.php' ]] || fail "direct proc_open() remains outside ProcessRunner: $file"
 done <<<"$proc_hits"
 
+# Filesystem-heavy log discovery should keep the native find fast path, but it
+# must run through the bounded ProcessRunner rather than direct proc_open/shell.
+LOG_SERVICE='scripts/admin-panel/src/Service/LogsDataService.php'
+grep -q 'ProcessRunner::run' "$LOG_SERVICE" || fail 'log discovery bypasses ProcessRunner'
+grep -q "'find'" "$LOG_SERVICE" || fail 'native find log discovery fast path missing'
+grep -q 'RecursiveDirectoryIterator' "$LOG_SERVICE" || fail 'PHP log discovery fallback missing'
+
 # logs.php still carries an old server-render fallback, but it must stay unreachable.
 grep -q '^\$apLogAjaxFirst = true;$' scripts/admin-panel/app/pages/logs.php || fail 'legacy log fallback became reachable'
 

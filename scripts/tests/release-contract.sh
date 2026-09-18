@@ -53,4 +53,17 @@ if grep -Eq 'actions/checkout@v[1-6]([^0-9]|$)|docker/build-push-action@v[1-6]([
   exit 1
 fi
 
+grep -Fq 'askai --help' scripts/tests/release-gate.sh || {
+  echo 'release gate does not validate askai' >&2
+  exit 1
+}
+grep -Fq 'aiops --help' scripts/tests/release-gate.sh || {
+  echo 'release gate does not validate aiops' >&2
+  exit 1
+}
+grep -Fq 'tools-healthcheck' scripts/tests/release-gate.sh || {
+  echo 'release gate does not use the Tools-owned health contract' >&2
+  exit 1
+}
+
 echo 'release contracts: ok'

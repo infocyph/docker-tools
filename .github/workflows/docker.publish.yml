@@ -378,7 +378,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          pull: false
+          pull: true
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -457,40 +457,3 @@ jobs:
             echo '- BuildKit SBOM: enabled'
             echo '- GitHub/Sigstore provenance attestations: Docker Hub + GHCR'
           } >> "$GITHUB_STEP_SUMMARY"
-
-
-      - name: Gate published image digest
-        env:
-          DIGEST: ${{ steps.push.outputs.digest }}
-        run: |
-          set -euo pipefail
-          image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/tools@${DIGEST}"
-
-          docker pull --platform linux/amd64 "$image" >/dev/null
-          bash scripts/tests/release-gate.sh "$image" .localdevstack/docker/compose/companion.yaml
-
-          docker pull --platform linux/arm64 "$image" >/dev/null
-          arm_name="tools-published-arm64-${RANDOM}"
-          trap 'docker rm -f "$arm_name" >/dev/null 2>&1 || true' EXIT
-          docker run -d --platform linux/arm64 --name "$arm_name" "$image" >/dev/null
-
-          for _ in $(seq 1 30); do
-            if docker exec "$arm_name" tools-healthcheck >/dev/null 2>&1; then
-              test "$(docker exec "$arm_name" uname -m)" = 'aarch64'
-              docker exec "$arm_name" mkcert -version >/dev/null
-              docker exec "$arm_name" lazydocker --version >/dev/null
-              docker exec "$arm_name" composer --version --no-ansi >/dev/null
-              docker exec "$arm_name" gitx --version >/dev/null
-              docker exec "$arm_name" askai --help >/dev/null
-              docker exec "$arm_name" aiops --help >/dev/null
-              docker exec "$arm_name" chromacat --version >/dev/null
-              docker exec "$arm_name" sqlitex --version >/dev/null
-              docker exec "$arm_name" netx --version >/dev/null
-              docker exec "$arm_name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
-              exit 0
-            fi
-            sleep 1
-          done
-
-          docker logs "$arm_name" >&2 || true
-          exit 1

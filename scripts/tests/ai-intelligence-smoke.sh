@@ -159,8 +159,18 @@ set -e
 [[ "$rc" -eq 65 ]] || fail "oversized review input returned $rc instead of 65"
 
 printf '5/6 repository review is metadata-only\n'
-repo_context="$(cd "$ROOT" && bash "$AIOPS" repo-review --context-only)"
+repo_dir="$tmp/repo"
+mkdir -p "$repo_dir"
+git -C "$repo_dir" init -q
+git -C "$repo_dir" config user.email smoke@example.invalid
+git -C "$repo_dir" config user.name smoke
+printf 'base\n' >"$repo_dir/file.txt"
+git -C "$repo_dir" add file.txt
+git -C "$repo_dir" commit -qm init
+printf 'changed\n' >>"$repo_dir/file.txt"
+repo_context="$(cd "$repo_dir" && bash "$AIOPS" repo-review --context-only)"
 grep -q '"kind":"repository-metadata"' <<<"$repo_context" || fail 'repo review metadata contract missing'
+grep -q '"file.txt"' <<<"$repo_context" || fail 'repo review metadata did not include changed filename'
 if grep -q '^diff --git ' <<<"$repo_context"; then
   fail 'repo review unexpectedly included diff content'
 fi

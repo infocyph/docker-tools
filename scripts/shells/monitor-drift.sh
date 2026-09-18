@@ -16,28 +16,19 @@ _json_escape() {
 }
 
 _infer_project() {
-  if [[ -n "${STATUS_PROJECT:-}" ]]; then
-    printf '%s' "$STATUS_PROJECT"
-    return 0
-  fi
-  if ! _has docker; then
-    printf 'unknown'
-    return 0
-  fi
   local p
-  p="$(
-    docker ps --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null |
-      sed '/^[[:space:]]*$/d' |
-      sort |
-      uniq -c |
-      sort -nr |
-      awk 'NR==1{print $2}'
-  )"
-  if [[ -z "$p" ]]; then
-    printf 'unknown'
-  else
-    printf '%s' "$p"
+  for p in "${STATUS_PROJECT:-}" "${LDS_COMPOSE_PROJECT:-}" "${COMPOSE_PROJECT_NAME:-}"; do
+    if [[ -n "$p" && "$p" != "unknown" ]]; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+  if _has docker; then
+    p="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' SERVER_TOOLS 2>/dev/null || true)"
+    [[ "$p" == "<no value>" ]] && p=""
+    [[ -n "$p" ]] && { printf '%s' "$p"; return 0; }
   fi
+  printf 'unknown'
 }
 
 _docker_exec_pref_shell() {
@@ -66,22 +57,19 @@ _choose_dest_dir() {
 }
 
 _find_container() {
-  local key="${1:-}" raw n s i st
-  raw="$(docker ps -a --format '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.State}}' 2>/dev/null || true)"
+  local project="${1:-}" key="${2:-}" raw n s i st
+  [[ -n "$project" && "$project" != "unknown" ]] || return 0
+  raw="$(docker ps -a \
+    --filter "label=com.docker.compose.project=${project}" \
+    --format '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.State}}' 2>/dev/null || true)"
   while IFS='|' read -r n s i st; do
     [[ -n "$n" ]] || continue
     case "$key" in
       nginx)
-        if [[ "${n,,} ${s,,} ${i,,}" == *nginx* ]]; then
-          printf '%s|%s\n' "$n" "$st"
-          return 0
-        fi
+        [[ "${n,,} ${s,,} ${i,,}" == *nginx* ]] && { printf '%s|%s\n' "$n" "$st"; return 0; }
         ;;
       apache)
-        if [[ "${n,,} ${s,,} ${i,,}" == *apache* ]]; then
-          printf '%s|%s\n' "$n" "$st"
-          return 0
-        fi
+        [[ "${n,,} ${s,,} ${i,,}" == *apache* ]] && { printf '%s|%s\n' "$n" "$st"; return 0; }
         ;;
       fpm)
         if [[ "${n,,} ${s,,} ${i,,}" == *php* || "${n,,} ${s,,} ${i,,}" == *fpm* ]]; then
@@ -147,7 +135,7 @@ main() {
     container="-"
     cstate="-"
 
-    container_info="$(_find_container "$comp" || true)"
+    container_info="$(_find_container "$project" "$comp" || true)"
     if [[ -z "$container_info" ]]; then
       level="warn"
       note="container_not_found"

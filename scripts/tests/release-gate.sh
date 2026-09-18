@@ -39,7 +39,30 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   test -x /usr/local/bin/chromacat
   test -x /usr/local/bin/sqlitex
   test -x /usr/local/bin/netx
+  test -x /usr/local/bin/certify
+  test -x /usr/local/bin/mkhost
+  test -x /usr/local/bin/rmhost
+  test -x /usr/local/bin/es-policy
   test -x /usr/local/bin/notifierd
+  test -x /usr/local/bin/notify
+  test -x /usr/local/bin/senv
+  test -x /usr/local/bin/domain-which
+  test -x /usr/local/bin/status
+  test -x /usr/local/bin/monitor-flows
+  test -x /usr/local/bin/monitor-runtime
+  test -x /usr/local/bin/monitor-tls
+  test -x /usr/local/bin/monitor-db
+  test -x /usr/local/bin/monitor-volumes
+  test -x /usr/local/bin/monitor-queue
+  test -x /usr/local/bin/monitor-slo
+  test -x /usr/local/bin/monitor-log-heatmap
+  test -x /usr/local/bin/monitor-drift
+  test -x /usr/local/bin/monitor-alerts
+  test -x /usr/local/bin/env-store
+  test -x /usr/local/bin/profile-chooser
+  test -x /usr/local/bin/init-php-dirs
+  test -x /usr/local/bin/git-default
+  test -x /usr/local/bin/entrypoint
   test -x /usr/local/bin/show-banner
   ! command -v ollama >/dev/null 2>&1
   mkcert -version >/dev/null
@@ -48,6 +71,16 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   gitx --version >/dev/null
   askai --help >/dev/null
   aiops --help >/dev/null
+  status --help >/dev/null
+  monitor-flows --help >/dev/null
+  monitor-runtime --help >/dev/null
+  monitor-tls --help >/dev/null
+  monitor-db --help >/dev/null
+  monitor-volumes --help >/dev/null
+  monitor-queue --help >/dev/null
+  monitor-slo --help >/dev/null
+  monitor-log-heatmap --help >/dev/null
+  monitor-drift --help >/dev/null
   chromacat --version >/dev/null
   sqlitex --version >/dev/null
   netx --version >/dev/null

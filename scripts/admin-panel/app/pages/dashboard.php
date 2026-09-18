@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 $dashboardScriptName = (string)($_SERVER['SCRIPT_NAME'] ?? '/index.php');
-$dashboardBasePath = str_replace('\\\\', '/', dirname($dashboardScriptName));
+$dashboardBasePath = str_replace('\\', '/', dirname($dashboardScriptName));
 if ($dashboardBasePath === '.' || $dashboardBasePath === '/') {
     $dashboardBasePath = '';
 }

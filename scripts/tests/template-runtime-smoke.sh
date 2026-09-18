@@ -51,7 +51,7 @@ docker pull "$PHP_FPM_IMAGE" >/dev/null
 while IFS= read -r template; do
   rendered="$tmp/nginx/zz-tools.conf"
   render_http_template "$template" "$rendered"
-  docker run --rm     --entrypoint nginx     -v "$rendered:/etc/nginx/conf.d/zz-tools.conf:ro"     -v "$tmp/certs:/etc/mkcert:ro"     -v "$tmp/rootCA:/etc/share/rootCA:ro"     "$NGINX_IMAGE" -t >/dev/null
+  docker run --rm -e AUTO_DISABLE_INVALID_CONFS=0 -e AUTO_RESTORE_DISABLED_CONFS=0     -v "$rendered:/etc/nginx/conf.d/zz-tools.conf:ro"     -v "$tmp/certs:/etc/mkcert:ro"     -v "$tmp/rootCA:/etc/share/rootCA:ro"     "$NGINX_IMAGE" nginx -t >/dev/null
 done < <(find scripts/http-templates -type f -path '*/nginx/*.conf' -print | LC_ALL=C sort)
 
 while IFS= read -r template; do

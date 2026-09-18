@@ -32,6 +32,14 @@ if grep -q 'proc_open[[:space:]]*(' scripts/admin-panel/app/pages/logs.php; then
 fi
 grep -q 'ADMIN_PANEL_LOG_ROOTS' scripts/admin-panel/src/Service/LogsDataService.php || fail 'canonical admin log roots config missing'
 
+# Dashboard must report live operational state, never template/demo business data.
+DASHBOARD='scripts/admin-panel/app/pages/dashboard.php'
+grep -q '/api/live-stats' "$DASHBOARD" || fail 'dashboard live status source missing'
+grep -q '/api/ai-assistant' "$DASHBOARD" || fail 'dashboard optional AI status source missing'
+if grep -Eqi 'Monthly Revenue|Recent Deployments|Order Status|Traffic Sources|TailAdmin-style|\$[0-9]{2,},[0-9]{3}' "$DASHBOARD"; then
+  fail 'dashboard contains fabricated/demo metrics'
+fi
+
 # Admin control-plane boundary.
 grep -q 'Content-Security-Policy' scripts/admin-panel/src/App/Kernel.php || fail 'admin CSP header missing'
 grep -q "'samesite' => 'Strict'" scripts/admin-panel/src/App/Kernel.php || fail 'SameSite=Strict control cookie missing'

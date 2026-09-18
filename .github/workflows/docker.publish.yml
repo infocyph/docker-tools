@@ -33,16 +33,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          EVENT_RELEASE_DRAFT: ${{ github.event.release.draft }}
+          EVENT_RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == 'release' ]]; then
+            if [[ "$EVENT_RELEASE_DRAFT" == 'true' || "$EVENT_RELEASE_PRERELEASE" == 'true' ]]; then
+              echo 'Stable publish workflow refuses draft/prerelease releases.' >&2
+              exit 1
+            fi
             RELEASE_TAG="$EVENT_RELEASE_TAG"
             PUBLISH_RELEASE_TAG=true
           else
-            RELEASE_TAG="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+            release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest")"
+            RELEASE_TAG="$(jq -r '.tag_name // empty' <<<"$release_json")"
+            release_draft="$(jq -r '.draft' <<<"$release_json")"
+            release_prerelease="$(jq -r '.prerelease' <<<"$release_json")"
+            [[ "$release_draft" == 'false' && "$release_prerelease" == 'false' ]] || {
+              echo 'Latest release is not a stable published release.' >&2
+              exit 1
+            }
             PUBLISH_RELEASE_TAG=false
           fi
-          [[ -n "$RELEASE_TAG" ]] || { echo 'No published Tools release found.' >&2; exit 1; }
+          [[ -n "$RELEASE_TAG" && "$RELEASE_TAG" != latest ]] || { echo 'No usable stable Tools release found.' >&2; exit 1; }
           {
             echo "RELEASE_TAG=$RELEASE_TAG"
             echo "PUBLISH_RELEASE_TAG=$PUBLISH_RELEASE_TAG"

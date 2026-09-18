@@ -187,7 +187,7 @@ _volume_size_bytes() {
 usage() {
   cat <<'EOF'
 Usage:
-  monitor-volumes [--json] [--top <n>] [--inode-top <n>]
+  monitor-volumes [--json] [--top <n>] [--inode-top <n>] [--skip-inodes]
 
 Examples:
   monitor-volumes --json
@@ -196,13 +196,14 @@ EOF
 }
 
 main() {
-  local json=0 top_n=0 inode_top_n=0
+  local json=0 top_n=0 inode_top_n=0 skip_inodes=0
   local max_rows="${MONITOR_VOLUMES_MAX_ROWS:-200}"
   while [[ "${1:-}" ]]; do
     case "$1" in
       --json) json=1; shift ;;
       --top) top_n="${2:-0}"; shift 2 ;;
       --inode-top) inode_top_n="${2:-0}"; shift 2 ;;
+      --skip-inodes) skip_inodes=1; shift ;;
       -h|--help) usage; return 0 ;;
       *) echo "Unknown arg: $1" >&2; usage; return 1 ;;
     esac
@@ -401,6 +402,7 @@ main() {
   ((effective_top_n > rows_count)) && effective_top_n="$rows_count"
   effective_inode_top_n="$inode_top_n"
   ((effective_inode_top_n > effective_top_n)) && effective_inode_top_n="$effective_top_n"
+  ((skip_inodes == 1)) && effective_inode_top_n=0
 
   local -a sorted=()
   if ((${#rows[@]})); then

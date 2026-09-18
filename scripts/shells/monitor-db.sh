@@ -51,16 +51,6 @@ _engine_from() {
   printf ''
 }
 
-_container_env_value() {
-  local name="${1:-}" key="${2:-}" line
-  [[ -n "$name" && -n "$key" ]] || return 0
-  while IFS= read -r line; do
-    [[ "$line" == "$key="* ]] || continue
-    printf '%s' "${line#*=}"
-    return 0
-  done < <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$name" 2>/dev/null || true)
-}
-
 _num_or_default() {
   local v="${1:-}" d="${2:-0}"
   if [[ "$v" =~ ^-?[0-9]+$ ]]; then printf '%s' "$v"; else printf '%s' "$d"; fi
@@ -131,34 +121,29 @@ _probe_mysql() {
   local name="${1:-}"
   _probe_defaults
 
-  local user pass status_out
-  user="$(_container_env_value "$name" MYSQL_USER)"
-  [[ -n "$user" ]] || user="$(_container_env_value "$name" MARIADB_USER)"
-  pass="$(_container_env_value "$name" MYSQL_PASSWORD)"
-  [[ -n "$pass" ]] || pass="$(_container_env_value "$name" MARIADB_PASSWORD)"
+  local status_out
+  status_out="$(_docker_exec_pref_shell "$name" '
+    user="${MYSQL_USER:-${MARIADB_USER:-}}"
+    pass="${MYSQL_PASSWORD:-${MARIADB_PASSWORD:-}}"
+    if [ -z "$user" ] || [ -z "$pass" ]; then
+      user=root
+      pass="${MYSQL_ROOT_PASSWORD:-${MARIADB_ROOT_PASSWORD:-}}"
+    fi
+    if [ -z "$user" ] || [ -z "$pass" ]; then
+      printf "__LDS_MISSING_CREDENTIALS__"
+      exit 0
+    fi
+    MYSQL_PWD="$pass" mysql -Nse "
+      SHOW GLOBAL STATUS LIKE '\''Threads_connected'\'';
+      SHOW GLOBAL STATUS LIKE '\''Threads_running'\'';
+      SHOW GLOBAL STATUS LIKE '\''Slow_queries'\'';
+      SHOW VARIABLES LIKE '\''max_connections'\'';
+    " -u"$user" 2>/dev/null
+  ')"
 
-  if [[ -z "$user" || -z "$pass" ]]; then
+  if [[ "$status_out" == "__LDS_MISSING_CREDENTIALS__" ]]; then
     P_LEVEL="warn"; P_NOTE="probe_unavailable_missing_credentials"; return 0
   fi
-
-  status_out="$(
-    docker exec -e LDS_MYSQL_USER="$user" -e LDS_MYSQL_PASS="$pass" "$name" bash -c '
-      MYSQL_PWD="$LDS_MYSQL_PASS" mysql -Nse "
-        SHOW GLOBAL STATUS LIKE '\''Threads_connected'\'';
-        SHOW GLOBAL STATUS LIKE '\''Threads_running'\'';
-        SHOW GLOBAL STATUS LIKE '\''Slow_queries'\'';
-        SHOW VARIABLES LIKE '\''max_connections'\'';
-      " -u"$LDS_MYSQL_USER" 2>/dev/null
-    ' 2>/dev/null || docker exec -e LDS_MYSQL_USER="$user" -e LDS_MYSQL_PASS="$pass" "$name" sh -c '
-      MYSQL_PWD="$LDS_MYSQL_PASS" mysql -Nse "
-        SHOW GLOBAL STATUS LIKE '\''Threads_connected'\'';
-        SHOW GLOBAL STATUS LIKE '\''Threads_running'\'';
-        SHOW GLOBAL STATUS LIKE '\''Slow_queries'\'';
-        SHOW VARIABLES LIKE '\''max_connections'\'';
-      " -u"$LDS_MYSQL_USER" 2>/dev/null
-    ' 2>/dev/null || true
-  )"
-
   if [[ -z "$status_out" ]]; then P_LEVEL="warn"; P_NOTE="mysql_probe_failed"; return 0; fi
 
   local connected running slow max_conn
@@ -183,38 +168,29 @@ _probe_postgres() {
   local name="${1:-}"
   _probe_defaults
 
-  local user db pass out
-  user="$(_container_env_value "$name" POSTGRES_USER)"
-  db="$(_container_env_value "$name" POSTGRES_DB)"
-  pass="$(_container_env_value "$name" POSTGRES_PASSWORD)"
-  if [[ -z "$user" || -z "$db" || -z "$pass" ]]; then
+  local out
+  out="$(_docker_exec_pref_shell "$name" '
+    user="${POSTGRES_USER:-}"
+    pass="${POSTGRES_PASSWORD:-}"
+    db="${POSTGRES_DB:-$user}"
+    if [ -z "$user" ] || [ -z "$db" ] || [ -z "$pass" ]; then
+      printf "__LDS_MISSING_CREDENTIALS__"
+      exit 0
+    fi
+    PGPASSWORD="$pass" psql -U "$user" -d "$db" -At -F "|" -c "
+      SELECT
+        COALESCE((SELECT sum(numbackends) FROM pg_stat_database),0),
+        COALESCE((SELECT count(*) FROM pg_stat_activity WHERE state='\''active'\''),0),
+        COALESCE((SELECT setting::bigint FROM pg_settings WHERE name='\''max_connections'\''),0),
+        CASE WHEN pg_is_in_recovery() THEN '\''replica'\'' ELSE '\''primary'\'' END,
+        COALESCE(EXTRACT(EPOCH FROM now()-pg_last_xact_replay_timestamp())::bigint,0),
+        COALESCE((SELECT sum(xact_commit+xact_rollback) FROM pg_stat_database),0)
+    " 2>/dev/null
+  ')"
+
+  if [[ "$out" == "__LDS_MISSING_CREDENTIALS__" ]]; then
     P_LEVEL="warn"; P_NOTE="probe_unavailable_missing_credentials"; return 0
   fi
-
-  out="$(
-    docker exec -e LDS_PG_USER="$user" -e LDS_PG_DB="$db" -e PGPASSWORD="$pass" "$name" bash -c '
-      psql -U "$LDS_PG_USER" -d "$LDS_PG_DB" -At -F "|" -c "
-        SELECT
-          COALESCE((SELECT sum(numbackends) FROM pg_stat_database),0),
-          COALESCE((SELECT count(*) FROM pg_stat_activity WHERE state='\''active'\''),0),
-          COALESCE((SELECT setting::bigint FROM pg_settings WHERE name='\''max_connections'\''),0),
-          CASE WHEN pg_is_in_recovery() THEN '\''replica'\'' ELSE '\''primary'\'' END,
-          COALESCE(EXTRACT(EPOCH FROM now()-pg_last_xact_replay_timestamp())::bigint,0),
-          COALESCE((SELECT sum(xact_commit+xact_rollback) FROM pg_stat_database),0)
-      " 2>/dev/null
-    ' 2>/dev/null || docker exec -e LDS_PG_USER="$user" -e LDS_PG_DB="$db" -e PGPASSWORD="$pass" "$name" sh -c '
-      psql -U "$LDS_PG_USER" -d "$LDS_PG_DB" -At -F "|" -c "
-        SELECT
-          COALESCE((SELECT sum(numbackends) FROM pg_stat_database),0),
-          COALESCE((SELECT count(*) FROM pg_stat_activity WHERE state='\''active'\''),0),
-          COALESCE((SELECT setting::bigint FROM pg_settings WHERE name='\''max_connections'\''),0),
-          CASE WHEN pg_is_in_recovery() THEN '\''replica'\'' ELSE '\''primary'\'' END,
-          COALESCE(EXTRACT(EPOCH FROM now()-pg_last_xact_replay_timestamp())::bigint,0),
-          COALESCE((SELECT sum(xact_commit+xact_rollback) FROM pg_stat_database),0)
-      " 2>/dev/null
-    ' 2>/dev/null || true
-  )"
-
   if [[ -z "$out" ]]; then P_LEVEL="warn"; P_NOTE="postgres_probe_failed"; return 0; fi
 
   local conn active max_conn replica lag ops
@@ -239,37 +215,33 @@ _probe_mongodb() {
   local name="${1:-}"
   _probe_defaults
 
-  local user pass out
-  user="$(_container_env_value "$name" MONGO_INITDB_ROOT_USERNAME)"
-  [[ -n "$user" ]] || user="$(_container_env_value "$name" MONGODB_ROOT_USERNAME)"
-  pass="$(_container_env_value "$name" MONGO_INITDB_ROOT_PASSWORD)"
-  [[ -n "$pass" ]] || pass="$(_container_env_value "$name" MONGODB_ROOT_PASSWORD)"
-  if [[ -z "$user" || -z "$pass" ]]; then
+  local out
+  out="$(_docker_exec_pref_shell "$name" '
+    user="${MONGO_INITDB_ROOT_USERNAME:-${MONGODB_ROOT_USERNAME:-}}"
+    pass="${MONGO_INITDB_ROOT_PASSWORD:-${MONGODB_ROOT_PASSWORD:-}}"
+    if [ -z "$user" ] || [ -z "$pass" ]; then
+      printf "__LDS_MISSING_CREDENTIALS__"
+      exit 0
+    fi
+    mongosh --quiet \
+      --host 127.0.0.1 \
+      --port 27017 \
+      --username "$user" \
+      --password "$pass" \
+      --authenticationDatabase admin \
+      --eval "
+        var s=db.serverStatus();
+        var cur=(s.connections&&s.connections.current)||0;
+        var active=(s.globalLock&&s.globalLock.activeClients&&s.globalLock.activeClients.total)||0;
+        var max=cur+((s.connections&&s.connections.available)||0);
+        var ops=(s.opcounters&&((s.opcounters.insert||0)+(s.opcounters.query||0)+(s.opcounters.update||0)+(s.opcounters.delete||0)))||0;
+        print(cur + \"|\" + active + \"|\" + max + \"|\" + ops);
+      " 2>/dev/null
+  ')"
+
+  if [[ "$out" == "__LDS_MISSING_CREDENTIALS__" ]]; then
     P_LEVEL="warn"; P_NOTE="probe_unavailable_missing_credentials"; return 0
   fi
-
-  out="$(
-    docker exec -e LDS_MONGO_USER="$user" -e LDS_MONGO_PASS="$pass" "$name" bash -c '
-      mongosh --quiet "mongodb://$LDS_MONGO_USER:$LDS_MONGO_PASS@localhost:27017/admin" --eval "
-        var s=db.serverStatus();
-        var cur=(s.connections&&s.connections.current)||0;
-        var active=(s.globalLock&&s.globalLock.activeClients&&s.globalLock.activeClients.total)||0;
-        var max=cur+((s.connections&&s.connections.available)||0);
-        var ops=(s.opcounters&&((s.opcounters.insert||0)+(s.opcounters.query||0)+(s.opcounters.update||0)+(s.opcounters.delete||0)))||0;
-        print(cur + \"|\" + active + \"|\" + max + \"|\" + ops);
-      " 2>/dev/null
-    ' 2>/dev/null || docker exec -e LDS_MONGO_USER="$user" -e LDS_MONGO_PASS="$pass" "$name" sh -c '
-      mongosh --quiet "mongodb://$LDS_MONGO_USER:$LDS_MONGO_PASS@localhost:27017/admin" --eval "
-        var s=db.serverStatus();
-        var cur=(s.connections&&s.connections.current)||0;
-        var active=(s.globalLock&&s.globalLock.activeClients&&s.globalLock.activeClients.total)||0;
-        var max=cur+((s.connections&&s.connections.available)||0);
-        var ops=(s.opcounters&&((s.opcounters.insert||0)+(s.opcounters.query||0)+(s.opcounters.update||0)+(s.opcounters.delete||0)))||0;
-        print(cur + \"|\" + active + \"|\" + max + \"|\" + ops);
-      " 2>/dev/null
-    ' 2>/dev/null || true
-  )"
-
   if [[ -z "$out" ]]; then P_LEVEL="warn"; P_NOTE="mongodb_probe_failed"; return 0; fi
 
   local conn active max_conn ops

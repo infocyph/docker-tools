@@ -170,7 +170,8 @@ git -C "$repo_dir" commit -qm init
 printf 'changed\n' >>"$repo_dir/file.txt"
 repo_context="$(cd "$repo_dir" && bash "$AIOPS" repo-review --context-only)"
 grep -q '"kind":"repository-metadata"' <<<"$repo_context" || fail 'repo review metadata contract missing'
-grep -q '"file.txt"' <<<"$repo_context" || fail 'repo review metadata did not include changed filename'
+grep -q 'file.txt' <<<"$repo_context" || fail 'repo review metadata did not include changed filename'
+grep -q '"unstaged_files"' <<<"$repo_context" || fail 'repo review unstaged metadata field missing'
 if grep -q '^diff --git ' <<<"$repo_context"; then
   fail 'repo review unexpectedly included diff content'
 fi

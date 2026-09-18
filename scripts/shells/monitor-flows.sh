@@ -23,33 +23,32 @@ _is_valid_domain_name() {
 }
 
 _infer_project() {
-  if [[ -n "${STATUS_PROJECT:-}" ]]; then
-    printf '%s' "$STATUS_PROJECT"
-    return 0
-  fi
-  if ! _has docker; then
-    printf 'unknown'
-    return 0
-  fi
-
   local p
-  p="$(
-    docker ps --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null |
-      sed '/^[[:space:]]*$/d' |
-      sort |
-      uniq -c |
-      sort -nr |
-      awk 'NR==1{print $2}'
-  )"
-  if [[ -z "$p" ]]; then
-    printf 'unknown'
-  else
-    printf '%s' "$p"
+  for p in "${STATUS_PROJECT:-}" "${LDS_COMPOSE_PROJECT:-}" "${COMPOSE_PROJECT_NAME:-}"; do
+    if [[ -n "$p" && "$p" != "unknown" ]]; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+  if _has docker; then
+    p="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' SERVER_TOOLS 2>/dev/null || true)"
+    [[ "$p" == "<no value>" ]] && p=""
+    [[ -n "$p" ]] && { printf '%s' "$p"; return 0; }
   fi
+  printf 'unknown'
+}
+
+_server_tools_cid() {
+  local project="${1:-}"
+  [[ -n "$project" && "$project" != "unknown" ]] || return 0
+  docker ps -aq \
+    --filter "label=com.docker.compose.project=${project}" \
+    --filter 'label=com.docker.compose.service=server-tools' \
+    2>/dev/null | head -n1 || true
 }
 
 _collect_urls() {
-  local f d n
+  local project="${1:-}" f d cid
   local -a urls_local=() urls_tools=()
   local nginx_dir="/etc/share/vhosts/nginx"
 
@@ -64,14 +63,13 @@ _collect_urls() {
   fi
 
   if _has docker; then
-    for n in SERVER_TOOLS "$(docker ps -aq --filter 'label=com.docker.compose.service=server-tools' 2>/dev/null | head -n1 || true)"; do
-      [[ -n "$n" ]] || continue
+    cid="$(_server_tools_cid "$project")"
+    if [[ -n "$cid" ]]; then
       while IFS= read -r d; do
         _is_valid_domain_name "$d" || continue
         urls_tools+=("https://$d")
-      done < <(docker exec "$n" domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
-      ((${#urls_tools[@]})) && break
-    done
+      done < <(docker exec "$cid" domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+    fi
   fi
 
   if ((${#urls_tools[@]} > ${#urls_local[@]})); then
@@ -247,7 +245,7 @@ main() {
   fi
 
   local -a urls=()
-  mapfile -t urls < <(_collect_urls 2>/dev/null || true)
+  mapfile -t urls < <(_collect_urls "$project" 2>/dev/null || true)
 
   local -a path_specs=()
   mapfile -t path_specs < <(_normalize_path_specs "$paths_csv")

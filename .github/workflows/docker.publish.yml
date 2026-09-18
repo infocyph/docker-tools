@@ -215,13 +215,15 @@ jobs:
           composer_version="$(docker run --rm --entrypoint composer "$IMAGE" --version --no-ansi | head -n 1)"
           gitx_version="$(docker run --rm --entrypoint gitx "$IMAGE" --version | head -n 1)"
           runtime_generated_at="$(docker run --rm --entrypoint jq "$IMAGE" -r .generated_at /etc/share/runtime-versions.json)"
-          scriptomatic_main="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main | awk '{print $1}')"
-          toolset_release="$(curl -fsSL https://api.github.com/repos/infocyph/Toolset/releases/latest | jq -r .tag_name)"
+          banner_sha256="$(docker run --rm --entrypoint sha256sum "$IMAGE" /usr/local/bin/show-banner | awk '{print $1}')"
           {
             echo "CANDIDATE_ALPINE_VERSION=$alpine_version"
             echo "CANDIDATE_MKCERT_VERSION=$mkcert_version"
             echo "CANDIDATE_LAZYDOCKER_VERSION=$lazydocker_version"
+            echo "CANDIDATE_COMPOSER_VERSION=$composer_version"
             echo "CANDIDATE_GITX_VERSION=$gitx_version"
+            echo "CANDIDATE_RUNTIME_GENERATED_AT=$runtime_generated_at"
+            echo "CANDIDATE_BANNER_SHA256=$banner_sha256"
           } >> "$GITHUB_ENV"
           {
             echo '## Candidate upstream resolution'
@@ -403,12 +405,18 @@ jobs:
           alpine_version="$(docker run --rm --platform linux/amd64 --entrypoint cat "$image" /etc/alpine-release)"
           mkcert_version="$(docker run --rm --platform linux/amd64 --entrypoint mkcert "$image" -version | head -n 1)"
           lazydocker_version="$(docker run --rm --platform linux/amd64 --entrypoint lazydocker "$image" --version | head -n 1)"
+          composer_version="$(docker run --rm --platform linux/amd64 --entrypoint composer "$image" --version --no-ansi | head -n 1)"
           gitx_version="$(docker run --rm --platform linux/amd64 --entrypoint gitx "$image" --version | head -n 1)"
+          runtime_generated_at="$(docker run --rm --platform linux/amd64 --entrypoint jq "$image" -r .generated_at /etc/share/runtime-versions.json)"
+          banner_sha256="$(docker run --rm --platform linux/amd64 --entrypoint sha256sum "$image" /usr/local/bin/show-banner | awk '{print $1}')"
 
           [[ "$alpine_version" == "$CANDIDATE_ALPINE_VERSION" ]]
           [[ "$mkcert_version" == "$CANDIDATE_MKCERT_VERSION" ]]
           [[ "$lazydocker_version" == "$CANDIDATE_LAZYDOCKER_VERSION" ]]
+          [[ "$composer_version" == "$CANDIDATE_COMPOSER_VERSION" ]]
           [[ "$gitx_version" == "$CANDIDATE_GITX_VERSION" ]]
+          [[ "$runtime_generated_at" == "$CANDIDATE_RUNTIME_GENERATED_AT" ]]
+          [[ "$banner_sha256" == "$CANDIDATE_BANNER_SHA256" ]]
           {
             echo '## Published Tools image'
             echo

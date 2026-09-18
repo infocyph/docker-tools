@@ -106,6 +106,12 @@ jobs:
           scriptomatic_main="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main | awk '{print $1}')"
           toolset_release="$(curl -fsSL https://api.github.com/repos/infocyph/Toolset/releases/latest | jq -r .tag_name)"
           {
+            echo "CANDIDATE_ALPINE_VERSION=$alpine_version"
+            echo "CANDIDATE_MKCERT_VERSION=$mkcert_version"
+            echo "CANDIDATE_LAZYDOCKER_VERSION=$lazydocker_version"
+            echo "CANDIDATE_GITX_VERSION=$gitx_version"
+          } >> "$GITHUB_ENV"
+          {
             echo '## Candidate upstream resolution'
             echo
             echo "- Alpine: \`$alpine_version\`"
@@ -253,14 +259,26 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
-          image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/tools@${DIGEST}"
-          manifest="$(docker buildx imagetools inspect "$image")"
-          grep -Fq 'linux/amd64' <<<"$manifest"
-          grep -Fq 'linux/arm64' <<<"$manifest"
+          ghcr_image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/tools@${DIGEST}"
+          dockerhub_image="docker.io/${GITHUB_REPOSITORY_OWNER}/tools@${DIGEST}"
+
+          for image in "$ghcr_image" "$dockerhub_image"; do
+            manifest="$(docker buildx imagetools inspect "$image")"
+            grep -Fq 'linux/amd64' <<<"$manifest"
+            grep -Fq 'linux/arm64' <<<"$manifest"
+          done
+
+          image="$ghcr_image"
           docker pull --platform linux/amd64 "$image" >/dev/null
           alpine_version="$(docker run --rm --platform linux/amd64 --entrypoint cat "$image" /etc/alpine-release)"
           mkcert_version="$(docker run --rm --platform linux/amd64 --entrypoint mkcert "$image" -version | head -n 1)"
           lazydocker_version="$(docker run --rm --platform linux/amd64 --entrypoint lazydocker "$image" --version | head -n 1)"
+          gitx_version="$(docker run --rm --platform linux/amd64 --entrypoint gitx "$image" --version | head -n 1)"
+
+          [[ "$alpine_version" == "$CANDIDATE_ALPINE_VERSION" ]]
+          [[ "$mkcert_version" == "$CANDIDATE_MKCERT_VERSION" ]]
+          [[ "$lazydocker_version" == "$CANDIDATE_LAZYDOCKER_VERSION" ]]
+          [[ "$gitx_version" == "$CANDIDATE_GITX_VERSION" ]]
           {
             echo '## Published Tools image'
             echo

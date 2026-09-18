@@ -245,7 +245,7 @@ ai_redact() {
   ' | sed -E \
     -e 's#([Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]:[[:space:]]*([Bb][Ee][Aa][Rr][Ee][Rr]|[Bb][Aa][Ss][Ii][Cc])[[:space:]]+)[^[:space:]]+#\1[REDACTED]#g' \
     -e 's#([Xx]-?[Aa][Pp][Ii]-?[Kk][Ee][Yy]:[[:space:]]*)[^[:space:]]+#\1[REDACTED]#g' \
-    -e 's#(https?://)[^/@[:space:]]+@#\1[REDACTED]@#g' \
+    -e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/@[:space:]]+@#\1[REDACTED]@#g' \
     -e 's#(^|[[:space:]])([A-Za-z0-9_]*(PASSWORD|PASSWD|PASS|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIAL)[A-Za-z0-9_]*)=([^[:space:]]*)#\1\2=[REDACTED]#gI' \
     -e 's#("[^"]*(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential)[^"]*"[[:space:]]*:[[:space:]]*)"[^"]*"#\1"[REDACTED]"#gI' \
     -e 's#gh[pousr]_[A-Za-z0-9_]{20,}#[REDACTED_GITHUB_TOKEN]#g' \

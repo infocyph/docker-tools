@@ -217,6 +217,7 @@ main() {
   ((top_n > max_rows)) && top_n="$max_rows"
   ((inode_top_n <= 0)) && inode_top_n="$top_n"
   ((inode_top_n > top_n)) && inode_top_n="$top_n"
+  ((skip_inodes == 1)) && inode_top_n=0
 
   if ! _has docker; then
     printf '{"ok":false,"error":"docker_missing","message":"docker command is required.","generated_at":"%s","project":"unknown"}\n' \

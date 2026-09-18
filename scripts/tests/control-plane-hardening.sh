@@ -14,7 +14,7 @@ if grep -R -n --include='*.php' 'shell_exec[[:space:]]*(' scripts/admin-panel/sr
   fail 'direct shell_exec() remains in admin panel'
 fi
 
-proc_hits="$(grep -R -l --include='*.php' 'proc_open[[:space:]]*(' scripts/admin-panel/src 2>/dev/null || true)"
+proc_hits="$(grep -R -l --include='*.php' 'proc_open[[:space:]]*(' scripts/admin-panel/src scripts/admin-panel/app 2>/dev/null || true)"
 while IFS= read -r file; do
   [[ -z "$file" || "$file" == 'scripts/admin-panel/src/Support/ProcessRunner.php' ]] || fail "direct proc_open() remains outside ProcessRunner: $file"
 done <<<"$proc_hits"
@@ -26,8 +26,11 @@ grep -q 'ProcessRunner::run' "$LOG_SERVICE" || fail 'log discovery bypasses Proc
 grep -q "'find'" "$LOG_SERVICE" || fail 'native find log discovery fast path missing'
 grep -q 'RecursiveDirectoryIterator' "$LOG_SERVICE" || fail 'PHP log discovery fallback missing'
 
-# logs.php still carries an old server-render fallback, but it must stay unreachable.
-grep -q '^\$apLogAjaxFirst = true;$' scripts/admin-panel/app/pages/logs.php || fail 'legacy log fallback became reachable'
+# Log viewer must use the active service/ProcessRunner path only.
+if grep -q 'proc_open[[:space:]]*(' scripts/admin-panel/app/pages/logs.php; then
+  fail 'legacy direct log-viewer process execution reappeared'
+fi
+grep -q 'ADMIN_PANEL_LOG_ROOTS' scripts/admin-panel/src/Service/LogsDataService.php || fail 'canonical admin log roots config missing'
 
 # Admin control-plane boundary.
 grep -q 'Content-Security-Policy' scripts/admin-panel/src/App/Kernel.php || fail 'admin CSP header missing'

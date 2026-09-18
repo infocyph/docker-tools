@@ -205,7 +205,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          pull: true
+          pull: false
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -257,3 +257,29 @@ jobs:
             echo '- BuildKit SBOM: enabled'
             echo '- GitHub/Sigstore provenance attestations: Docker Hub + GHCR'
           } >> "$GITHUB_STEP_SUMMARY"
+
+
+      - name: Gate published image digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/tools@${DIGEST}"
+
+          docker pull --platform linux/amd64 "$image" >/dev/null
+          bash scripts/tests/release-gate.sh "$image" .localdevstack/docker/compose/companion.yaml
+
+          docker pull --platform linux/arm64 "$image" >/dev/null
+          docker run --rm --platform linux/arm64 --entrypoint bash "$image" -lc '
+            set -euo pipefail
+            test "$(uname -m)" = "aarch64"
+            mkcert -version >/dev/null
+            lazydocker --version >/dev/null
+            composer --version --no-ansi >/dev/null
+            gitx --version >/dev/null
+            askai --help >/dev/null
+            aiops --help >/dev/null
+            chromacat --version >/dev/null
+            sqlitex --version >/dev/null
+            netx --version >/dev/null
+          '

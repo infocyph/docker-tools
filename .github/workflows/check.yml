@@ -133,7 +133,30 @@ jobs:
             command -v chromacat >/dev/null &&
             command -v sqlitex >/dev/null &&
             command -v netx >/dev/null &&
+            command -v certify >/dev/null &&
+            command -v mkhost >/dev/null &&
+            command -v rmhost >/dev/null &&
+            command -v es-policy >/dev/null &&
             command -v notifierd >/dev/null &&
+            command -v notify >/dev/null &&
+            command -v senv >/dev/null &&
+            command -v domain-which >/dev/null &&
+            command -v status >/dev/null &&
+            command -v monitor-flows >/dev/null &&
+            command -v monitor-runtime >/dev/null &&
+            command -v monitor-tls >/dev/null &&
+            command -v monitor-db >/dev/null &&
+            command -v monitor-volumes >/dev/null &&
+            command -v monitor-queue >/dev/null &&
+            command -v monitor-slo >/dev/null &&
+            command -v monitor-log-heatmap >/dev/null &&
+            command -v monitor-drift >/dev/null &&
+            command -v monitor-alerts >/dev/null &&
+            command -v env-store >/dev/null &&
+            command -v profile-chooser >/dev/null &&
+            command -v init-php-dirs >/dev/null &&
+            command -v git-default >/dev/null &&
+            command -v entrypoint >/dev/null &&
             command -v tools-healthcheck >/dev/null &&
             command -v flock >/dev/null &&
             command -v php >/dev/null &&
@@ -141,6 +164,8 @@ jobs:
             test -r "$LDS_AI_PROVIDER_LIB" &&
             test "$LDS_AI_PROVIDER" = "ollama" &&
             test "$LDS_AI_URL" = "http://llm-sm:11434" &&
+            test "${NOTIFY_TOKEN+x}" = "x" &&
+            test "$NOTIFY_TOKEN" = "" &&
             mkcert -version >/dev/null &&
             lazydocker --version >/dev/null &&
             gitx --version >/dev/null &&

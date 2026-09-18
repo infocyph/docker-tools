@@ -233,7 +233,7 @@ main() {
   if [[ -z "$project" || "$project" == "unknown" ]]; then
     if ((json)); then
       printf '{"ok":false,"error":"project_unresolved","message":"LocalDevStack Compose project could not be determined; host-wide volume discovery is disabled.","generated_at":"%s","project":"unknown","filters":{"top":%d,"inode_top":%d},"summary":{"volumes":0,"pass":0,"warn":0,"fail":0,"inode_scanned":0,"docker_root_free_bytes":-1},"items":[]}\n' \
-        "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" "$effective_top_n" "$effective_inode_top_n"
+        "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" "$top_n" "$inode_top_n"
     else
       printf 'Volume Monitor | project=unknown volumes=0 degraded=project_unresolved\n'
     fi

@@ -57,6 +57,15 @@ fi
 if grep -Eq 'docker ps -a --format' scripts/shells/monitor-db.sh; then
   fail 'DB monitor still widens to all daemon containers'
 fi
+if grep -q '_container_env_value' scripts/shells/monitor-db.sh || grep -q '\.Config\.Env' scripts/shells/monitor-db.sh; then
+  fail 'DB monitor still extracts database credentials into the Tools process'
+fi
+if grep -Eq 'docker exec .*-[eE][[:space:]]+[^[:space:]]*(PASS|PASSWORD)=' scripts/shells/monitor-db.sh; then
+  fail 'DB monitor still forwards credential values through host-side docker exec arguments'
+fi
+grep -q 'MYSQL_ROOT_PASSWORD' scripts/shells/monitor-db.sh || fail 'MySQL root-only probe fallback missing'
+grep -q 'POSTGRES_DB:-\$user' scripts/shells/monitor-db.sh || fail 'PostgreSQL default database fallback missing'
+grep -q -- '--authenticationDatabase admin' scripts/shells/monitor-db.sh || fail 'MongoDB explicit authentication database probe missing'
 
 # TLS user credential material must be explicit and password protected.
 grep -q 'LDS_USER_P12_ENABLED.*:-0' scripts/shells/certify.sh || fail 'user P12 must be disabled by default'

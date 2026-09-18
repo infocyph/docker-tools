@@ -164,8 +164,6 @@ jobs:
             test -r "$LDS_AI_PROVIDER_LIB" &&
             test "$LDS_AI_PROVIDER" = "ollama" &&
             test "$LDS_AI_URL" = "http://llm-sm:11434" &&
-            test "${NOTIFY_TOKEN+x}" = "x" &&
-            test "$NOTIFY_TOKEN" = "" &&
             mkcert -version >/dev/null &&
             lazydocker --version >/dev/null &&
             gitx --version >/dev/null &&
@@ -218,6 +216,7 @@ jobs:
 
           docker exec "$name" tools-healthcheck
           docker exec "$name" bash -c 'test "$LDS_AI_ENABLED" = auto && test "$LDS_AI_URL" = http://llm-sm:11434'
+          docker exec "$name" sh -lc 'tr "\0" "\n" </proc/1/environ | grep -qx "NOTIFY_TOKEN="'
           docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
 
           admin_pid="$(docker exec "$name" cat /run/admin-panel.pid)"

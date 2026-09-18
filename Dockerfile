@@ -193,6 +193,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     ADMIN_PANEL_PHP_SERVER_LOG=/tmp/admin-panel-php-server.log \
     ADMIN_PANEL_PID_FILE=/run/admin-panel.pid \
     ADMIN_PANEL_PRODUCT_NAME=LocalDevStack \
+    ADMIN_PANEL_LOG_ROOTS=/global/log \
     ADMIN_PANEL_BRAND_NAME=docker-tools \
     ADMIN_PANEL_COMPANY_NAME=infocyph \
     ADMIN_PANEL_CRON_DIR=/etc/share/scheduler/cron-jobs \

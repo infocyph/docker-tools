@@ -48,6 +48,33 @@ if grep -Eq 'docker ps .*compose\.project.*uniq -c' scripts/shells/entrypoint.sh
   fail 'entrypoint project scope widens to host-wide project inference'
 fi
 
+if grep -Eq "docker ps -a?[^\n]*--format '\{\{\.Label \"com\.docker\.compose\.project\"\}\}'" scripts/shells/status.sh; then
+  fail 'status still infers project from daemon-wide container population'
+fi
+if grep -Fq "docker ps -aq --filter 'label=com.docker.compose.service=server-tools'" scripts/shells/status.sh; then
+  fail 'status still selects an unscoped server-tools container'
+fi
+if grep -Fq '{{range .Config.Env}}{{println .}}{{end}}' scripts/shells/status.sh; then
+  fail 'status still inspects the full environment of a container'
+fi
+grep -q 'label=com.docker.compose.project=' scripts/shells/status.sh || fail 'status project-scoped Docker filters missing'
+
+if grep -Fq "docker ps --filter 'label=com.docker.compose.service=nginx'" scripts/shells/monitor-tls.sh; then
+  fail 'TLS monitor still selects an unscoped Nginx container'
+fi
+if grep -Fq "docker ps -aq --filter 'label=com.docker.compose.service=server-tools'" scripts/shells/monitor-tls.sh; then
+  fail 'TLS monitor still selects an unscoped server-tools container'
+fi
+if grep -Eq "docker ps[^\n]*--format '\{\{\.Label \"com\.docker\.compose\.project\"\}\}'" scripts/shells/monitor-tls.sh; then
+  fail 'TLS monitor still infers the project from daemon-wide containers'
+fi
+grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-tls.sh || fail 'TLS monitor project env contract missing'
+grep -q 'label=com.docker.compose.project=' scripts/shells/monitor-tls.sh || fail 'TLS monitor scoped Docker filter missing'
+grep -q "nc -z -w 2" scripts/shells/monitor-tls.sh || fail 'TLS monitor fixed-argv reachability probe missing'
+if grep -Eq 'bash -c ".*\/dev\/tcp/\$\{?host' scripts/shells/monitor-tls.sh; then
+  fail 'TLS monitor interpolates target values into shell code'
+fi
+
 grep -q 'label=com.docker.compose.project=' scripts/shells/certify.sh || fail 'certificate Docker discovery is not project-scoped'
 if grep -Eq 'docker ps -q[[:space:]]+2>/dev/null' scripts/shells/certify.sh; then
   fail 'certificate discovery still permits daemon-wide docker ps'

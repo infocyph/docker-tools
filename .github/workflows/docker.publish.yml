@@ -93,6 +93,96 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Snapshot rolling upstream inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          retry() {
+            local attempt=1 max_attempts=5
+            until "$@"; do
+              if (( attempt >= max_attempts )); then
+                echo "Command failed after ${max_attempts} attempts: $*" >&2
+                return 1
+              fi
+              sleep "$((attempt * 2))"
+              attempt=$((attempt + 1))
+            done
+          }
+
+          get_alpine_digest() {
+            local output digest
+            output="$(docker buildx imagetools inspect alpine:latest 2>&1)" || { echo "$output" >&2; return 1; }
+            digest="$(awk '$1 == "Digest:" {print $2; exit}' <<<"$output")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+            printf '%s\n' "$digest"
+          }
+
+          get_scriptomatic_sha() {
+            local sha
+            sha="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main | awk 'NF {print $1; exit}')"
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+            printf '%s\n' "$sha"
+          }
+
+          get_release_tag() {
+            local repository="$1" tag
+            tag="$(gh api "repos/${repository}/releases/latest" --jq '.tag_name // empty')" || return 1
+            [[ -n "$tag" ]] || return 1
+            printf '%s\n' "$tag"
+          }
+
+          get_asset_sha256() {
+            local url="$1" tmp sha
+            tmp="$(mktemp)"
+            curl --fail --silent --show-error --location \
+              --retry 5 --retry-all-errors --retry-delay 2 \
+              --connect-timeout 15 --max-time 120 "$url" -o "$tmp" || { rm -f "$tmp"; return 1; }
+            [[ -s "$tmp" ]] || { rm -f "$tmp"; return 1; }
+            sha="$(sha256sum "$tmp" | awk '{print $1}')"
+            rm -f "$tmp"
+            [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+            printf '%s\n' "$sha"
+          }
+
+          ALPINE_DIGEST="$(retry get_alpine_digest)"
+          SCRIPTOMATIC_REF="$(retry get_scriptomatic_sha)"
+          TOOLSET_RELEASE="$(retry get_release_tag infocyph/Toolset)"
+          MKCERT_RELEASE="$(retry get_release_tag FiloSottile/mkcert)"
+          LAZYDOCKER_RELEASE="$(retry get_release_tag jesseduffield/lazydocker)"
+          TOOLSET_INSTALLER_SHA256="$(retry get_asset_sha256 "https://github.com/infocyph/Toolset/releases/download/${TOOLSET_RELEASE}/install.sh")"
+          MKCERT_SHA256_AMD64="$(retry get_asset_sha256 "https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_RELEASE}/mkcert-${MKCERT_RELEASE}-linux-amd64")"
+          MKCERT_SHA256_ARM64="$(retry get_asset_sha256 "https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_RELEASE}/mkcert-${MKCERT_RELEASE}-linux-arm64")"
+          ALPINE_REF="alpine:latest@${ALPINE_DIGEST}"
+
+          {
+            echo "ALPINE_REF=$ALPINE_REF"
+            echo "SCRIPTOMATIC_REF=$SCRIPTOMATIC_REF"
+            echo "TOOLSET_RELEASE=$TOOLSET_RELEASE"
+            echo "TOOLSET_INSTALLER_SHA256=$TOOLSET_INSTALLER_SHA256"
+            echo "MKCERT_RELEASE=$MKCERT_RELEASE"
+            echo "MKCERT_SHA256_AMD64=$MKCERT_SHA256_AMD64"
+            echo "MKCERT_SHA256_ARM64=$MKCERT_SHA256_ARM64"
+            echo "LAZYDOCKER_RELEASE=$LAZYDOCKER_RELEASE"
+          } >> "$GITHUB_ENV"
+
+          {
+            echo '## Pinned rolling upstreams'
+            echo
+            echo "- Alpine: $ALPINE_REF"
+            echo "- Scriptomatic main: $SCRIPTOMATIC_REF"
+            echo "- Toolset: $TOOLSET_RELEASE"
+            echo "- Toolset installer SHA-256: $TOOLSET_INSTALLER_SHA256"
+            echo "- mkcert: $MKCERT_RELEASE"
+            echo "- mkcert amd64 SHA-256: $MKCERT_SHA256_AMD64"
+            echo "- mkcert arm64 SHA-256: $MKCERT_SHA256_ARM64"
+            echo "- lazydocker: $LAZYDOCKER_RELEASE"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generated template runtime compatibility
+        run: bash scripts/tests/template-runtime-smoke.sh
+
       - name: Build fresh amd64 release candidate
         uses: docker/build-push-action@v7
         with:

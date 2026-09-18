@@ -15,7 +15,11 @@ for expected in \
   'release:' \
   'types: [published]' \
   'workflow_dispatch:' \
+  'release_tag:' \
+  'MANUAL_RELEASE_TAG:' \
   'RELEASE_TAG="$EVENT_RELEASE_TAG"' \
+  'releases/tags/${MANUAL_RELEASE_TAG}' \
+  'Manual recovery refuses draft/prerelease release:' \
   'EVENT_RELEASE_PRERELEASE:' \
   'Stable publish workflow refuses draft/prerelease releases.' \
   'release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest")"' \
@@ -99,6 +103,19 @@ grep -Fq '[[ "$banner_sha256" == "$CANDIDATE_BANNER_SHA256" ]]' "$workflow" || {
   echo 'candidate/published Scriptomatic banner parity check missing' >&2
   exit 1
 }
+
+grep -Fq 'echo "- Toolset release: \`$TOOLSET_RELEASE\`"' "$workflow" || {
+  echo 'candidate summary is not using resolved Toolset release pin' >&2
+  exit 1
+}
+grep -Fq 'echo "- Scriptomatic revision: \`$SCRIPTOMATIC_REF\`"' "$workflow" || {
+  echo 'candidate summary is not using resolved Scriptomatic revision pin' >&2
+  exit 1
+}
+if grep -Fq '$toolset_release' "$workflow" || grep -Fq '$scriptomatic_main' "$workflow"; then
+  echo 'publish workflow contains stale candidate-summary variables' >&2
+  exit 1
+fi
 
 if grep -Eq 'actions/checkout@v[1-6]([^0-9]|$)|docker/build-push-action@v[1-6]([^0-9]|$)|docker/login-action@v[1-3]([^0-9]|$)|docker/metadata-action@v[1-5]([^0-9]|$)' "$workflow"; then
   echo 'publish workflow contains a superseded action major' >&2

@@ -734,29 +734,9 @@ _status_show_volumes() {
   if ((${#vols[@]} > 0)); then
     mapfile -t vols < <(printf "%s\n" "${vols[@]}" | awk '!seen[$0]++')
   fi
-
   if ((${#vols[@]} == 0)); then
     printf "(none)\n"
     return 0
-  fi
-
-  declare -A vol_size=()
-  local df
-  df="$(docker system df -v 2>/dev/null || true)"
-  if [[ -n "$df" ]]; then
-    while read -r name _links size _rest; do
-      [[ -n "$name" && "$name" != "VOLUME" ]] || continue
-      [[ -n "$size" ]] || continue
-      vol_size["$name"]="$size"
-    done < <(
-      printf "%s\n" "$df" |
-        awk '
-          /^Local Volumes space usage:/ {inside=1; next}
-          inside && /^Build cache usage:/ {exit}
-          inside && /^[[:space:]]*$/ {next}
-          inside {print}
-        ' | awk 'NR==1{next} {print $1, $2, $3}'
-    )
   fi
 
   local -a rows=()
@@ -766,8 +746,7 @@ _status_show_volumes() {
     return 0
   fi
 
-  local w_name=6 w_drv=6
-  local line name drv
+  local w_name=6 w_drv=6 line name drv
   for line in "${rows[@]}"; do
     IFS='|' read -r name drv <<<"$line"
     ((${#name} > w_name)) && w_name=${#name}
@@ -776,25 +755,19 @@ _status_show_volumes() {
   ((w_name > 40)) && w_name=40
   ((w_drv > 12)) && w_drv=12
 
-  printf "  %b%-*s%b  %b%-*s%b  %b%s%b\n" \
+  printf "  %b%-*s%b  %b%-*s%b\n" \
     "$BOLD" "$w_name" "NAME" "$NC" \
-    "$BOLD" "$w_drv" "DRIVER" "$NC" \
-    "$BOLD" "SIZE" "$NC"
+    "$BOLD" "$w_drv" "DRIVER" "$NC"
 
-  local any_size=0
   for line in "${rows[@]}"; do
     IFS='|' read -r name drv <<<"$line"
     local n_disp="$name" d_disp="$drv"
     if ((${#n_disp} > w_name)); then n_disp="${n_disp:0:w_name-3}..."; fi
     if ((${#d_disp} > w_drv)); then d_disp="${d_disp:0:w_drv-3}..."; fi
-    local sz="${vol_size[$name]:--}"
-    [[ "$sz" != "-" ]] && any_size=1
-    printf "  %-*s  %-*s  %s\n" "$w_name" "$n_disp" "$w_drv" "${d_disp:-'-'}" "$sz"
+    printf "  %-*s  %-*s\n" "$w_name" "$n_disp" "$w_drv" "${d_disp:-'-'}"
   done
 
-  if ((any_size == 0)); then
-    printf "\n  %bNote:%b volume sizes unavailable (docker system df -v did not provide volume table)\n" "$YELLOW" "$NC"
-  fi
+  printf "\n  %bSize/inode details:%b use monitor-volumes (project-scoped)\n" "$DIM" "$NC"
 }
 
 _status_show_networks() {
@@ -1658,6 +1631,7 @@ _status_json_volumes() {
   local -a cids=()
   mapfile -t cids < <(_status_project_cids)
   if ((${#cids[@]})); then
+    local v
     while IFS= read -r v; do
       [[ -n "$v" ]] && vols+=("$v")
     done < <(
@@ -1665,28 +1639,8 @@ _status_json_volumes() {
         sed '/^[[:space:]]*$/d'
     )
   fi
-
   if ((${#vols[@]})); then
     mapfile -t vols < <(printf "%s\n" "${vols[@]}" | awk '!seen[$0]++')
-  fi
-
-  declare -A vol_size=()
-  local df
-  df="$(docker system df -v 2>/dev/null || true)"
-  if [[ -n "$df" ]]; then
-    while read -r name _links size _rest; do
-      [[ -n "$name" && "$name" != "VOLUME" ]] || continue
-      [[ -n "$size" ]] || continue
-      vol_size["$name"]="$size"
-    done < <(
-      printf "%s\n" "$df" |
-        awk '
-          /^Local Volumes space usage:/ {inside=1; next}
-          inside && /^Build cache usage:/ {exit}
-          inside && /^[[:space:]]*$/ {next}
-          inside {print}
-        ' | awk 'NR==1{next} {print $1, $2, $3}'
-    )
   fi
 
   local -a rows=()
@@ -1694,32 +1648,22 @@ _status_json_volumes() {
     mapfile -t rows < <(docker volume inspect -f '{{.Name}}|{{.Driver}}' "${vols[@]}" 2>/dev/null | sed '/^[[:space:]]*$/d')
   fi
 
-  local any_size=0
   printf '{"items":['
-  local first=1 line name drv sz
+  local first=1 line name drv
   for line in "${rows[@]}"; do
     IFS='|' read -r name drv <<<"$line"
     [[ -n "$name" ]] || continue
-    sz="${vol_size[$name]:--}"
-    [[ "$sz" != "-" ]] && any_size=1
     ((first)) || printf ","
     first=0
     printf '{'
     printf '"name":"%s",' "$(_json_escape "$name")"
     printf '"driver":"%s",' "$(_json_escape "${drv:--}")"
-    printf '"size":"%s"' "$(_json_escape "$sz")"
+    printf '"size":"-"'
     printf '}'
   done
   printf '],'
-  printf '"size_table_available":'
-  if ((any_size)); then
-    printf "true"
-  else
-    printf "false"
-  fi
-  if ((any_size == 0 && ${#rows[@]} > 0)); then
-    printf ',"note":"%s"' "$(_json_escape "volume sizes unavailable (docker system df -v did not provide volume table)")"
-  fi
+  printf '"size_table_available":false,'
+  printf '"note":"%s"' "$(_json_escape "Use monitor-volumes for project-scoped size and inode details.")"
   printf '}'
 }
 

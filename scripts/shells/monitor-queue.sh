@@ -281,7 +281,7 @@ main() {
             fi
           fi
         elif [[ "$key" == *":reserved" ]]; then
-          zc="$(_docker_exec_pref_shell "$redis_container" "redis-cli ZCARD \"$key\" 2>/dev/null || true")"
+          zc="$(docker exec "$redis_container" redis-cli ZCARD "$key" 2>/dev/null || true)"
           zc="$(_num_or_default "$zc" 0)"
           queue_reserved=$((queue_reserved + zc))
         elif [[ "$key" == *":notify" ]]; then

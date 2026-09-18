@@ -136,17 +136,35 @@ jobs:
       - name: Final arm64 release-candidate gate
         run: |
           set -euo pipefail
-          docker run --rm --platform linux/arm64 --entrypoint bash infocyph/tools:publish-candidate-arm64 -lc '
-            test "$(uname -m)" = "aarch64" &&
-            mkcert -version >/dev/null &&
-            lazydocker --version >/dev/null &&
-            composer --version --no-ansi >/dev/null &&
-            gitx --version >/dev/null &&
-            chromacat --version >/dev/null &&
-            sqlitex --version >/dev/null &&
-            netx --version >/dev/null &&
-            jq -e ".php.active | length > 0" "$RUNTIME_VERSIONS_DB" >/dev/null
-          '
+          name="tools-publish-arm64-${RANDOM}"
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+
+          docker run -d \
+            --platform linux/arm64 \
+            --name "$name" \
+            infocyph/tools:publish-candidate-arm64 >/dev/null
+
+          for _ in $(seq 1 30); do
+            if docker exec "$name" tools-healthcheck >/dev/null 2>&1; then
+              test "$(docker exec "$name" uname -m)" = 'aarch64'
+              docker exec "$name" mkcert -version >/dev/null
+              docker exec "$name" lazydocker --version >/dev/null
+              docker exec "$name" composer --version --no-ansi >/dev/null
+              docker exec "$name" gitx --version >/dev/null
+              docker exec "$name" askai --help >/dev/null
+              docker exec "$name" aiops --help >/dev/null
+              docker exec "$name" chromacat --version >/dev/null
+              docker exec "$name" sqlitex --version >/dev/null
+              docker exec "$name" netx --version >/dev/null
+              docker exec "$name" jq -e '.php.active | length > 0' /etc/share/runtime-versions.json >/dev/null
+              docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs "$name" >&2 || true
+          exit 1
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
@@ -270,16 +288,27 @@ jobs:
           bash scripts/tests/release-gate.sh "$image" .localdevstack/docker/compose/companion.yaml
 
           docker pull --platform linux/arm64 "$image" >/dev/null
-          docker run --rm --platform linux/arm64 --entrypoint bash "$image" -lc '
-            set -euo pipefail
-            test "$(uname -m)" = "aarch64"
-            mkcert -version >/dev/null
-            lazydocker --version >/dev/null
-            composer --version --no-ansi >/dev/null
-            gitx --version >/dev/null
-            askai --help >/dev/null
-            aiops --help >/dev/null
-            chromacat --version >/dev/null
-            sqlitex --version >/dev/null
-            netx --version >/dev/null
-          '
+          arm_name="tools-published-arm64-${RANDOM}"
+          trap 'docker rm -f "$arm_name" >/dev/null 2>&1 || true' EXIT
+          docker run -d --platform linux/arm64 --name "$arm_name" "$image" >/dev/null
+
+          for _ in $(seq 1 30); do
+            if docker exec "$arm_name" tools-healthcheck >/dev/null 2>&1; then
+              test "$(docker exec "$arm_name" uname -m)" = 'aarch64'
+              docker exec "$arm_name" mkcert -version >/dev/null
+              docker exec "$arm_name" lazydocker --version >/dev/null
+              docker exec "$arm_name" composer --version --no-ansi >/dev/null
+              docker exec "$arm_name" gitx --version >/dev/null
+              docker exec "$arm_name" askai --help >/dev/null
+              docker exec "$arm_name" aiops --help >/dev/null
+              docker exec "$arm_name" chromacat --version >/dev/null
+              docker exec "$arm_name" sqlitex --version >/dev/null
+              docker exec "$arm_name" netx --version >/dev/null
+              docker exec "$arm_name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs "$arm_name" >&2 || true
+          exit 1

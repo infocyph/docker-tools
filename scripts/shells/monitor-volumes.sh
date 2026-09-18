@@ -16,50 +16,19 @@ _json_escape() {
 }
 
 _infer_project() {
-  if [[ -n "${STATUS_PROJECT:-}" ]]; then
-    printf '%s' "$STATUS_PROJECT"
-    return 0
-  fi
-  if ! _has docker; then
-    printf 'unknown'
-    return 0
-  fi
-
   local p
-  p="$(
-    docker ps --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null |
-      sed '/^[[:space:]]*$/d' |
-      sort |
-      uniq -c |
-      sort -nr |
-      awk 'NR==1{print $2}'
-  )"
-  if [[ -z "$p" ]]; then
-    printf 'unknown'
-  else
-    printf '%s' "$p"
+  for p in "${STATUS_PROJECT:-}" "${LDS_COMPOSE_PROJECT:-}" "${COMPOSE_PROJECT_NAME:-}"; do
+    if [[ -n "$p" && "$p" != "unknown" ]]; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+  if _has docker; then
+    p="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' SERVER_TOOLS 2>/dev/null || true)"
+    [[ "$p" == "<no value>" ]] && p=""
+    [[ -n "$p" ]] && { printf '%s' "$p"; return 0; }
   fi
-}
-
-_to_bytes() {
-  local v="${1:-}"
-  v="${v//,/}"
-  local num unit
-  num="$(printf '%s' "$v" | awk '{gsub(/[^0-9.]/,""); print}')"
-  unit="$(printf '%s' "$v" | awk '{gsub(/[0-9.]/,""); print}')"
-  awk -v n="${num:-0}" -v u="$unit" 'BEGIN{
-    mul=1
-    if(u=="B"||u=="") mul=1
-    else if(u=="kB"||u=="KB") mul=1000
-    else if(u=="MB") mul=1000^2
-    else if(u=="GB") mul=1000^3
-    else if(u=="TB") mul=1000^4
-    else if(u=="KiB") mul=1024
-    else if(u=="MiB") mul=1024^2
-    else if(u=="GiB") mul=1024^3
-    else if(u=="TiB") mul=1024^4
-    printf "%.0f", (n+0)*mul
-  }'
+  printf 'unknown'
 }
 
 _num_or_default() {
@@ -144,42 +113,45 @@ _emit_json_csv_array() {
 }
 
 _helper_image() {
-  local name img
-  for name in SERVER_TOOLS "$(docker ps -q --filter 'label=com.docker.compose.service=server-tools' | head -n1)"; do
-    [[ -n "$name" ]] || continue
-    img="$(docker inspect -f '{{.Config.Image}}' "$name" 2>/dev/null || true)"
-    if [[ -n "$img" ]]; then
-      printf '%s' "$img"
-      return 0
-    fi
-  done
-  img="$(docker ps --format '{{.Image}}' 2>/dev/null | head -n1 || true)"
-  printf '%s' "$img"
+  local project="${1:-}" cid img
+  [[ -n "$project" && "$project" != "unknown" ]] || return 0
+
+  cid="$(docker ps -q \
+    --filter "label=com.docker.compose.project=${project}" \
+    --filter 'label=com.docker.compose.service=server-tools' \
+    2>/dev/null | head -n1 || true)"
+  if [[ -n "$cid" ]]; then
+    img="$(docker inspect -f '{{.Config.Image}}' "$cid" 2>/dev/null || true)"
+    [[ -n "$img" ]] && { printf '%s' "$img"; return 0; }
+  fi
 }
 
 _pick_probe_runtime() {
+  local project="${1:-}"
   local -a candidates=()
   local img
 
-  img="$(_helper_image)"
+  img="$(_helper_image "$project")"
   [[ -n "$img" ]] && candidates+=("$img")
 
   while IFS= read -r img; do
     [[ -n "$img" ]] || continue
     local seen=0 existing
     for existing in "${candidates[@]}"; do
-      if [[ "$existing" == "$img" ]]; then
-        seen=1
-        break
-      fi
+      [[ "$existing" == "$img" ]] && { seen=1; break; }
     done
     ((seen == 0)) && candidates+=("$img")
-  done < <(docker ps --format '{{.Image}}' 2>/dev/null | sed '/^[[:space:]]*$/d')
+  done < <(
+    docker ps \
+      --filter "label=com.docker.compose.project=${project}" \
+      --format '{{.Image}}' 2>/dev/null |
+      sed '/^[[:space:]]*$/d'
+  )
 
   local shell image
   for image in "${candidates[@]}"; do
     for shell in bash sh; do
-      if docker run --rm --entrypoint "$shell" "$image" -c 'command -v df >/dev/null 2>&1 && command -v find >/dev/null 2>&1' >/dev/null 2>&1; then
+      if docker run --rm --entrypoint "$shell" "$image" -c 'command -v df >/dev/null 2>&1 && command -v find >/dev/null 2>&1 && command -v du >/dev/null 2>&1 && command -v awk >/dev/null 2>&1' >/dev/null 2>&1; then
         printf '%s|%s' "$image" "$shell"
         return 0
       fi
@@ -189,10 +161,33 @@ _pick_probe_runtime() {
   printf '|'
 }
 
+_volume_size_bytes() {
+  local vname="${1:-}" targets="${2:-}" helper_image="${3:-}" helper_shell="${4:-}"
+  local target probe_container probe_path out
+  [[ -n "$vname" ]] || { printf '0'; return 0; }
+
+  if [[ -n "$targets" ]]; then
+    while IFS= read -r target; do
+      [[ -n "$target" ]] || continue
+      IFS='|' read -r probe_container probe_path <<<"$target"
+      [[ -n "$probe_container" && -n "$probe_path" ]] || continue
+      out="$(docker exec --user 0 -e AP_MONITOR_PATH="$probe_path" "$probe_container" sh -c 'du -sk "$AP_MONITOR_PATH" 2>/dev/null | awk "NR==1{printf \"%.0f\", \$1 * 1024}"' 2>/dev/null || true)"
+      [[ "$out" =~ ^[0-9]+$ ]] && { printf '%s' "$out"; return 0; }
+    done <<<"$targets"
+  fi
+
+  if [[ -n "$helper_image" && -n "$helper_shell" ]]; then
+    out="$(docker run --rm --user 0 --entrypoint "$helper_shell" -v "${vname}:/v:ro" "$helper_image" -c 'du -sk /v 2>/dev/null | awk "NR==1{printf \"%.0f\", \$1 * 1024}"' 2>/dev/null || true)"
+    [[ "$out" =~ ^[0-9]+$ ]] && { printf '%s' "$out"; return 0; }
+  fi
+
+  printf '0'
+}
+
 usage() {
   cat <<'EOF'
 Usage:
-  monitor-volumes [--json] [--top <n>] [--inode-top <n>]
+  monitor-volumes [--json] [--top <n>] [--inode-top <n>] [--skip-inodes]
 
 Examples:
   monitor-volumes --json
@@ -201,13 +196,14 @@ EOF
 }
 
 main() {
-  local json=0 top_n=0 inode_top_n=0
+  local json=0 top_n=0 inode_top_n=0 skip_inodes=0
   local max_rows="${MONITOR_VOLUMES_MAX_ROWS:-200}"
   while [[ "${1:-}" ]]; do
     case "$1" in
       --json) json=1; shift ;;
       --top) top_n="${2:-0}"; shift 2 ;;
       --inode-top) inode_top_n="${2:-0}"; shift 2 ;;
+      --skip-inodes) skip_inodes=1; shift ;;
       -h|--help) usage; return 0 ;;
       *) echo "Unknown arg: $1" >&2; usage; return 1 ;;
     esac
@@ -221,6 +217,7 @@ main() {
   ((top_n > max_rows)) && top_n="$max_rows"
   ((inode_top_n <= 0)) && inode_top_n="$top_n"
   ((inode_top_n > top_n)) && inode_top_n="$top_n"
+  ((skip_inodes == 1)) && inode_top_n=0
 
   if ! _has docker; then
     printf '{"ok":false,"error":"docker_missing","message":"docker command is required.","generated_at":"%s","project":"unknown"}\n' \
@@ -235,16 +232,22 @@ main() {
 
   local project
   project="$(_infer_project)"
+  if [[ -z "$project" || "$project" == "unknown" ]]; then
+    if ((json)); then
+      printf '{"ok":false,"error":"project_unresolved","message":"LocalDevStack Compose project could not be determined; host-wide volume discovery is disabled.","generated_at":"%s","project":"unknown","filters":{"top":%d,"inode_top":%d},"summary":{"volumes":0,"pass":0,"warn":0,"fail":0,"inode_scanned":0,"docker_root_free_bytes":-1},"items":[]}\n' \
+        "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" "$top_n" "$inode_top_n"
+    else
+      printf 'Volume Monitor | project=unknown volumes=0 degraded=project_unresolved\n'
+    fi
+    return 0
+  fi
 
   local -a cids=()
   if [[ "$project" != "unknown" && -n "$project" ]]; then
     mapfile -t cids < <(docker ps -aq --filter "label=com.docker.compose.project=${project}" 2>/dev/null | sed '/^[[:space:]]*$/d')
   fi
-  if ((${#cids[@]} == 0)); then
-    mapfile -t cids < <(docker ps -aq 2>/dev/null | sed '/^[[:space:]]*$/d')
-  fi
 
-  declare -A vol_service=() vol_present=() vol_probe_targets=()
+  declare -A vol_service=() vol_present=() vol_probe_targets=() vol_links=()
   local cid cname crunning service mounts m mname mdest
   for cid in "${cids[@]}"; do
     [[ -n "$cid" ]] || continue
@@ -260,6 +263,7 @@ main() {
       IFS='|' read -r mname mdest <<<"$m"
       [[ -n "$mname" ]] || continue
       vol_present["$mname"]=1
+      vol_links["$mname"]=$((${vol_links[$mname]:-0} + 1))
       if [[ -z "${vol_service[$mname]:-}" ]]; then
         vol_service["$mname"]="$service"
       elif [[ ",${vol_service[$mname]}," != *",$service,"* ]]; then
@@ -275,33 +279,20 @@ main() {
     done <<<"$mounts"
   done
 
-  local raw_df
-  raw_df="$(docker system df -v 2>/dev/null || true)"
-  local -a volume_rows=()
-  mapfile -t volume_rows < <(
-    printf '%s\n' "$raw_df" | awk '
-      BEGIN{sec=0;hdr=0;seen=0}
-      /^Local Volumes space usage:/ {sec=1; next}
-      sec==1 && /^VOLUME NAME[[:space:]]+LINKS[[:space:]]+SIZE/ {hdr=1; next}
-      sec==1 && hdr==1 {
-        if ($0 ~ /^[[:space:]]*$/) {
-          if (seen) exit
-          next
-        }
-        seen=1
-        name=$1; links=$2; size=$3
-        if (name != "" && links ~ /^[0-9]+$/) print name "|" links "|" size
-      }
-    '
-  )
+  local helper_image helper_shell helper_rt
+  helper_rt="$(_pick_probe_runtime "$project")"
+  IFS='|' read -r helper_image helper_shell <<<"$helper_rt"
 
-  if ((${#volume_rows[@]} == 0)); then
-    mapfile -t volume_rows < <(
-      docker volume ls --format '{{.Name}}' 2>/dev/null |
-        sed '/^[[:space:]]*$/d' |
-        awk '{print $1"|0|0B"}'
-    )
-  fi
+  local -a volume_rows=()
+  local scoped_volume scoped_links scoped_size_b scoped_size_h
+  for scoped_volume in "${!vol_present[@]}"; do
+    [[ -n "$scoped_volume" ]] || continue
+    scoped_links="${vol_links[$scoped_volume]:-0}"
+    scoped_size_b="$(_volume_size_bytes "$scoped_volume" "${vol_probe_targets[$scoped_volume]:-}" "$helper_image" "$helper_shell")"
+    scoped_size_b="$(_num_or_default "$scoped_size_b" 0)"
+    scoped_size_h="$(_bytes_human "$scoped_size_b")"
+    volume_rows+=("$scoped_volume|$scoped_links|$scoped_size_h|$scoped_size_b")
+  done
 
   local state_dir history_file
   state_dir="$(_state_dir)"
@@ -345,15 +336,8 @@ main() {
   local -a rows=()
   local row vname links size_h size_b svc delta dt growth_bph eta_h pressure level note
   for row in "${volume_rows[@]}"; do
-    IFS='|' read -r vname links size_h <<<"$row"
+    IFS='|' read -r vname links size_h size_b <<<"$row"
     [[ -n "$vname" ]] || continue
-    if [[ "$project" != "unknown" && -n "$project" ]]; then
-      if [[ -z "${vol_present[$vname]:-}" ]]; then
-        continue
-      fi
-    fi
-
-    size_b="$(_to_bytes "$size_h")"
     size_b="$(_num_or_default "$size_b" 0)"
     svc="${vol_service[$vname]:--}"
     delta=0
@@ -419,16 +403,14 @@ main() {
   ((effective_top_n > rows_count)) && effective_top_n="$rows_count"
   effective_inode_top_n="$inode_top_n"
   ((effective_inode_top_n > effective_top_n)) && effective_inode_top_n="$effective_top_n"
+  ((skip_inodes == 1)) && effective_inode_top_n=0
 
   local -a sorted=()
   if ((${#rows[@]})); then
     mapfile -t sorted < <(printf '%s\n' "${rows[@]}" | sort -t'|' -k5,5nr | head -n "$effective_top_n")
   fi
 
-  # Optional inode scan for biggest volumes.
-  local helper_image helper_shell helper_rt
-  helper_rt="$(_pick_probe_runtime)"
-  IFS='|' read -r helper_image helper_shell <<<"$helper_rt"
+  # Optional inode scan for biggest project volumes.
   if [[ "$effective_inode_top_n" -gt 0 && ${#sorted[@]} -gt 0 ]]; then
     local -a inode_targets=()
     mapfile -t inode_targets < <(printf '%s\n' "${sorted[@]}" | head -n "$effective_inode_top_n")

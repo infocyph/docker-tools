@@ -72,42 +72,13 @@ _normalize_label_value() {
 }
 
 _detect_project_from_containers() {
-  local p cid
-
+  local p
   p="$(_normalize_label_value "$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' SERVER_TOOLS 2>/dev/null || true)")"
-  [[ -n "$p" ]] && {
-    printf "%s" "$p"
-    return 0
-  }
-
-  cid="$(docker ps -aq --filter 'label=com.docker.compose.service=server-tools' 2>/dev/null | head -n1 || true)"
-  if [[ -n "$cid" ]]; then
-    p="$(_normalize_label_value "$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$cid" 2>/dev/null || true)")"
-    [[ -n "$p" ]] && {
-      printf "%s" "$p"
-      return 0
-    }
-  fi
-
-  p="$(docker ps -a --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null |
-    sed '/^[[:space:]]*$/d' |
-    sort |
-    uniq -c |
-    sort -nr |
-    awk 'NR==1{print $2}')"
   printf "%s" "${p:-}"
 }
 
 _project_name_from_server_tools() {
-  local cid line
-  for cid in SERVER_TOOLS "$(docker ps -aq --filter 'label=com.docker.compose.service=server-tools' 2>/dev/null | head -n1 || true)"; do
-    [[ -n "$cid" ]] || continue
-    while IFS= read -r line; do
-      [[ "$line" == "COMPOSE_PROJECT_NAME="* ]] || continue
-      printf "%s" "${line#*=}"
-      return 0
-    done < <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null || true)
-  done
+  _detect_project_from_containers
 }
 
 _detect_workdir_from_containers() {
@@ -491,24 +462,26 @@ _status_project_names() {
   docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Names}}' 2>/dev/null | sed '/^[[:space:]]*$/d' || true
 }
 
-_container_env_value() {
-  local cid="${1:-}" key="${2:-}" line
-  [[ -n "$cid" && -n "$key" ]] || return 0
-  while IFS= read -r line; do
-    [[ "$line" == "$key="* ]] || continue
-    printf "%s" "${line#*=}"
-    return 0
-  done < <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null || true)
+_server_tools_cid() {
+  local project
+  project="$(lds_project)"
+  [[ -n "$project" && "$project" != "unknown" ]] || return 0
+  docker ps -aq \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter 'label=com.docker.compose.service=server-tools' \
+    2>/dev/null | head -n1 || true
 }
 
 _profiles_from_server_tools() {
-  local cid
-  cid="$(docker ps -aq --filter 'name=SERVER_TOOLS' 2>/dev/null | head -n1 || true)"
-  if [[ -z "$cid" ]]; then
-    cid="$(docker ps -aq --filter 'label=com.docker.compose.service=server-tools' 2>/dev/null | head -n1 || true)"
+  if [[ -n "${COMPOSE_PROFILES:-}" ]]; then
+    printf "%s" "$COMPOSE_PROFILES"
+    return 0
   fi
+
+  local cid
+  cid="$(_server_tools_cid)"
   [[ -n "$cid" ]] || return 0
-  _container_env_value "$cid" "COMPOSE_PROFILES"
+  docker exec "$cid" sh -c 'printf "%s" "${COMPOSE_PROFILES:-}"' 2>/dev/null || true
 }
 
 _status_running_names() {
@@ -739,6 +712,22 @@ _status_show_disk() {
   docker system df
 }
 
+_status_project_volume_size_rows() {
+  _has monitor-volumes || return 0
+  _has jq || return 0
+
+  local payload
+  payload="$(MONITOR_VOLUMES_MAX_ROWS=1000 monitor-volumes --json --skip-inodes 2>/dev/null || true)"
+  [[ -n "$payload" ]] || return 0
+  printf '%s' "$payload" | jq -r '
+    if .ok == true then
+      .items[]? | [.volume, (.size // "-")] | @tsv
+    else
+      empty
+    end
+  ' 2>/dev/null || true
+}
+
 _status_show_volumes() {
   local project
   project="$(lds_project)"
@@ -761,30 +750,17 @@ _status_show_volumes() {
   if ((${#vols[@]} > 0)); then
     mapfile -t vols < <(printf "%s\n" "${vols[@]}" | awk '!seen[$0]++')
   fi
-
   if ((${#vols[@]} == 0)); then
     printf "(none)\n"
     return 0
   fi
 
   declare -A vol_size=()
-  local df
-  df="$(docker system df -v 2>/dev/null || true)"
-  if [[ -n "$df" ]]; then
-    while read -r name _links size _rest; do
-      [[ -n "$name" && "$name" != "VOLUME" ]] || continue
-      [[ -n "$size" ]] || continue
-      vol_size["$name"]="$size"
-    done < <(
-      printf "%s\n" "$df" |
-        awk '
-          /^Local Volumes space usage:/ {inside=1; next}
-          inside && /^Build cache usage:/ {exit}
-          inside && /^[[:space:]]*$/ {next}
-          inside {print}
-        ' | awk 'NR==1{next} {print $1, $2, $3}'
-    )
-  fi
+  local size_name size_value
+  while IFS=$'\t' read -r size_name size_value; do
+    [[ -n "$size_name" ]] || continue
+    vol_size["$size_name"]="${size_value:--}"
+  done < <(_status_project_volume_size_rows)
 
   local -a rows=()
   mapfile -t rows < <(docker volume inspect -f '{{.Name}}|{{.Driver}}' "${vols[@]}" 2>/dev/null | sed '/^[[:space:]]*$/d')
@@ -793,8 +769,7 @@ _status_show_volumes() {
     return 0
   fi
 
-  local w_name=6 w_drv=6
-  local line name drv
+  local w_name=6 w_drv=6 line name drv
   for line in "${rows[@]}"; do
     IFS='|' read -r name drv <<<"$line"
     ((${#name} > w_name)) && w_name=${#name}
@@ -808,19 +783,19 @@ _status_show_volumes() {
     "$BOLD" "$w_drv" "DRIVER" "$NC" \
     "$BOLD" "SIZE" "$NC"
 
-  local any_size=0
+  local any_size=0 sz
   for line in "${rows[@]}"; do
     IFS='|' read -r name drv <<<"$line"
     local n_disp="$name" d_disp="$drv"
     if ((${#n_disp} > w_name)); then n_disp="${n_disp:0:w_name-3}..."; fi
     if ((${#d_disp} > w_drv)); then d_disp="${d_disp:0:w_drv-3}..."; fi
-    local sz="${vol_size[$name]:--}"
+    sz="${vol_size[$name]:--}"
     [[ "$sz" != "-" ]] && any_size=1
     printf "  %-*s  %-*s  %s\n" "$w_name" "$n_disp" "$w_drv" "${d_disp:-'-'}" "$sz"
   done
 
   if ((any_size == 0)); then
-    printf "\n  %bNote:%b volume sizes unavailable (docker system df -v did not provide volume table)\n" "$YELLOW" "$NC"
+    printf "\n  %bNote:%b project-scoped volume sizes unavailable\n" "$YELLOW" "$NC"
   fi
 }
 
@@ -952,14 +927,13 @@ _status_urls() {
   fi
 
   if _has docker; then
-    for n in SERVER_TOOLS "$(docker ps -aq --filter 'label=com.docker.compose.service=server-tools' 2>/dev/null | head -n1 || true)"; do
-      [[ -n "$n" ]] || continue
+    n="$(_server_tools_cid)"
+    if [[ -n "$n" ]]; then
       while IFS= read -r d; do
         _is_valid_domain_name "$d" || continue
         urls_tools+=("https://$d")
       done < <(docker exec "$n" domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
-      ((${#urls_tools[@]})) && break
-    done
+    fi
   fi
 
   if ((${#urls_tools[@]} > ${#urls_local[@]})); then
@@ -1686,6 +1660,7 @@ _status_json_volumes() {
   local -a cids=()
   mapfile -t cids < <(_status_project_cids)
   if ((${#cids[@]})); then
+    local v
     while IFS= read -r v; do
       [[ -n "$v" ]] && vols+=("$v")
     done < <(
@@ -1693,29 +1668,16 @@ _status_json_volumes() {
         sed '/^[[:space:]]*$/d'
     )
   fi
-
   if ((${#vols[@]})); then
     mapfile -t vols < <(printf "%s\n" "${vols[@]}" | awk '!seen[$0]++')
   fi
 
   declare -A vol_size=()
-  local df
-  df="$(docker system df -v 2>/dev/null || true)"
-  if [[ -n "$df" ]]; then
-    while read -r name _links size _rest; do
-      [[ -n "$name" && "$name" != "VOLUME" ]] || continue
-      [[ -n "$size" ]] || continue
-      vol_size["$name"]="$size"
-    done < <(
-      printf "%s\n" "$df" |
-        awk '
-          /^Local Volumes space usage:/ {inside=1; next}
-          inside && /^Build cache usage:/ {exit}
-          inside && /^[[:space:]]*$/ {next}
-          inside {print}
-        ' | awk 'NR==1{next} {print $1, $2, $3}'
-    )
-  fi
+  local size_name size_value
+  while IFS=$'\t' read -r size_name size_value; do
+    [[ -n "$size_name" ]] || continue
+    vol_size["$size_name"]="${size_value:--}"
+  done < <(_status_project_volume_size_rows)
 
   local -a rows=()
   if ((${#vols[@]})); then
@@ -1741,12 +1703,12 @@ _status_json_volumes() {
   printf '],'
   printf '"size_table_available":'
   if ((any_size)); then
-    printf "true"
+    printf 'true'
   else
-    printf "false"
-  fi
-  if ((any_size == 0 && ${#rows[@]} > 0)); then
-    printf ',"note":"%s"' "$(_json_escape "volume sizes unavailable (docker system df -v did not provide volume table)")"
+    printf 'false'
+    if ((${#rows[@]} > 0)); then
+      printf ',"note":"%s"' "$(_json_escape "Project-scoped volume sizes unavailable.")"
+    fi
   fi
   printf '}'
 }

@@ -16,40 +16,25 @@ _json_escape() {
 }
 
 _infer_project() {
-  if [[ -n "${STATUS_PROJECT:-}" ]]; then
-    printf '%s' "$STATUS_PROJECT"
-    return 0
-  fi
-  if ! _has docker; then
-    printf 'unknown'
-    return 0
-  fi
   local p
-  p="$(
-    docker ps --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null |
-      sed '/^[[:space:]]*$/d' |
-      sort |
-      uniq -c |
-      sort -nr |
-      awk 'NR==1{print $2}'
-  )"
-  if [[ -z "$p" ]]; then
-    printf 'unknown'
-  else
-    printf '%s' "$p"
+  for p in "${STATUS_PROJECT:-}" "${LDS_COMPOSE_PROJECT:-}" "${COMPOSE_PROJECT_NAME:-}"; do
+    if [[ -n "$p" && "$p" != "unknown" ]]; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+  if _has docker; then
+    p="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' SERVER_TOOLS 2>/dev/null || true)"
+    [[ "$p" == "<no value>" ]] && p=""
+    [[ -n "$p" ]] && { printf '%s' "$p"; return 0; }
   fi
-}
-
-_docker_exec_pref_shell() {
-  local c="${1:-}" script="${2:-}"
-  [[ -n "$c" ]] || return 0
-  docker exec "$c" bash -c "$script" 2>/dev/null || docker exec "$c" sh -c "$script" 2>/dev/null || true
+  printf 'unknown'
 }
 
 _container_sha() {
   local c="${1:-}" f="${2:-}"
   [[ -n "$c" && -n "$f" ]] || return 0
-  _docker_exec_pref_shell "$c" "if [ -f \"$f\" ]; then sha256sum \"$f\" 2>/dev/null | awk '{print \$1}'; fi"
+  docker exec "$c" sha256sum "$f" 2>/dev/null | awk 'NR==1{print $1}' || true
 }
 
 _choose_dest_dir() {
@@ -58,7 +43,7 @@ _choose_dest_dir() {
   local d
   for d in "$@"; do
     [[ -n "$d" ]] || continue
-    if docker exec "$c" bash -c "[ -d \"$d\" ]" >/dev/null 2>&1 || docker exec "$c" sh -c "[ -d \"$d\" ]" >/dev/null 2>&1; then
+    if docker exec "$c" test -d "$d" >/dev/null 2>&1; then
       printf '%s' "$d"
       return 0
     fi
@@ -66,22 +51,19 @@ _choose_dest_dir() {
 }
 
 _find_container() {
-  local key="${1:-}" raw n s i st
-  raw="$(docker ps -a --format '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.State}}' 2>/dev/null || true)"
+  local project="${1:-}" key="${2:-}" raw n s i st
+  [[ -n "$project" && "$project" != "unknown" ]] || return 0
+  raw="$(docker ps -a \
+    --filter "label=com.docker.compose.project=${project}" \
+    --format '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.State}}' 2>/dev/null || true)"
   while IFS='|' read -r n s i st; do
     [[ -n "$n" ]] || continue
     case "$key" in
       nginx)
-        if [[ "${n,,} ${s,,} ${i,,}" == *nginx* ]]; then
-          printf '%s|%s\n' "$n" "$st"
-          return 0
-        fi
+        [[ "${n,,} ${s,,} ${i,,}" == *nginx* ]] && { printf '%s|%s\n' "$n" "$st"; return 0; }
         ;;
       apache)
-        if [[ "${n,,} ${s,,} ${i,,}" == *apache* ]]; then
-          printf '%s|%s\n' "$n" "$st"
-          return 0
-        fi
+        [[ "${n,,} ${s,,} ${i,,}" == *apache* ]] && { printf '%s|%s\n' "$n" "$st"; return 0; }
         ;;
       fpm)
         if [[ "${n,,} ${s,,} ${i,,}" == *php* || "${n,,} ${s,,} ${i,,}" == *fpm* ]]; then
@@ -147,7 +129,7 @@ main() {
     container="-"
     cstate="-"
 
-    container_info="$(_find_container "$comp" || true)"
+    container_info="$(_find_container "$project" "$comp" || true)"
     if [[ -z "$container_info" ]]; then
       level="warn"
       note="container_not_found"
@@ -212,7 +194,7 @@ main() {
     tmp_src="$(mktemp)"
     tmp_dst="$(mktemp)"
     find "$src_dir" -type f -name "$find_glob" -exec basename {} \; 2>/dev/null | sort -u >"$tmp_src" || true
-    _docker_exec_pref_shell "$container" "find \"$dest_dir\" -type f -name \"$find_glob\" -exec basename {} \\; 2>/dev/null" | sort -u >"$tmp_dst" || true
+    docker exec "$container" find "$dest_dir" -type f -name "$find_glob" -exec basename {} ';' 2>/dev/null | sort -u >"$tmp_dst" || true
     extra="$(comm -13 "$tmp_src" "$tmp_dst" 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | awk '{print $1}')"
     extra="${extra:-0}"
     rm -f "$tmp_src" "$tmp_dst" >/dev/null 2>&1 || true

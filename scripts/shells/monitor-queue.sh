@@ -16,28 +16,19 @@ _json_escape() {
 }
 
 _infer_project() {
-  if [[ -n "${STATUS_PROJECT:-}" ]]; then
-    printf '%s' "$STATUS_PROJECT"
-    return 0
-  fi
-  if ! _has docker; then
-    printf 'unknown'
-    return 0
-  fi
   local p
-  p="$(
-    docker ps --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null |
-      sed '/^[[:space:]]*$/d' |
-      sort |
-      uniq -c |
-      sort -nr |
-      awk 'NR==1{print $2}'
-  )"
-  if [[ -z "$p" ]]; then
-    printf 'unknown'
-  else
-    printf '%s' "$p"
+  for p in "${STATUS_PROJECT:-}" "${LDS_COMPOSE_PROJECT:-}" "${COMPOSE_PROJECT_NAME:-}"; do
+    if [[ -n "$p" && "$p" != "unknown" ]]; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+  if _has docker; then
+    p="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' SERVER_TOOLS 2>/dev/null || true)"
+    [[ "$p" == "<no value>" ]] && p=""
+    [[ -n "$p" ]] && { printf '%s' "$p"; return 0; }
   fi
+  printf 'unknown'
 }
 
 _num_or_default() {
@@ -77,8 +68,11 @@ _docker_exec_pref_shell() {
 }
 
 _find_redis_container() {
-  local raw name service image state
-  raw="$(docker ps -a --format '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.State}}' 2>/dev/null || true)"
+  local project="${1:-}" raw name service image state
+  [[ -n "$project" && "$project" != "unknown" ]] || return 0
+  raw="$(docker ps -a \
+    --filter "label=com.docker.compose.project=${project}" \
+    --format '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.State}}' 2>/dev/null || true)"
   while IFS='|' read -r name service image state; do
     [[ -n "$name" ]] || continue
     if [[ "${name,,} ${service,,} ${image,,}" == *redis* ]]; then
@@ -89,8 +83,11 @@ _find_redis_container() {
 }
 
 _find_runner_container() {
-  local raw name service image state hay
-  raw="$(docker ps -a --format '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.State}}' 2>/dev/null || true)"
+  local project="${1:-}" raw name service image state hay
+  [[ -n "$project" && "$project" != "unknown" ]] || return 0
+  raw="$(docker ps -a \
+    --filter "label=com.docker.compose.project=${project}" \
+    --format '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.State}}' 2>/dev/null || true)"
   while IFS='|' read -r name service image state; do
     [[ -n "$name" ]] || continue
     hay="${name,,} ${service,,} ${image,,}"
@@ -249,9 +246,6 @@ main() {
   if [[ "$project" != "unknown" && -n "$project" ]]; then
     mapfile -t names < <(docker ps -a --filter "label=com.docker.compose.project=${project}" --format '{{.Names}}' 2>/dev/null | sed '/^[[:space:]]*$/d')
   fi
-  if ((${#names[@]} == 0)); then
-    mapfile -t names < <(docker ps -a --format '{{.Names}}' 2>/dev/null | sed '/^[[:space:]]*$/d')
-  fi
 
   local raw=""
   if ((${#names[@]})); then
@@ -261,20 +255,20 @@ main() {
   local queue_pending=0 queue_delayed=0 queue_reserved=0 oldest_pending_age=-1
   local redis_container="" redis_state="" redis_note="not_detected"
   local redis_entry
-  redis_entry="$(_find_redis_container || true)"
+  redis_entry="$(_find_redis_container "$project" || true)"
   if [[ -n "$redis_entry" ]]; then
     IFS='|' read -r redis_container redis_state <<<"$redis_entry"
     redis_note="ok"
     if [[ "$redis_state" == "running" ]]; then
       local keys key llen zc zline zscore zepoch zage max_age
-      mapfile -t keys < <(_docker_exec_pref_shell "$redis_container" "redis-cli --scan --pattern 'queues:*' 2>/dev/null || true" | sed '/^[[:space:]]*$/d')
+      mapfile -t keys < <(docker exec "$redis_container" redis-cli --scan --pattern 'queues:*' 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
       max_age=-1
       for key in "${keys[@]}"; do
         if [[ "$key" == *":delayed" ]]; then
-          zc="$(_docker_exec_pref_shell "$redis_container" "redis-cli ZCARD \"$key\" 2>/dev/null || true")"
+          zc="$(docker exec "$redis_container" redis-cli ZCARD "$key" 2>/dev/null || true)"
           zc="$(_num_or_default "$zc" 0)"
           queue_delayed=$((queue_delayed + zc))
-          zline="$(_docker_exec_pref_shell "$redis_container" "redis-cli ZRANGE \"$key\" 0 0 WITHSCORES 2>/dev/null || true" | tail -n1)"
+          zline="$(docker exec "$redis_container" redis-cli ZRANGE "$key" 0 0 WITHSCORES 2>/dev/null | tail -n1 || true)"
           zscore="$(_num_or_default "$zline" 0)"
           if ((zscore > 0)); then
             zepoch="$zscore"
@@ -287,13 +281,13 @@ main() {
             fi
           fi
         elif [[ "$key" == *":reserved" ]]; then
-          zc="$(_docker_exec_pref_shell "$redis_container" "redis-cli ZCARD \"$key\" 2>/dev/null || true")"
+          zc="$(docker exec "$redis_container" redis-cli ZCARD "$key" 2>/dev/null || true)"
           zc="$(_num_or_default "$zc" 0)"
           queue_reserved=$((queue_reserved + zc))
         elif [[ "$key" == *":notify" ]]; then
           :
         else
-          llen="$(_docker_exec_pref_shell "$redis_container" "redis-cli LLEN \"$key\" 2>/dev/null || true")"
+          llen="$(docker exec "$redis_container" redis-cli LLEN "$key" 2>/dev/null || true)"
           llen="$(_num_or_default "$llen" 0)"
           queue_pending=$((queue_pending + llen))
         fi
@@ -305,7 +299,7 @@ main() {
   fi
 
   local runner_container="" runner_state="" runner_entry
-  runner_entry="$(_find_runner_container || true)"
+  runner_entry="$(_find_runner_container "$project" || true)"
   if [[ -n "$runner_entry" ]]; then
     IFS='|' read -r runner_container runner_state <<<"$runner_entry"
   fi

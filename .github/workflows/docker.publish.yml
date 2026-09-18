@@ -5,90 +5,466 @@ on:
     types: [published]
   schedule:
     - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: docker-publish
+  cancel-in-progress: false
 
 jobs:
-  push_to_registries:
-    name: Push Docker image to Docker Hub and GHCR
+  publish:
+    name: Build, verify and publish Tools
     runs-on: ubuntu-latest
+    timeout-minutes: 70
     permissions:
       contents: read
       packages: write
       attestations: write
+      artifact-metadata: write
       id-token: write
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: Set RELEASE_TAG environment variable
+      - name: Resolve release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          EVENT_RELEASE_DRAFT: ${{ github.event.release.draft }}
+          EVENT_RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == 'release' ]]; then
+            if [[ "$EVENT_RELEASE_DRAFT" == 'true' || "$EVENT_RELEASE_PRERELEASE" == 'true' ]]; then
+              echo 'Stable publish workflow refuses draft/prerelease releases.' >&2
+              exit 1
+            fi
+            RELEASE_TAG="$EVENT_RELEASE_TAG"
+            PUBLISH_RELEASE_TAG=true
+          else
+            release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest")"
+            RELEASE_TAG="$(jq -r '.tag_name // empty' <<<"$release_json")"
+            release_draft="$(jq -r '.draft' <<<"$release_json")"
+            release_prerelease="$(jq -r '.prerelease' <<<"$release_json")"
+            [[ "$release_draft" == 'false' && "$release_prerelease" == 'false' ]] || {
+              echo 'Latest release is not a stable published release.' >&2
+              exit 1
+            }
+            PUBLISH_RELEASE_TAG=false
+          fi
+          [[ -n "$RELEASE_TAG" && "$RELEASE_TAG" != latest ]] || { echo 'No usable stable Tools release found.' >&2; exit 1; }
+          {
+            echo "RELEASE_TAG=$RELEASE_TAG"
+            echo "PUBLISH_RELEASE_TAG=$PUBLISH_RELEASE_TAG"
+          } >> "$GITHUB_ENV"
+          {
+            echo '## Publish resolution'
+            echo
+            echo "- Event: \`$EVENT_NAME\`"
+            echo "- Tools source release: \`$RELEASE_TAG\`"
+            echo "- Publish immutable release tag: \`$PUBLISH_RELEASE_TAG\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check out exact Tools release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Capture source revision
+        run: echo "TOOLS_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Check out LocalDevStack main
+        uses: actions/checkout@v7
+        with:
+          repository: infocyph/LocalDevStack
+          ref: main
+          path: .localdevstack
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Snapshot rolling upstream inputs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "Fetching latest release tag..."
-          RELEASE_TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
-          if [ -z "$RELEASE_TAG" ]; then
-            echo "No release found. Exiting."
-            exit 1
-          fi
-          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
-          echo "Using release tag: $RELEASE_TAG"
+          set -euo pipefail
 
-      - name: Set IMAGE_NAME environment variable
-        run: |
-          IMAGE_NAME=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f2 | sed 's/^docker-//')
-          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
-          echo "Computed IMAGE_NAME: $IMAGE_NAME"
+          retry() {
+            local attempt=1 max_attempts=5
+            until "$@"; do
+              if (( attempt >= max_attempts )); then
+                echo "Command failed after ${max_attempts} attempts: $*" >&2
+                return 1
+              fi
+              sleep "$((attempt * 2))"
+              attempt=$((attempt + 1))
+            done
+          }
 
-      - name: Check out the repo at the latest release tag
-        uses: actions/checkout@v4
+          get_alpine_digest() {
+            local output digest
+            output="$(docker buildx imagetools inspect alpine:latest 2>&1)" || { echo "$output" >&2; return 1; }
+            digest="$(awk '$1 == "Digest:" {print $2; exit}' <<<"$output")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+            printf '%s\n' "$digest"
+          }
+
+          get_scriptomatic_sha() {
+            local sha
+            sha="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main | awk 'NF {print $1; exit}')"
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+            printf '%s\n' "$sha"
+          }
+
+          get_release_tag() {
+            local repository="$1" tag
+            tag="$(gh api "repos/${repository}/releases/latest" --jq '.tag_name // empty')" || return 1
+            [[ -n "$tag" ]] || return 1
+            printf '%s\n' "$tag"
+          }
+
+          get_asset_sha256() {
+            local url="$1" tmp sha
+            tmp="$(mktemp)"
+            curl --fail --silent --show-error --location \
+              --retry 5 --retry-all-errors --retry-delay 2 \
+              --connect-timeout 15 --max-time 120 "$url" -o "$tmp" || { rm -f "$tmp"; return 1; }
+            [[ -s "$tmp" ]] || { rm -f "$tmp"; return 1; }
+            sha="$(sha256sum "$tmp" | awk '{print $1}')"
+            rm -f "$tmp"
+            [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+            printf '%s\n' "$sha"
+          }
+
+          ALPINE_DIGEST="$(retry get_alpine_digest)"
+          SCRIPTOMATIC_REF="$(retry get_scriptomatic_sha)"
+          TOOLSET_RELEASE="$(retry get_release_tag infocyph/Toolset)"
+          MKCERT_RELEASE="$(retry get_release_tag FiloSottile/mkcert)"
+          LAZYDOCKER_RELEASE="$(retry get_release_tag jesseduffield/lazydocker)"
+          TOOLSET_INSTALLER_SHA256="$(retry get_asset_sha256 "https://github.com/infocyph/Toolset/releases/download/${TOOLSET_RELEASE}/install.sh")"
+          MKCERT_SHA256_AMD64="$(retry get_asset_sha256 "https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_RELEASE}/mkcert-${MKCERT_RELEASE}-linux-amd64")"
+          MKCERT_SHA256_ARM64="$(retry get_asset_sha256 "https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_RELEASE}/mkcert-${MKCERT_RELEASE}-linux-arm64")"
+          ALPINE_REF="alpine:latest@${ALPINE_DIGEST}"
+
+          {
+            echo "ALPINE_REF=$ALPINE_REF"
+            echo "SCRIPTOMATIC_REF=$SCRIPTOMATIC_REF"
+            echo "TOOLSET_RELEASE=$TOOLSET_RELEASE"
+            echo "TOOLSET_INSTALLER_SHA256=$TOOLSET_INSTALLER_SHA256"
+            echo "MKCERT_RELEASE=$MKCERT_RELEASE"
+            echo "MKCERT_SHA256_AMD64=$MKCERT_SHA256_AMD64"
+            echo "MKCERT_SHA256_ARM64=$MKCERT_SHA256_ARM64"
+            echo "LAZYDOCKER_RELEASE=$LAZYDOCKER_RELEASE"
+          } >> "$GITHUB_ENV"
+
+          {
+            echo '## Pinned rolling upstreams'
+            echo
+            echo "- Alpine: $ALPINE_REF"
+            echo "- Scriptomatic main: $SCRIPTOMATIC_REF"
+            echo "- Toolset: $TOOLSET_RELEASE"
+            echo "- Toolset installer SHA-256: $TOOLSET_INSTALLER_SHA256"
+            echo "- mkcert: $MKCERT_RELEASE"
+            echo "- mkcert amd64 SHA-256: $MKCERT_SHA256_AMD64"
+            echo "- mkcert arm64 SHA-256: $MKCERT_SHA256_ARM64"
+            echo "- lazydocker: $LAZYDOCKER_RELEASE"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generated template runtime compatibility
+        run: bash scripts/tests/template-runtime-smoke.sh
+
+      - name: Build fresh amd64 release candidate
+        uses: docker/build-push-action@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          context: .
+          platforms: linux/amd64
+          load: true
+          pull: true
+          no-cache: true
+          push: false
+          tags: infocyph/tools:publish-candidate
+          build-args: |
+            ALPINE_REF=${{ env.ALPINE_REF }}
+            SCRIPTOMATIC_REF=${{ env.SCRIPTOMATIC_REF }}
+            TOOLSET_RELEASE=${{ env.TOOLSET_RELEASE }}
+            TOOLSET_INSTALLER_SHA256=${{ env.TOOLSET_INSTALLER_SHA256 }}
+            MKCERT_RELEASE=${{ env.MKCERT_RELEASE }}
+            MKCERT_SHA256_AMD64=${{ env.MKCERT_SHA256_AMD64 }}
+            MKCERT_SHA256_ARM64=${{ env.MKCERT_SHA256_ARM64 }}
+            LAZYDOCKER_RELEASE=${{ env.LAZYDOCKER_RELEASE }}
+          cache-to: type=gha,scope=publish-candidate-amd64,mode=max
+
+      - name: Record candidate upstream resolution
+        env:
+          IMAGE: infocyph/tools:publish-candidate
+        run: |
+          set -euo pipefail
+          alpine_version="$(docker run --rm --entrypoint cat "$IMAGE" /etc/alpine-release)"
+          mkcert_version="$(docker run --rm --entrypoint mkcert "$IMAGE" -version | head -n 1)"
+          lazydocker_version="$(docker run --rm --entrypoint lazydocker "$IMAGE" --version | head -n 1)"
+          composer_version="$(docker run --rm --entrypoint composer "$IMAGE" --version --no-ansi | head -n 1)"
+          gitx_version="$(docker run --rm --entrypoint gitx "$IMAGE" --version | head -n 1)"
+          runtime_generated_at="$(docker run --rm --entrypoint jq "$IMAGE" -r .generated_at /etc/share/runtime-versions.json)"
+          banner_sha256="$(docker run --rm --entrypoint sha256sum "$IMAGE" /usr/local/bin/show-banner | awk '{print $1}')"
+          {
+            echo "CANDIDATE_ALPINE_VERSION=$alpine_version"
+            echo "CANDIDATE_MKCERT_VERSION=$mkcert_version"
+            echo "CANDIDATE_LAZYDOCKER_VERSION=$lazydocker_version"
+            echo "CANDIDATE_COMPOSER_VERSION=$composer_version"
+            echo "CANDIDATE_GITX_VERSION=$gitx_version"
+            echo "CANDIDATE_RUNTIME_GENERATED_AT=$runtime_generated_at"
+            echo "CANDIDATE_BANNER_SHA256=$banner_sha256"
+          } >> "$GITHUB_ENV"
+          {
+            echo '## Candidate upstream resolution'
+            echo
+            echo "- Alpine: \`$alpine_version\`"
+            echo "- mkcert: \`$mkcert_version\`"
+            echo "- lazydocker: \`$lazydocker_version\`"
+            echo "- Composer: \`$composer_version\`"
+            echo "- gitx: \`$gitx_version\`"
+            echo "- Toolset latest release: \`$toolset_release\`"
+            echo "- Scriptomatic main: \`$scriptomatic_main\`"
+            echo "- Runtime metadata generated at: \`$runtime_generated_at\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Final amd64 release-candidate gate
+        run: bash scripts/tests/release-gate.sh infocyph/tools:publish-candidate .localdevstack/docker/compose/companion.yaml
+
+      - name: Build fresh arm64 release candidate
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          pull: true
+          no-cache: true
+          push: false
+          tags: infocyph/tools:publish-candidate-arm64
+          build-args: |
+            ALPINE_REF=${{ env.ALPINE_REF }}
+            SCRIPTOMATIC_REF=${{ env.SCRIPTOMATIC_REF }}
+            TOOLSET_RELEASE=${{ env.TOOLSET_RELEASE }}
+            TOOLSET_INSTALLER_SHA256=${{ env.TOOLSET_INSTALLER_SHA256 }}
+            MKCERT_RELEASE=${{ env.MKCERT_RELEASE }}
+            MKCERT_SHA256_AMD64=${{ env.MKCERT_SHA256_AMD64 }}
+            MKCERT_SHA256_ARM64=${{ env.MKCERT_SHA256_ARM64 }}
+            LAZYDOCKER_RELEASE=${{ env.LAZYDOCKER_RELEASE }}
+          cache-to: type=gha,scope=publish-candidate-arm64,mode=max
+
+      - name: Final arm64 release-candidate gate
+        run: |
+          set -euo pipefail
+          name="tools-publish-arm64-${RANDOM}"
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+
+          docker run -d \
+            --platform linux/arm64 \
+            --name "$name" \
+            infocyph/tools:publish-candidate-arm64 >/dev/null
+
+          for _ in $(seq 1 30); do
+            if docker exec "$name" tools-healthcheck >/dev/null 2>&1; then
+              test "$(docker exec "$name" uname -m)" = 'aarch64'
+              docker exec "$name" mkcert -version >/dev/null
+              docker exec "$name" lazydocker --version >/dev/null
+              docker exec "$name" composer --version --no-ansi >/dev/null
+              docker exec "$name" gitx --version >/dev/null
+              docker exec "$name" askai --help >/dev/null
+              docker exec "$name" aiops --help >/dev/null
+              docker exec "$name" chromacat --version >/dev/null
+              docker exec "$name" sqlitex --version >/dev/null
+              docker exec "$name" netx --version >/dev/null
+              docker exec "$name" jq -e '.php.active | length > 0' /etc/share/runtime-versions.json >/dev/null
+              docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs "$name" >&2 || true
+          exit 1
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: docker.io
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Log in to GitHub Container Registry (GHCR)
-        uses: docker/login-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Enforce immutable release tags
+        if: env.PUBLISH_RELEASE_TAG == 'true'
+        env:
+          VERSION_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          assert_absent() {
+            local image="$1" output
+            if output="$(docker buildx imagetools inspect "$image" 2>&1)"; then
+              echo "Refusing to overwrite immutable release tag: $image" >&2
+              return 1
+            fi
+            case "$output" in
+              *'not found'*|*'manifest unknown'*|*'NAME_UNKNOWN'*) return 0 ;;
+              *) echo "$output" >&2; return 1 ;;
+            esac
+          }
+          assert_absent "docker.io/${GITHUB_REPOSITORY_OWNER}/tools:${VERSION_TAG}"
+          assert_absent "ghcr.io/${GITHUB_REPOSITORY_OWNER}/tools:${VERSION_TAG}"
+
+      - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
-            docker.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+            docker.io/${{ github.repository_owner }}/tools
+            ghcr.io/${{ github.repository_owner }}/tools
+          flavor: |
+            latest=false
           tags: |
-            ${{ env.RELEASE_TAG }}
-            latest
+            type=raw,value=${{ env.RELEASE_TAG }},enable=${{ env.PUBLISH_RELEASE_TAG == 'true' }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.TOOLS_SOURCE_SHA }}
+            org.opencontainers.image.version=${{ env.RELEASE_TAG }}
 
-      - name: Build and push Docker images
+      - name: Build and push multi-architecture image
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
+          pull: false
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ALPINE_REF=${{ env.ALPINE_REF }}
+            SCRIPTOMATIC_REF=${{ env.SCRIPTOMATIC_REF }}
+            TOOLSET_RELEASE=${{ env.TOOLSET_RELEASE }}
+            TOOLSET_INSTALLER_SHA256=${{ env.TOOLSET_INSTALLER_SHA256 }}
+            MKCERT_RELEASE=${{ env.MKCERT_RELEASE }}
+            MKCERT_SHA256_AMD64=${{ env.MKCERT_SHA256_AMD64 }}
+            MKCERT_SHA256_ARM64=${{ env.MKCERT_SHA256_ARM64 }}
+            LAZYDOCKER_RELEASE=${{ env.LAZYDOCKER_RELEASE }}
+          cache-from: |
+            type=gha,scope=publish-candidate-amd64
+            type=gha,scope=publish-candidate-arm64
+          cache-to: type=gha,scope=publish-multiarch,mode=max
+          provenance: mode=max
+          sbom: true
 
-      - name: Generate artifact attestation for Docker Hub
-        uses: actions/attest-build-provenance@v2
+      - name: Generate Docker Hub provenance attestation
+        uses: actions/attest@v4
         with:
-          subject-name: docker.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          subject-name: docker.io/${{ github.repository_owner }}/tools
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
-          github-token: ${{ github.token }}
 
-      - name: Generate artifact attestation for GHCR
-        uses: actions/attest-build-provenance@v2
+      - name: Generate GHCR provenance attestation
+        uses: actions/attest@v4
         with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          subject-name: ghcr.io/${{ github.repository_owner }}/tools
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
-          github-token: ${{ github.token }}
+
+      - name: Verify and summarize published image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          ghcr_image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/tools@${DIGEST}"
+          dockerhub_image="docker.io/${GITHUB_REPOSITORY_OWNER}/tools@${DIGEST}"
+
+          for image in "$ghcr_image" "$dockerhub_image"; do
+            manifest="$(docker buildx imagetools inspect "$image")"
+            grep -Fq 'linux/amd64' <<<"$manifest"
+            grep -Fq 'linux/arm64' <<<"$manifest"
+          done
+
+          image="$ghcr_image"
+          docker pull --platform linux/amd64 "$image" >/dev/null
+          alpine_version="$(docker run --rm --platform linux/amd64 --entrypoint cat "$image" /etc/alpine-release)"
+          mkcert_version="$(docker run --rm --platform linux/amd64 --entrypoint mkcert "$image" -version | head -n 1)"
+          lazydocker_version="$(docker run --rm --platform linux/amd64 --entrypoint lazydocker "$image" --version | head -n 1)"
+          composer_version="$(docker run --rm --platform linux/amd64 --entrypoint composer "$image" --version --no-ansi | head -n 1)"
+          gitx_version="$(docker run --rm --platform linux/amd64 --entrypoint gitx "$image" --version | head -n 1)"
+          runtime_generated_at="$(docker run --rm --platform linux/amd64 --entrypoint jq "$image" -r .generated_at /etc/share/runtime-versions.json)"
+          banner_sha256="$(docker run --rm --platform linux/amd64 --entrypoint sha256sum "$image" /usr/local/bin/show-banner | awk '{print $1}')"
+
+          [[ "$alpine_version" == "$CANDIDATE_ALPINE_VERSION" ]]
+          [[ "$mkcert_version" == "$CANDIDATE_MKCERT_VERSION" ]]
+          [[ "$lazydocker_version" == "$CANDIDATE_LAZYDOCKER_VERSION" ]]
+          [[ "$composer_version" == "$CANDIDATE_COMPOSER_VERSION" ]]
+          [[ "$gitx_version" == "$CANDIDATE_GITX_VERSION" ]]
+          [[ "$runtime_generated_at" == "$CANDIDATE_RUNTIME_GENERATED_AT" ]]
+          [[ "$banner_sha256" == "$CANDIDATE_BANNER_SHA256" ]]
+          {
+            echo '## Published Tools image'
+            echo
+            echo "- Source tag: \`$RELEASE_TAG\`"
+            echo "- Source revision: \`$TOOLS_SOURCE_SHA\`"
+            echo "- Manifest digest: \`$DIGEST\`"
+            echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
+            echo "- Published amd64 Alpine: \`$alpine_version\`"
+            echo "- Published amd64 mkcert: \`$mkcert_version\`"
+            echo "- Published amd64 lazydocker: \`$lazydocker_version\`"
+            echo "- BuildKit provenance: enabled (\`mode=max\`)"
+            echo '- BuildKit SBOM: enabled'
+            echo '- GitHub/Sigstore provenance attestations: Docker Hub + GHCR'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+
+      - name: Gate published image digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/tools@${DIGEST}"
+
+          docker pull --platform linux/amd64 "$image" >/dev/null
+          bash scripts/tests/release-gate.sh "$image" .localdevstack/docker/compose/companion.yaml
+
+          docker pull --platform linux/arm64 "$image" >/dev/null
+          arm_name="tools-published-arm64-${RANDOM}"
+          trap 'docker rm -f "$arm_name" >/dev/null 2>&1 || true' EXIT
+          docker run -d --platform linux/arm64 --name "$arm_name" "$image" >/dev/null
+
+          for _ in $(seq 1 30); do
+            if docker exec "$arm_name" tools-healthcheck >/dev/null 2>&1; then
+              test "$(docker exec "$arm_name" uname -m)" = 'aarch64'
+              docker exec "$arm_name" mkcert -version >/dev/null
+              docker exec "$arm_name" lazydocker --version >/dev/null
+              docker exec "$arm_name" composer --version --no-ansi >/dev/null
+              docker exec "$arm_name" gitx --version >/dev/null
+              docker exec "$arm_name" askai --help >/dev/null
+              docker exec "$arm_name" aiops --help >/dev/null
+              docker exec "$arm_name" chromacat --version >/dev/null
+              docker exec "$arm_name" sqlitex --version >/dev/null
+              docker exec "$arm_name" netx --version >/dev/null
+              docker exec "$arm_name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs "$arm_name" >&2 || true
+          exit 1

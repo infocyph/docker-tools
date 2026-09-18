@@ -119,6 +119,10 @@ if ($topbarPageTitle === '') {
           <i class="bi bi-hdd-network"></i>
           <span>Host Manager</span>
         </a>
+        <a class="ap-nav-link <?= $activePage === 'ai-assistant' ? 'active' : '' ?>" href="<?= htmlspecialchars($routeHref('ai-assistant'), ENT_QUOTES, 'UTF-8') ?>">
+          <i class="bi bi-stars"></i>
+          <span>AI Assistant</span>
+        </a>
         <div class="ap-nav-tree <?= $automationActive ? 'is-open' : '' ?>">
           <button
             class="ap-nav-link ap-nav-link-toggle <?= $automationActive ? 'active' : '' ?>"

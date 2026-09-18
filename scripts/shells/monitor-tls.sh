@@ -69,39 +69,50 @@ _is_valid_domain_name() {
 }
 
 _infer_project() {
-  if [[ -n "${STATUS_PROJECT:-}" ]]; then
-    printf '%s' "$STATUS_PROJECT"
-    return 0
-  fi
-  if ! _has docker; then
-    printf 'unknown'
-    return 0
+  local p
+  for p in "${STATUS_PROJECT:-}" "${LDS_COMPOSE_PROJECT:-}" "${COMPOSE_PROJECT_NAME:-}"; do
+    if [[ -n "$p" && "$p" != "unknown" ]]; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+
+  if _has docker; then
+    p="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' SERVER_TOOLS 2>/dev/null || true)"
+    [[ "$p" == "<no value>" ]] && p=""
+    if [[ -n "$p" ]]; then
+      printf '%s' "$p"
+      return 0
+    fi
   fi
 
-  local p
-  p="$(
-    docker ps --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null |
-      sed '/^[[:space:]]*$/d' |
-      sort |
-      uniq -c |
-      sort -nr |
-      awk 'NR==1{print $2}'
-  )"
-  if [[ -z "$p" ]]; then
-    printf 'unknown'
-  else
-    printf '%s' "$p"
-  fi
+  printf 'unknown'
+}
+
+_server_tools_cid() {
+  local project="${1:-}"
+  [[ -n "$project" && "$project" != "unknown" ]] || return 0
+  _has docker || return 0
+  docker ps -aq \
+    --filter "label=com.docker.compose.project=${project}" \
+    --filter 'label=com.docker.compose.service=server-tools' \
+    2>/dev/null | head -n1 || true
 }
 
 _tcp_reachable() {
   local host="${1:-}" port="${2:-443}"
-  [[ -n "$host" ]] || return 1
-  if _has timeout; then
-    timeout 2 bash -c "cat < /dev/null > /dev/tcp/${host}/${port}" >/dev/null 2>&1
+  [[ -n "$host" && "$port" =~ ^[0-9]+$ ]] || return 1
+
+  if _has nc; then
+    nc -z -w 2 "$host" "$port" >/dev/null 2>&1
     return $?
   fi
-  bash -c "cat < /dev/null > /dev/tcp/${host}/${port}" >/dev/null 2>&1
+
+  if _has timeout; then
+    timeout 2 bash -c 'exec 3<>"/dev/tcp/${1}/${2}"' _ "$host" "$port" >/dev/null 2>&1
+    return $?
+  fi
+  bash -c 'exec 3<>"/dev/tcp/${1}/${2}"' _ "$host" "$port" >/dev/null 2>&1
 }
 
 _detect_tls_target() {
@@ -113,25 +124,17 @@ _detect_tls_target() {
 
   local -a candidates=()
   local n
-  if _has docker; then
-    if [[ -n "$project" && "$project" != "unknown" ]]; then
-      while IFS= read -r n; do
-        [[ -n "$n" ]] || continue
-        candidates+=("$n")
-      done < <(
-        docker ps --filter "label=com.docker.compose.project=${project}" --filter 'label=com.docker.compose.service=nginx' --format '{{.Names}}' 2>/dev/null |
-          sed '/^[[:space:]]*$/d'
-      )
-    fi
-    if ((${#candidates[@]} == 0)); then
-      while IFS= read -r n; do
-        [[ -n "$n" ]] || continue
-        candidates+=("$n")
-      done < <(
-        docker ps --filter 'label=com.docker.compose.service=nginx' --format '{{.Names}}' 2>/dev/null |
-          sed '/^[[:space:]]*$/d'
-      )
-    fi
+  if _has docker && [[ -n "$project" && "$project" != "unknown" ]]; then
+    while IFS= read -r n; do
+      [[ -n "$n" ]] || continue
+      candidates+=("$n")
+    done < <(
+      docker ps \
+        --filter "label=com.docker.compose.project=${project}" \
+        --filter 'label=com.docker.compose.service=nginx' \
+        --format '{{.Names}}' 2>/dev/null |
+        sed '/^[[:space:]]*$/d'
+    )
   fi
 
   candidates+=("NGINX" "nginx" "127.0.0.1")
@@ -155,7 +158,7 @@ _detect_tls_target() {
 
 _collect_domains() {
   local nginx_dir="${1:-/etc/share/vhosts/nginx}"
-  local f d n
+  local f d n project cid
   local -a local_domains=() tool_domains=()
 
   if [[ -d "$nginx_dir" ]]; then
@@ -169,16 +172,14 @@ _collect_domains() {
     shopt -u nullglob
   fi
 
-  if _has docker; then
-    for n in SERVER_TOOLS "$(docker ps -aq --filter 'label=com.docker.compose.service=server-tools' 2>/dev/null | head -n1 || true)"; do
-      [[ -n "$n" ]] || continue
-      while IFS= read -r d; do
-        d="${d,,}"
-        _is_valid_domain_name "$d" || continue
-        tool_domains+=("$d")
-      done < <(docker exec "$n" domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
-      ((${#tool_domains[@]})) && break
-    done
+  project="$(_infer_project)"
+  cid="$(_server_tools_cid "$project")"
+  if [[ -n "$cid" ]]; then
+    while IFS= read -r d; do
+      d="${d,,}"
+      _is_valid_domain_name "$d" || continue
+      tool_domains+=("$d")
+    done < <(docker exec "$cid" domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
   fi
 
   if ((${#tool_domains[@]} > ${#local_domains[@]})); then

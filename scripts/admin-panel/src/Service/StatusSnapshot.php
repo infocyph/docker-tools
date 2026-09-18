@@ -3,23 +3,24 @@ declare(strict_types=1);
 
 namespace AdminPanel\Service;
 
+use AdminPanel\Support\ProcessRunner;
+
 final class StatusSnapshot
 {
-    /**
-     * @return array<string,mixed>
-     */
+    /** @return array<string,mixed> */
     public function collect(): array
     {
-        if (!$this->isShellExecAvailable()) {
+        $result = ProcessRunner::run(['status', '--json'], 30, null, 1048576);
+        if (!(bool)($result['ok'] ?? false)) {
             return [
                 'ok' => false,
-                'error' => 'shell_exec_unavailable',
-                'message' => 'Cannot run status command in this PHP runtime.',
+                'error' => 'status_command_failed',
+                'message' => trim((string)($result['stderr'] ?? 'status --json failed.')) ?: 'status --json failed.',
             ];
         }
 
-        $raw = shell_exec('status --json 2>/dev/null');
-        if (!is_string($raw) || trim($raw) === '') {
+        $raw = (string)($result['stdout'] ?? '');
+        if (trim($raw) === '') {
             return [
                 'ok' => false,
                 'error' => 'status_command_failed',
@@ -44,10 +45,7 @@ final class StatusSnapshot
         ];
     }
 
-    /**
-     * @param array<string,mixed> $payload
-     * @return array<string,mixed>
-     */
+    /** @param array<string,mixed> $payload @return array<string,mixed> */
     private function buildSummary(array $payload): array
     {
         $containers = (array)($payload['sections']['containers']['core']['items'] ?? []);
@@ -61,11 +59,11 @@ final class StatusSnapshot
             }
             $health = strtolower((string)($container['health'] ?? ''));
             if ($health === 'healthy') {
-                $healthy++;
+                ++$healthy;
             } elseif ($health === '-' || $health === '') {
-                $noHealth++;
+                ++$noHealth;
             } else {
-                $unhealthy++;
+                ++$unhealthy;
             }
         }
 
@@ -83,20 +81,5 @@ final class StatusSnapshot
             'build_cache_reclaimable' => (string)($payload['sections']['drift']['build_cache_reclaimable'] ?? ''),
             'egress_ip' => (string)($payload['sections']['checks']['system']['tests']['egress_ip']['value'] ?? ''),
         ];
-    }
-
-    private function isShellExecAvailable(): bool
-    {
-        if (!function_exists('shell_exec')) {
-            return false;
-        }
-
-        $disabled = (string)ini_get('disable_functions');
-        if ($disabled === '') {
-            return true;
-        }
-
-        $parts = array_map('trim', explode(',', $disabled));
-        return !in_array('shell_exec', $parts, true);
     }
 }

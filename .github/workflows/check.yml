@@ -1,0 +1,310 @@
+name: Check
+
+on:
+  push:
+  pull_request:
+    branches: [ "main", "master", "develop", "development" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Static and contract checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install static-check dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck php-cli jq ripgrep
+
+      - name: Validate shell syntax
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            bash -n "$file"
+          done < <(find scripts -type f -name '*.sh' -print0)
+
+      - name: ShellCheck critical errors
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(find scripts -type f -name '*.sh' -print0)
+          shellcheck --severity=error --shell=bash "${files[@]}"
+
+      - name: Validate PHP syntax
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            php -l "$file" >/dev/null
+          done < <(find scripts/admin-panel -type f -name '*.php' -print0)
+          php -l scripts/tests/process-runner-smoke.php >/dev/null
+          php -l scripts/tests/fake-ollama-router.php >/dev/null
+
+      - name: Dependency and architecture contracts
+        run: bash scripts/tests/dependency-contract.sh
+
+      - name: Baseline feature parity contracts
+        run: bash scripts/tests/feature-parity-contract.sh
+
+      - name: Publication contracts
+        run: bash scripts/tests/release-contract.sh
+
+      - name: Control-plane hardening contracts
+        run: bash scripts/tests/control-plane-hardening.sh
+
+      - name: Template ABI static contract
+        run: bash scripts/tests/template-abi-contract.sh
+
+      - name: AI architecture contracts
+        run: bash scripts/tests/ai-contract.sh
+
+      - name: AI intelligence contracts
+        run: bash scripts/tests/ai-intelligence-contract.sh
+
+      - name: AI provider fake-endpoint smoke
+        run: bash scripts/tests/ai-provider-smoke.sh
+
+      - name: AI client and gitx policy smoke
+        run: bash scripts/tests/ai-client-smoke.sh
+
+      - name: AI intelligence and admin smoke
+        run: bash scripts/tests/ai-intelligence-smoke.sh
+
+      - name: Env-store concurrency and corruption recovery
+        run: bash scripts/tests/env-store-concurrency.sh
+
+      - name: Bounded admin process runner
+        run: php scripts/tests/process-runner-smoke.php
+
+      - name: Install actionlint
+        env:
+          GOBIN: ${{ runner.temp }}/bin
+        run: |
+          mkdir -p "$GOBIN"
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+
+      - name: Lint workflows
+        run: "${{ runner.temp }}/bin/actionlint"
+
+  amd64:
+    name: amd64 image smoke
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Generated template runtime compatibility
+        run: bash scripts/tests/template-runtime-smoke.sh
+
+      - name: Build amd64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          pull: true
+          push: false
+          tags: infocyph/tools:ci
+          cache-from: type=gha,scope=check-amd64
+          cache-to: type=gha,scope=check-amd64,mode=max
+
+      - name: Verify image commands and generated metadata
+        run: |
+          docker run --rm --entrypoint bash infocyph/tools:ci -lc '
+            test "$(uname -m)" = "x86_64" &&
+            command -v composer >/dev/null &&
+            command -v mkcert >/dev/null &&
+            command -v lazydocker >/dev/null &&
+            command -v gitx >/dev/null &&
+            command -v askai >/dev/null &&
+            command -v aiops >/dev/null &&
+            command -v chromacat >/dev/null &&
+            command -v sqlitex >/dev/null &&
+            command -v netx >/dev/null &&
+            command -v certify >/dev/null &&
+            command -v mkhost >/dev/null &&
+            command -v rmhost >/dev/null &&
+            command -v es-policy >/dev/null &&
+            command -v notifierd >/dev/null &&
+            command -v notify >/dev/null &&
+            command -v senv >/dev/null &&
+            command -v domain-which >/dev/null &&
+            command -v status >/dev/null &&
+            command -v monitor-flows >/dev/null &&
+            command -v monitor-runtime >/dev/null &&
+            command -v monitor-tls >/dev/null &&
+            command -v monitor-db >/dev/null &&
+            command -v monitor-volumes >/dev/null &&
+            command -v monitor-queue >/dev/null &&
+            command -v monitor-slo >/dev/null &&
+            command -v monitor-log-heatmap >/dev/null &&
+            command -v monitor-drift >/dev/null &&
+            command -v monitor-alerts >/dev/null &&
+            command -v env-store >/dev/null &&
+            command -v profile-chooser >/dev/null &&
+            command -v init-php-dirs >/dev/null &&
+            command -v git-default >/dev/null &&
+            command -v entrypoint >/dev/null &&
+            command -v tools-healthcheck >/dev/null &&
+            command -v flock >/dev/null &&
+            command -v php >/dev/null &&
+            test -x /usr/local/libexec/gitx-toolset &&
+            test -r "$LDS_AI_PROVIDER_LIB" &&
+            test "$LDS_AI_PROVIDER" = "ollama" &&
+            test "$LDS_AI_URL" = "http://llm-sm:11434" &&
+            mkcert -version >/dev/null &&
+            lazydocker --version >/dev/null &&
+            gitx --version >/dev/null &&
+            askai --help >/dev/null &&
+            aiops --help >/dev/null &&
+            chromacat --version >/dev/null &&
+            sqlitex --version >/dev/null &&
+            netx --version >/dev/null &&
+            jq -e ".php.active | type == \"array\" and length > 0" "$RUNTIME_VERSIONS_DB" >/dev/null &&
+            jq -e ".node.active | type == \"array\" and length > 0" "$RUNTIME_VERSIONS_DB" >/dev/null
+          '
+
+      - name: AI provider and client image smoke
+        run: |
+          docker run --rm --entrypoint bash infocyph/tools:ci -lc '
+            AI_PROVIDER_LIB=/usr/local/lib/docker-tools/ai-provider.sh \
+            AI_FAKE_ROUTER=/etc/share/scripts/tests/fake-ollama-router.php \
+            bash /etc/share/scripts/tests/ai-provider-smoke.sh &&
+            AI_ASKAI_BIN=/usr/local/bin/askai \
+            AI_GITX_WRAPPER=/usr/local/bin/gitx \
+            AI_PROVIDER_LIB=/usr/local/lib/docker-tools/ai-provider.sh \
+            AI_FAKE_ROUTER=/etc/share/scripts/tests/fake-ollama-router.php \
+            bash /etc/share/scripts/tests/ai-client-smoke.sh &&
+            AI_AIOPS_BIN=/usr/local/bin/aiops \
+            AI_ASKAI_BIN=/usr/local/bin/askai \
+            AI_PROVIDER_LIB=/usr/local/lib/docker-tools/ai-provider.sh \
+            AI_FAKE_ROUTER=/etc/share/scripts/tests/fake-ollama-router.php \
+            AI_ADMIN_BOOTSTRAP=/etc/share/admin-panel/app/bootstrap.php \
+            bash /etc/share/scripts/tests/ai-intelligence-smoke.sh
+          '
+
+      - name: SOPS environment helper smoke
+        run: |
+          docker run --rm --entrypoint bash infocyph/tools:ci -lc \
+            'bash /etc/share/scripts/tests/senv-smoke.sh'
+
+      - name: Tools health and admin lifecycle smoke
+        run: |
+          set -euo pipefail
+          name="tools-ci-${RANDOM}"
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$name" infocyph/tools:ci >/dev/null
+
+          for _ in $(seq 1 30); do
+            if docker exec "$name" tools-healthcheck >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          docker exec "$name" tools-healthcheck
+          docker exec "$name" bash -c 'test "$LDS_AI_ENABLED" = auto && test "$LDS_AI_URL" = http://llm-sm:11434'
+          docker exec "$name" sh -lc 'tr "\0" "\n" </proc/1/environ | grep -qx "NOTIFY_TOKEN="'
+          docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
+
+          admin_pid="$(docker exec "$name" cat /run/admin-panel.pid)"
+          docker exec "$name" kill "$admin_pid"
+          sleep 1
+
+          if docker exec "$name" tools-healthcheck >/dev/null 2>&1; then
+            echo 'Healthcheck remained green after enabled admin process died.' >&2
+            exit 1
+          fi
+
+          docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
+
+      - name: Tools health without admin panel
+        run: |
+          set -euo pipefail
+          name="tools-no-admin-${RANDOM}"
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$name" -e ADMIN_PANEL_AUTOSTART=0 infocyph/tools:ci >/dev/null
+
+          for _ in $(seq 1 30); do
+            if docker exec "$name" tools-healthcheck >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          docker exec "$name" tools-healthcheck
+          docker exec "$name" test ! -e /run/admin-panel.pid
+          docker exec "$name" bash -c 'test "$STATUS_PROJECT" = unknown && test "$LDS_COMPOSE_PROJECT" = unknown && test -s "$BASH_ENV"'
+          docker exec "$name" bash -c 'test "$LDS_AI_ENABLED" = auto && ! askai --status >/dev/null 2>&1'
+          docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
+
+  arm64:
+    name: arm64 image smoke
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build arm64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          pull: true
+          push: false
+          tags: infocyph/tools:ci-arm64
+          cache-from: type=gha,scope=check-arm64
+          cache-to: type=gha,scope=check-arm64,mode=max
+
+      - name: Verify arm64 native tools
+        run: |
+          docker run --rm --platform linux/arm64 --entrypoint bash infocyph/tools:ci-arm64 -lc '
+            test "$(uname -m)" = "aarch64" &&
+            command -v tools-healthcheck >/dev/null &&
+            command -v askai >/dev/null &&
+            command -v aiops >/dev/null &&
+            command -v flock >/dev/null &&
+            test -x /usr/local/libexec/gitx-toolset &&
+            test -r "$LDS_AI_PROVIDER_LIB" &&
+            test "$LDS_AI_URL" = "http://llm-sm:11434" &&
+            mkcert -version >/dev/null &&
+            lazydocker --version >/dev/null &&
+            gitx --version >/dev/null &&
+            askai --help >/dev/null &&
+            aiops --help >/dev/null &&
+            chromacat --version >/dev/null &&
+            sqlitex --version >/dev/null &&
+            netx --version >/dev/null &&
+            jq -e ".php.active | type == \"array\" and length > 0" "$RUNTIME_VERSIONS_DB" >/dev/null
+          '

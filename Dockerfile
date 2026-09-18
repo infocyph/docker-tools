@@ -1,40 +1,91 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 1: fetch mkcert + lazydocker + runtime versions json
+# Stage 1: fetch native tools + Composer + runtime versions metadata
 # ─────────────────────────────────────────────────────────────────────────────
-FROM alpine:latest AS fetch
+ARG ALPINE_REF=alpine:latest
+FROM ${ALPINE_REF} AS fetch
 SHELL ["/bin/sh", "-euo", "pipefail", "-c"]
+
+ARG TARGETOS=linux
+ARG TARGETARCH
+ARG MKCERT_RELEASE=latest
+ARG MKCERT_SHA256_AMD64=
+ARG MKCERT_SHA256_ARM64=
+ARG LAZYDOCKER_RELEASE=latest
 
 ENV DIR=/usr/local/bin
 
 COPY scripts/shells/composer-setup.sh /tmp/composer-setup
-RUN apk add --no-cache curl bash ca-certificates jq php php-phar php-common php-openssl php-mbstring \
+RUN apk add --no-cache curl bash ca-certificates jq file php php-phar php-common php-openssl php-mbstring \
   && update-ca-certificates \
   && mkdir -p /out \
-  && curl -fsSJL -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" \
+  && case "${TARGETOS}/${TARGETARCH}" in \
+       linux/amd64|linux/arm64) ;; \
+       *) echo "Unsupported target: ${TARGETOS}/${TARGETARCH}" >&2; exit 1 ;; \
+     esac \
+  && case "$TARGETARCH" in \
+       amd64) mkcert_checksum="$MKCERT_SHA256_AMD64" ;; \
+       arm64) mkcert_checksum="$MKCERT_SHA256_ARM64" ;; \
+     esac \
+  && if [ "$MKCERT_RELEASE" = latest ]; then \
+       mkcert_url="https://dl.filippo.io/mkcert/latest?for=${TARGETOS}/${TARGETARCH}"; \
+     else \
+       mkcert_url="https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_RELEASE}/mkcert-${MKCERT_RELEASE}-${TARGETOS}-${TARGETARCH}"; \
+     fi \
+  && curl -fsSJL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 \
+       -o /out/mkcert "$mkcert_url" \
+  && test -s /out/mkcert \
+  && if [ -n "$mkcert_checksum" ]; then printf '%s  %s\n' "$mkcert_checksum" /out/mkcert | sha256sum -c -; fi \
   && chmod +x /out/mkcert \
-  && curl -fsSL "https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh" | bash \
-  && cp /usr/local/bin/lazydocker /out/lazydocker \
-  && chmod +x /out/lazydocker \
+  && file /out/mkcert | grep -q 'ELF' \
+  && /out/mkcert -version \
+  && tmp="$(mktemp -d)" \
+  && if [ "$LAZYDOCKER_RELEASE" = latest ]; then \
+       lazy_release_api="https://api.github.com/repos/jesseduffield/lazydocker/releases/latest"; \
+     else \
+       lazy_release_api="https://api.github.com/repos/jesseduffield/lazydocker/releases/tags/${LAZYDOCKER_RELEASE}"; \
+     fi \
+  && release_json="$(curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 "$lazy_release_api")" \
+  && lazy_tag="$(printf '%s' "$release_json" | jq -er '.tag_name')" \
+  && lazy_version="${lazy_tag#v}" \
+  && case "$TARGETARCH" in amd64) lazy_arch=x86_64 ;; arm64) lazy_arch=arm64 ;; esac \
+  && lazy_asset="lazydocker_${lazy_version}_Linux_${lazy_arch}.tar.gz" \
+  && lazy_url="$(printf '%s' "$release_json" | jq -er --arg name "$lazy_asset" '.assets[] | select(.name == $name) | .browser_download_url')" \
+  && checksum_url="$(printf '%s' "$release_json" | jq -er '.assets[] | select(.name == "checksums.txt") | .browser_download_url')" \
+  && curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 -o "$tmp/$lazy_asset" "$lazy_url" \
+  && curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 -o "$tmp/checksums.txt" "$checksum_url" \
+  && expected="$(awk -v asset="$lazy_asset" '$2 == asset {print $1}' "$tmp/checksums.txt")" \
+  && test -n "$expected" \
+  && printf '%s  %s\n' "$expected" "$tmp/$lazy_asset" | sha256sum -c - \
+  && tar -xzf "$tmp/$lazy_asset" -C "$tmp" lazydocker \
+  && install -m 0755 "$tmp/lazydocker" /out/lazydocker \
+  && /out/lazydocker --version \
+  && rm -rf "$tmp" \
   && chmod +x /tmp/composer-setup \
-  && COMPOSER_INSTALL_DIR=/out COMPOSER_FILENAME=composer /tmp/composer-setup
+  && COMPOSER_INSTALL_DIR=/out COMPOSER_FILENAME=composer /tmp/composer-setup \
+  && php /out/composer --version --no-ansi
 
 RUN <<'SH'
 set -euo pipefail
 
 tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 
-curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
+curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 \
   "https://endoflife.date/api/v1/products/php/" \
   -o "$tmp/php.json"
 
-curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors \
+curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 \
   "https://endoflife.date/api/v1/products/nodejs/" \
   -o "$tmp/node.json"
 
+jq -e '.result.releases | type == "array" and length > 0' "$tmp/php.json" >/dev/null
+jq -e '.result.releases | type == "array" and length > 0' "$tmp/node.json" >/dev/null
+
 cat > "$tmp/build-versions.jq" <<'JQ'
 def nowiso: (now | todateiso8601);
+def version_parts: split(".") | map(tonumber);
 def sort_node: sort_by(.version|tonumber) | reverse;
-def sort_php:  sort_by(.version) | reverse;
+def sort_php:  sort_by(.version|version_parts) | reverse;
 
 def php_releases:  ($php[0].result.releases // []);
 def node_releases: ($node[0].result.releases // []);
@@ -105,14 +156,19 @@ JQ
 jq -n --slurpfile php "$tmp/php.json" --slurpfile node "$tmp/node.json" \
   -f "$tmp/build-versions.jq" > /out/runtime-versions.json
 
+jq -e '.php.active | type == "array" and length > 0' /out/runtime-versions.json >/dev/null
+jq -e '.node.active | type == "array" and length > 0' /out/runtime-versions.json >/dev/null
 chmod 644 /out/runtime-versions.json
-rm -rf "$tmp"
 SH
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: runtime/tools image
 # ─────────────────────────────────────────────────────────────────────────────
-FROM alpine:latest
+FROM ${ALPINE_REF}
+
+ARG SCRIPTOMATIC_REF=main
+ARG TOOLSET_RELEASE=latest
+ARG TOOLSET_INSTALLER_SHA256=
 
 LABEL org.opencontainers.image.source="https://github.com/infocyph/docker-tools"
 LABEL org.opencontainers.image.description="Tools"
@@ -120,11 +176,12 @@ LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.authors="infocyph,abmmhasan"
 
 ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
+    BASH_ENV=/run/lds-project.env \
+    LDS_PROJECT_ENV_FILE=/run/lds-project.env \
     CAROOT=/etc/share/rootCA \
     NOTIFY_FIFO=/run/notify.fifo \
     NOTIFY_TCP_PORT=9901 \
     NOTIFY_PREFIX=__HOST_NOTIFY__ \
-    NOTIFY_TOKEN="" \
     RUNTIME_VERSIONS_DB=/etc/share/runtime-versions.json \
     LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8 \
@@ -135,12 +192,30 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     SOPS_CFG_DIR=/etc/share/sops/config \
     SOPS_GLOBAL_DIR=/etc/share/sops/global \
     SOPS_REPO_DIR=/etc/share/vhosts/sops \
+    LDS_AI_ENABLED=auto \
+    LDS_AI_PROVIDER=ollama \
+    LDS_AI_URL=http://llm-sm:11434 \
+    LDS_AI_MODEL= \
+    LDS_AI_CONNECT_TIMEOUT=2 \
+    LDS_AI_PREFLIGHT_TIMEOUT=5 \
+    LDS_AI_TIMEOUT=600 \
+    LDS_AI_AVAILABILITY_TTL=5 \
+    LDS_AI_MAX_CONTEXT_BYTES=524288 \
+    LDS_AI_MAX_REQUEST_BYTES=1048576 \
+    LDS_AI_MAX_RESPONSE_BYTES=2097152 \
+    LDS_AI_CACHE_DIR=/run/lds-ai \
+    LDS_AI_PROVIDER_LIB=/usr/local/lib/docker-tools/ai-provider.sh \
+    LDS_AIOPS_COLLECT_TIMEOUT=15 \
+    ADMIN_PANEL_AIOPS_BIN=/usr/local/bin/aiops \
+    ADMIN_PANEL_ASKAI_BIN=/usr/local/bin/askai \
     ADMIN_PANEL_AUTOSTART=1 \
     ADMIN_PANEL_PORT=9911 \
     ADMIN_PANEL_BIND=0.0.0.0 \
     ADMIN_PANEL_DOCROOT=/etc/share/admin-panel \
     ADMIN_PANEL_PHP_SERVER_LOG=/tmp/admin-panel-php-server.log \
+    ADMIN_PANEL_PID_FILE=/run/admin-panel.pid \
     ADMIN_PANEL_PRODUCT_NAME=LocalDevStack \
+    ADMIN_PANEL_LOG_ROOTS=/global/log \
     ADMIN_PANEL_BRAND_NAME=docker-tools \
     ADMIN_PANEL_COMPANY_NAME=infocyph \
     ADMIN_PANEL_CRON_DIR=/etc/share/scheduler/cron-jobs \
@@ -149,16 +224,18 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     ADMIN_PANEL_RUNNER_SUPERVISOR_CONF=/etc/supervisor/supervisord.conf \
     GIT_CONFIG_GLOBAL=/git-config/.gitconfig \
     BANNER_SHOWN=0 \
-    HOST_OS=${HOST_OS:-linux}
+    HOST_OS=linux
 
 RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
       docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
-      bind-tools iproute2 traceroute mtr netcat-openbsd ripgrep gzip \
+      bind-tools iproute2 traceroute mtr netcat-openbsd gzip flock \
       lnav multitail less php php-mbstring php-curl php-zip php-phar php-openssl php-common \
   && update-ca-certificates \
   && mkdir -p \
+      /usr/local/lib/docker-tools \
+      /usr/local/libexec \
       /etc/mkcert \
       /etc/share/rootCA \
       /etc/share/vhosts/docker-compose \
@@ -180,13 +257,17 @@ RUN apk add --no-cache \
   && chmod 700 /etc/share/sops/global /etc/share/sops/keys /etc/share/sops/config \
   && rm -rf /tmp/* /var/tmp/*
 
-SHELL ["/bin/bash", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 COPY --from=fetch /out/mkcert /usr/local/bin/mkcert
 COPY --from=fetch /out/lazydocker /usr/local/bin/lazydocker
 COPY --from=fetch /out/composer /usr/local/bin/composer
 COPY --from=fetch /out/runtime-versions.json /etc/share/runtime-versions.json
 
+COPY scripts/lib/ai-provider.sh /usr/local/lib/docker-tools/ai-provider.sh
+COPY scripts/shells/askai.sh /usr/local/bin/askai
+COPY scripts/shells/aiops.sh /usr/local/bin/aiops
+COPY scripts/shells/gitx-wrapper.sh /tmp/gitx-wrapper
 COPY scripts/shells/certify.sh /usr/local/bin/certify
 COPY scripts/shells/mkhost.sh /usr/local/bin/mkhost
 COPY scripts/shells/rmhost.sh /usr/local/bin/rmhost
@@ -211,20 +292,46 @@ COPY scripts/shells/profile-chooser.sh /usr/local/bin/profile-chooser
 COPY scripts/shells/init-php-dirs.sh /usr/local/bin/init-php-dirs
 COPY scripts/shells/git-default.sh /usr/local/bin/git-default
 COPY scripts/shells/entrypoint.sh /usr/local/bin/entrypoint
+COPY scripts/shells/tools-healthcheck.sh /usr/local/bin/tools-healthcheck
 COPY scripts/tests/ /etc/share/scripts/tests/
 COPY scripts/http-templates/ /etc/http-templates/
 COPY scripts/docker-templates/ /etc/docker-templates/
 COPY scripts/fpm-templates/ /etc/fpm-templates/
 COPY scripts/admin-panel/ /etc/share/admin-panel
 
-ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Git/gitx /usr/local/bin/gitx
-ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner
-ADD https://raw.githubusercontent.com/infocyph/Toolset/main/ChromaCat/chromacat /usr/local/bin/chromacat
-ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Sqlite/sqlitex /usr/local/bin/sqlitex
-ADD https://raw.githubusercontent.com/infocyph/Toolset/main/Network/netx /usr/local/bin/netx
-
-RUN chmod +x \
+RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 \
+      "https://raw.githubusercontent.com/infocyph/Scriptomatic/${SCRIPTOMATIC_REF}/bash/banner.sh" \
+      -o /usr/local/bin/show-banner \
+  && test -s /usr/local/bin/show-banner \
+  && bash -n /usr/local/bin/show-banner \
+  && if [ "$TOOLSET_RELEASE" = latest ]; then \
+       toolset_installer_url="https://github.com/infocyph/Toolset/releases/latest/download/install.sh"; \
+     else \
+       toolset_installer_url="https://github.com/infocyph/Toolset/releases/download/${TOOLSET_RELEASE}/install.sh"; \
+     fi \
+  && curl -fsSLo /tmp/toolset-install.sh "$toolset_installer_url" \
+  && test -s /tmp/toolset-install.sh \
+  && if [ -n "$TOOLSET_INSTALLER_SHA256" ]; then printf '%s  %s\n' "$TOOLSET_INSTALLER_SHA256" /tmp/toolset-install.sh | sha256sum -c -; fi \
+  && bash -n /tmp/toolset-install.sh \
+  && if [ "$TOOLSET_RELEASE" = latest ]; then \
+       bash /tmp/toolset-install.sh --latest --prefix /usr/local/bin gitx chromacat sqlitex netx; \
+     else \
+       bash /tmp/toolset-install.sh --release "$TOOLSET_RELEASE" --prefix /usr/local/bin gitx chromacat sqlitex netx; \
+     fi \
+  && /usr/local/bin/gitx --version \
+  && chromacat --version \
+  && sqlitex --version \
+  && netx --version \
+  && mkdir -p /usr/local/libexec \
+  && mv /usr/local/bin/gitx /usr/local/libexec/gitx-toolset \
+  && install -m 0755 /tmp/gitx-wrapper /usr/local/bin/gitx \
+  && rm -f /tmp/gitx-wrapper \
+  && gitx --version \
+  && rm -f /tmp/toolset-install.sh \
+  && chmod +x \
       /usr/local/bin/gitx \
+      /usr/local/bin/askai \
+      /usr/local/bin/aiops \
       /usr/local/bin/git-default \
       /usr/local/bin/certify \
       /usr/local/bin/mkhost \
@@ -236,6 +343,7 @@ RUN chmod +x \
       /usr/local/bin/notifierd \
       /usr/local/bin/notify \
       /usr/local/bin/entrypoint \
+      /usr/local/bin/tools-healthcheck \
       /usr/local/bin/mkcert \
       /usr/local/bin/lazydocker \
       /usr/local/bin/es-policy \
@@ -257,6 +365,8 @@ RUN chmod +x \
       /usr/local/bin/init-php-dirs \
       /usr/local/bin/composer \
       /etc/share/scripts/tests/senv-smoke.sh \
+      /etc/share/scripts/tests/ai-provider-smoke.sh \
+  && chmod 0644 /usr/local/lib/docker-tools/ai-provider.sh \
   && init-php-dirs \
   && chmod -R 755 /etc/share/vhosts \
   && mkdir -p /etc/profile.d \
@@ -281,8 +391,26 @@ RUN chmod +x \
       echo '  export BANNER_SHOWN=1'; \
       echo '  show-banner "Tools"'; \
       echo 'fi'; \
-  } >> /root/.bashrc
+    } >> /root/.bashrc \
+  && bash -n /usr/local/lib/docker-tools/ai-provider.sh \
+  && bash -n /usr/local/bin/askai \
+  && bash -n /usr/local/bin/aiops \
+  && bash -n /usr/local/bin/gitx \
+  && askai --help >/dev/null \
+  && aiops --help >/dev/null \
+  && bash -n /usr/local/bin/entrypoint \
+  && bash -n /usr/local/bin/tools-healthcheck \
+  && php -l /etc/share/scripts/tests/fake-ollama-router.php >/dev/null \
+  && php -l /etc/share/admin-panel/index.php >/dev/null \
+  && php -l /etc/share/admin-panel/app/bootstrap.php >/dev/null \
+  && find /etc/share/admin-panel/src -type f -name '*.php' -exec php -l {} \; >/dev/null
 
 WORKDIR /app
+
+HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/usr/local/bin/tools-healthcheck"]
+
+STOPSIGNAL SIGTERM
+
 ENTRYPOINT ["/usr/local/bin/entrypoint"]
 CMD ["/usr/local/bin/notifierd"]

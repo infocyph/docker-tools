@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CERT_DIR="/etc/mkcert"
-VHOST_DIR="/etc/share/vhosts"
+CERT_DIR="${CERT_DIR:-/etc/mkcert}"
+VHOST_DIR="${VHOST_DIR:-/etc/share/vhosts}"
+TOOLS_CONTAINER_NAME="${TOOLS_CONTAINER_NAME:-${ADMIN_PANEL_TOOLS_CONTAINER:-SERVER_TOOLS}}"
 
-# User-facing export (only safe artifacts: root CA public cert + chosen P12)
+# User-facing export. The root CA public certificate is safe to export automatically.
+# User P12 export is opt-in and password-protected.
 EXPORT_DIR="${EXPORT_DIR:-/etc/share/certs}"
-EXPORT_P12="${EXPORT_P12:-lds-client-user.p12}"       # source (inside CERT_DIR)
-EXPORT_P12_NAME="${EXPORT_P12_NAME:-mTLS-user.p12}"   # destination filename (inside EXPORT_DIR)
+EXPORT_P12="${EXPORT_P12:-lds-client-user.p12}"
+EXPORT_P12_NAME="${EXPORT_P12_NAME:-mTLS-user.p12}"
 EXPORT_ROOTCA_NAME="${EXPORT_ROOTCA_NAME:-rootCA.pem}"
+LDS_USER_P12_ENABLED="${LDS_USER_P12_ENABLED:-0}"
+LDS_USER_P12_PASSWORD="${LDS_USER_P12_PASSWORD:-}"
 
 ###############################################################################
 # UI (mkhost/rmhost-compatible, TTY-aware)
@@ -57,7 +61,6 @@ fmt_epoch_local() {
     date -d "@$e" "+%Y-%m-%d %H:%M:%S %z"
     return 0
   fi
-  # BSD/macOS
   date -r "$e" "+%Y-%m-%d %H:%M:%S %z" 2>/dev/null
 }
 
@@ -65,15 +68,31 @@ run_mkcert() {
   mkcert "$@" >/dev/null 2>&1
 }
 
-# Collect SAN-safe DNS tokens from running containers:
-# - container name
-# - network aliases (what Docker DNS actually resolves)
-# - hostname (harmless to include if valid)
+resolve_compose_project() {
+  local project="${LDS_COMPOSE_PROJECT:-${COMPOSE_PROJECT_NAME:-}}"
+  project="$(printf '%s' "$project" | xargs)"
+  if [[ -n "$project" ]]; then
+    printf '%s\n' "$project"
+    return 0
+  fi
+
+  command -v docker >/dev/null 2>&1 || return 1
+  project="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$TOOLS_CONTAINER_NAME" 2>/dev/null || true)"
+  project="$(printf '%s' "$project" | xargs)"
+  [[ -n "$project" && "$project" != '<no value>' ]] || return 1
+  printf '%s\n' "$project"
+}
+
+# Collect SAN-safe DNS tokens only from the current LocalDevStack Compose project.
+# If the project cannot be determined, do not widen discovery to the whole daemon.
 docker_service_domains() {
   command -v docker >/dev/null 2>&1 || return 0
 
-  local ids json
-  ids="$(docker ps -q 2>/dev/null || true)"
+  local project ids json
+  project="$(resolve_compose_project || true)"
+  [[ -n "$project" ]] || return 0
+
+  ids="$(docker ps -q --filter "label=com.docker.compose.project=${project}" 2>/dev/null || true)"
   [[ -n "$ids" ]] || return 0
 
   json="$(docker inspect $ids 2>/dev/null || true)"
@@ -82,7 +101,7 @@ docker_service_domains() {
   if command -v python3 >/dev/null 2>&1; then
     DOCKER_INSPECT_JSON="$json" python3 - <<'PY'
 import os, json, re
-data = json.loads(os.environ.get("DOCKER_INSPECT_JSON","[]") or "[]")
+data = json.loads(os.environ.get("DOCKER_INSPECT_JSON", "[]") or "[]")
 rx = re.compile(r"^[a-z0-9.-]+$", re.I)
 out = set()
 
@@ -105,7 +124,6 @@ PY
     return 0
   fi
 
-  # Fallback without python (best-effort)
   docker inspect --format '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}{{range $v.Aliases}} {{.}}{{end}}{{end}} {{.Config.Hostname}}' $ids 2>/dev/null \
     | tr ' ' '\n' \
     | sed 's|^/||' \
@@ -129,15 +147,14 @@ get_domains_from_files() {
   local auto
   auto="$(docker_service_domains || true)"
   if [[ -n "$auto" ]]; then
-    while IFS= read -r d; do
-      [[ -n "$d" ]] && domains+=("$d")
+    while IFS= read -r domain; do
+      [[ -n "$domain" ]] && domains+=("$domain")
     done <<<"$auto"
   fi
 
   printf '%s\n' "${domains[@]}" | awk 'NF' | sort -u
 }
 
-# Get certificate expiry in epoch; prints epoch or empty
 cert_expiry_epoch() {
   local cert_file="$1" expiry expiry_epoch
   [[ -f "$cert_file" ]] || return 1
@@ -148,7 +165,6 @@ cert_expiry_epoch() {
   printf '%s\n' "$expiry_epoch"
 }
 
-# validate_certificate <cert_path> <needs_domains:0|1>
 validate_certificate() {
   local cert_file="$1"
   local needs_domains="${2:-1}"
@@ -161,7 +177,6 @@ validate_certificate() {
 
   now="$(date +%s)"
   [[ "$expiry_epoch" -gt "$now" ]] || return 1
-
   [[ "$needs_domains" -eq 1 ]] || return 0
 
   local san dns_entries ip_entries all_san
@@ -208,7 +223,6 @@ update_container_trust() {
   fi
 }
 
-# Atomic copy helper (avoids half-written files during sync)
 atomic_install() {
   local mode="$1" src="$2" dst="$3"
   local dir tmp
@@ -216,6 +230,36 @@ atomic_install() {
   tmp="$dir/.tmp.$(basename "$dst").$$.$RANDOM"
   install -m "$mode" "$src" "$tmp"
   mv -f "$tmp" "$dst"
+}
+
+generate_user_p12() {
+  [[ "$LDS_USER_P12_ENABLED" == "1" ]] || return 0
+  [[ -n "$LDS_USER_P12_PASSWORD" ]] || {
+    err "LDS_USER_P12_ENABLED=1 requires a non-empty LDS_USER_P12_PASSWORD."
+    return 1
+  }
+
+  local cert="$CERT_DIR/lds-client-user.pem"
+  local key="$CERT_DIR/lds-client-user-key.pem"
+  local out="$CERT_DIR/$EXPORT_P12"
+  [[ -f "$cert" && -f "$key" ]] || {
+    err "Cannot build user P12; user client certificate/key is missing."
+    return 1
+  }
+
+  local tmp="$CERT_DIR/.tmp.${EXPORT_P12}.$$.$RANDOM"
+  if ! openssl pkcs12 -export \
+    -in "$cert" \
+    -inkey "$key" \
+    -out "$tmp" \
+    -name "lds-client-user Certificate" \
+    -passout "pass:${LDS_USER_P12_PASSWORD}" >/dev/null 2>&1; then
+    rm -f -- "$tmp"
+    err "Failed to build password-protected user P12."
+    return 1
+  fi
+  chmod 0600 "$tmp"
+  mv -f -- "$tmp" "$out"
 }
 
 export_user_artifacts() {
@@ -226,7 +270,6 @@ export_user_artifacts() {
   mkdir -p "$EXPORT_DIR"
   chmod 755 "$EXPORT_DIR" 2>/dev/null || true
 
-  # 1) mkcert root CA public cert (NEVER export the private rootCA-key.pem)
   local caroot root_ca
   caroot="$(mkcert -CAROOT 2>/dev/null || true)"
   root_ca=""
@@ -239,14 +282,18 @@ export_user_artifacts() {
     warn " - WARN: rootCA.pem not found (mkcert -CAROOT returned: ${caroot:-<empty>})"
   fi
 
-  # 2) Export P12 (renamed)
   local p12_src="$CERT_DIR/$EXPORT_P12"
   local p12_dst="$EXPORT_DIR/$EXPORT_P12_NAME"
-  if [[ -f "$p12_src" ]]; then
-    atomic_install 0640 "$p12_src" "$p12_dst"
-    ok " - [OK] ${EXPORT_P12} -> $p12_dst"
+  if [[ "$LDS_USER_P12_ENABLED" == "1" ]]; then
+    if [[ -f "$p12_src" ]]; then
+      atomic_install 0600 "$p12_src" "$p12_dst"
+      ok " - [OK] Password-protected ${EXPORT_P12} -> $p12_dst"
+    else
+      warn " - WARN: P12 not found: $p12_src"
+    fi
   else
-    warn " - WARN: P12 not found: $p12_src"
+    rm -f -- "$p12_dst"
+    say " - ${DIM}User P12 export disabled (set LDS_USER_P12_ENABLED=1 explicitly).${NC}"
   fi
 
   say " - ${DIM}Available in:${NC} $EXPORT_DIR"
@@ -257,7 +304,7 @@ generate_certificates() {
   declare -A CERT_FILES=(
     ["LDS (Server)"]="lds-server.pem lds-server-key.pem"
     ["LDS (Client Internal)"]="lds-client-internal.pem lds-client-internal-key.pem --client"
-    ["LDS (Client User)"]="lds-client-user.pem lds-client-user-key.pem --client p12"
+    ["LDS (Client User)"]="lds-client-user.pem lds-client-user-key.pem --client"
   )
 
   local labels=(
@@ -268,14 +315,14 @@ generate_certificates() {
 
   local output=""
   local total=0 regenerated=0 valid=0
-  local label cert_file key_file client_flag p12 needs_domains full_cert_path p12_name
+  local label cert_file key_file client_flag needs_domains full_cert_path
   local exp_epoch exp_str
 
   mkdir -p "$CERT_DIR"
 
   for label in "${labels[@]}"; do
     total=$((total + 1))
-    IFS=' ' read -r cert_file key_file client_flag p12 <<<"${CERT_FILES[$label]}"
+    IFS=' ' read -r cert_file key_file client_flag <<<"${CERT_FILES[$label]}"
     full_cert_path="$CERT_DIR/$cert_file"
 
     needs_domains=1
@@ -297,16 +344,6 @@ generate_certificates() {
         -cert-file "$CERT_DIR/$cert_file" \
         -key-file "$CERT_DIR/$key_file" \
         $CERT_DOMAINS
-
-      if [[ "${p12:-}" == "p12" ]]; then
-        p12_name="${cert_file%.pem}.p12"
-        openssl pkcs12 -export \
-          -in "$CERT_DIR/$cert_file" \
-          -inkey "$CERT_DIR/$key_file" \
-          -out "$CERT_DIR/$p12_name" \
-          -name "${cert_file%.pem} Certificate" \
-          -passout pass:"" >/dev/null 2>&1 || true
-      fi
     else
       run_mkcert --ecdsa \
         -cert-file "$CERT_DIR/$cert_file" \
@@ -328,7 +365,13 @@ generate_certificates() {
     "$CERT_DIR"/lds-client-internal.pem \
     "$CERT_DIR"/lds-client-user.pem \
     2>/dev/null || true
+  chmod 0600 \
+    "$CERT_DIR"/lds-server-key.pem \
+    "$CERT_DIR"/lds-client-internal-key.pem \
+    "$CERT_DIR"/lds-client-user-key.pem \
+    2>/dev/null || true
 
+  generate_user_p12
   run_mkcert -install >/dev/null 2>&1 || true
 
   output+=$'\n'"${DIM}--------------------------------------------------------------${NC}"$'\n'
@@ -346,6 +389,12 @@ generate_certificates() {
 main() {
   need_cmd openssl
   need_cmd mkcert
+
+  case "$LDS_USER_P12_ENABLED" in
+    0|1) ;;
+    *) err "LDS_USER_P12_ENABLED must be 0 or 1."; exit 1 ;;
+  esac
+
   mkdir -p "$CERT_DIR"
 
   mapfile -t CONF_FILES < <(find "$VHOST_DIR" -type f -name '*.conf' 2>/dev/null || true)
@@ -363,8 +412,6 @@ main() {
 
   generate_certificates
   update_container_trust
-
-  # Export only user-required artifacts:
   export_user_artifacts
 
   echo

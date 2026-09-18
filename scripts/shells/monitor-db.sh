@@ -16,25 +16,18 @@ _json_escape() {
 }
 
 _infer_project() {
-  if [[ -n "${STATUS_PROJECT:-}" ]]; then
-    printf '%s' "$STATUS_PROJECT"
+  local p="${STATUS_PROJECT:-${LDS_COMPOSE_PROJECT:-${COMPOSE_PROJECT_NAME:-}}}"
+  p="$(printf '%s' "$p" | xargs)"
+  if [[ -n "$p" ]]; then
+    printf '%s' "$p"
     return 0
   fi
-  if ! _has docker; then
-    printf 'unknown'
-    return 0
-  fi
+  _has docker || { printf 'unknown'; return 0; }
 
-  local p
-  p="$(
-    docker ps --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null |
-      sed '/^[[:space:]]*$/d' |
-      sort |
-      uniq -c |
-      sort -nr |
-      awk 'NR==1{print $2}'
-  )"
-  if [[ -z "$p" ]]; then
+  local tools="${TOOLS_CONTAINER_NAME:-${ADMIN_PANEL_TOOLS_CONTAINER:-SERVER_TOOLS}}"
+  p="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$tools" 2>/dev/null || true)"
+  p="$(printf '%s' "$p" | xargs)"
+  if [[ -z "$p" || "$p" == '<no value>' ]]; then
     printf 'unknown'
   else
     printf '%s' "$p"
@@ -44,57 +37,23 @@ _infer_project() {
 _engine_from() {
   local x="${1,,}"
   if [[ "$x" == *redis-insight* || "$x" == *redis_insight* || "$x" == *redisinsight* ]]; then
-    printf 'db-client'
-    return 0
+    printf 'db-client'; return 0
   fi
   if [[ "$x" == *cloudbeaver* || "$x" == *mongo-express* || "$x" == *mongo_express* || "$x" == *kibana* || "$x" == *filebeat* ]]; then
-    printf 'db-client'
-    return 0
+    printf 'db-client'; return 0
   fi
-  if [[ "$x" == *mariadb* ]]; then
-    printf 'mariadb'
-    return 0
-  fi
-  if [[ "$x" == *mongodb* ]]; then
-    printf 'mongodb'
-    return 0
-  fi
-  if [[ "$x" == *elasticsearch* ]]; then
-    printf 'elasticsearch'
-    return 0
-  fi
-  if [[ "$x" == *redis* ]]; then
-    printf 'redis'
-    return 0
-  fi
-  if [[ "$x" == *mysql* ]]; then
-    printf 'mysql'
-    return 0
-  fi
-  if [[ "$x" == *postgres* ]]; then
-    printf 'postgres'
-    return 0
-  fi
+  if [[ "$x" == *mariadb* ]]; then printf 'mariadb'; return 0; fi
+  if [[ "$x" == *mongodb* ]]; then printf 'mongodb'; return 0; fi
+  if [[ "$x" == *elasticsearch* ]]; then printf 'elasticsearch'; return 0; fi
+  if [[ "$x" == *redis* ]]; then printf 'redis'; return 0; fi
+  if [[ "$x" == *mysql* ]]; then printf 'mysql'; return 0; fi
+  if [[ "$x" == *postgres* ]]; then printf 'postgres'; return 0; fi
   printf ''
-}
-
-_container_env_value() {
-  local name="${1:-}" key="${2:-}" line
-  [[ -n "$name" && -n "$key" ]] || return 0
-  while IFS= read -r line; do
-    [[ "$line" == "$key="* ]] || continue
-    printf '%s' "${line#*=}"
-    return 0
-  done < <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$name" 2>/dev/null || true)
 }
 
 _num_or_default() {
   local v="${1:-}" d="${2:-0}"
-  if [[ "$v" =~ ^-?[0-9]+$ ]]; then
-    printf '%s' "$v"
-  else
-    printf '%s' "$d"
-  fi
+  if [[ "$v" =~ ^-?[0-9]+$ ]]; then printf '%s' "$v"; else printf '%s' "$d"; fi
 }
 
 _docker_exec_pref_shell() {
@@ -122,13 +81,10 @@ _probe_defaults() {
 _probe_redis() {
   local name="${1:-}"
   _probe_defaults
-
   local info
   info="$(_docker_exec_pref_shell "$name" 'redis-cli INFO 2>/dev/null || true')"
   if [[ -z "$info" ]]; then
-    P_LEVEL="fail"
-    P_NOTE="redis_cli_failed"
-    return 0
+    P_LEVEL="warn"; P_NOTE="probe_unavailable"; return 0
   fi
 
   local connected blocked evicted used_mem max_mem role lag ops
@@ -149,25 +105,15 @@ _probe_redis() {
   P_REPLICA="${role:--}"
   P_REPL_LAG="$(_num_or_default "$lag" -1)"
   P_OPS="$(_num_or_default "$ops" -1)"
-  P_NOTE="ok"
-  P_LEVEL="pass"
+  P_NOTE="ok"; P_LEVEL="pass"
 
   if ((P_MAX_MEM > 0 && P_USED_MEM >= 0)); then
     P_MEM_PCT=$((P_USED_MEM * 100 / P_MAX_MEM))
-    if ((P_MEM_PCT >= 85)); then
-      P_LEVEL="warn"
-      P_NOTE="memory_pressure"
-    fi
+    if ((P_MEM_PCT >= 85)); then P_LEVEL="warn"; P_NOTE="memory_pressure"; fi
   fi
-  if ((P_EVICTED > 0)); then
-    P_LEVEL="warn"
-    P_NOTE="key_evictions_detected"
-  fi
+  if ((P_EVICTED > 0)); then P_LEVEL="warn"; P_NOTE="key_evictions_detected"; fi
   if [[ "$P_REPLICA" == "slave" || "$P_REPLICA" == "replica" ]]; then
-    if ((P_REPL_LAG > 30)); then
-      P_LEVEL="warn"
-      P_NOTE="replication_lag"
-    fi
+    if ((P_REPL_LAG > 30)); then P_LEVEL="warn"; P_NOTE="replication_lag"; fi
   fi
 }
 
@@ -175,45 +121,30 @@ _probe_mysql() {
   local name="${1:-}"
   _probe_defaults
 
-  local user pass status_out
-  user="$(_container_env_value "$name" MYSQL_USER)"
-  [[ -n "$user" ]] || user="$(_container_env_value "$name" MARIADB_USER)"
-  [[ -n "$user" ]] || user="root"
+  local status_out
+  status_out="$(_docker_exec_pref_shell "$name" '
+    user="${MYSQL_USER:-${MARIADB_USER:-}}"
+    pass="${MYSQL_PASSWORD:-${MARIADB_PASSWORD:-}}"
+    if [ -z "$user" ] || [ -z "$pass" ]; then
+      user=root
+      pass="${MYSQL_ROOT_PASSWORD:-${MARIADB_ROOT_PASSWORD:-}}"
+    fi
+    if [ -z "$user" ] || [ -z "$pass" ]; then
+      printf "__LDS_MISSING_CREDENTIALS__"
+      exit 0
+    fi
+    MYSQL_PWD="$pass" mysql -Nse "
+      SHOW GLOBAL STATUS LIKE '\''Threads_connected'\'';
+      SHOW GLOBAL STATUS LIKE '\''Threads_running'\'';
+      SHOW GLOBAL STATUS LIKE '\''Slow_queries'\'';
+      SHOW VARIABLES LIKE '\''max_connections'\'';
+    " -u"$user" 2>/dev/null
+  ')"
 
-  pass="$(_container_env_value "$name" MYSQL_PASSWORD)"
-  [[ -n "$pass" ]] || pass="$(_container_env_value "$name" MARIADB_PASSWORD)"
-  [[ -n "$pass" ]] || pass="$(_container_env_value "$name" MYSQL_ROOT_PASSWORD)"
-  [[ -n "$pass" ]] || pass="$(_container_env_value "$name" MARIADB_ROOT_PASSWORD)"
-
-  status_out="$(
-    docker exec \
-      -e LDS_MYSQL_USER="$user" \
-      -e LDS_MYSQL_PASS="$pass" \
-      "$name" bash -c '
-        MYSQL_PWD="$LDS_MYSQL_PASS" mysql -Nse "
-          SHOW GLOBAL STATUS LIKE '\''Threads_connected'\'';
-          SHOW GLOBAL STATUS LIKE '\''Threads_running'\'';
-          SHOW GLOBAL STATUS LIKE '\''Slow_queries'\'';
-          SHOW VARIABLES LIKE '\''max_connections'\'';
-        " -u"$LDS_MYSQL_USER" 2>/dev/null
-      ' 2>/dev/null || docker exec \
-      -e LDS_MYSQL_USER="$user" \
-      -e LDS_MYSQL_PASS="$pass" \
-      "$name" sh -c '
-        MYSQL_PWD="$LDS_MYSQL_PASS" mysql -Nse "
-          SHOW GLOBAL STATUS LIKE '\''Threads_connected'\'';
-          SHOW GLOBAL STATUS LIKE '\''Threads_running'\'';
-          SHOW GLOBAL STATUS LIKE '\''Slow_queries'\'';
-          SHOW VARIABLES LIKE '\''max_connections'\'';
-        " -u"$LDS_MYSQL_USER" 2>/dev/null
-      ' 2>/dev/null || true
-  )"
-
-  if [[ -z "$status_out" ]]; then
-    P_LEVEL="fail"
-    P_NOTE="mysql_probe_failed"
-    return 0
+  if [[ "$status_out" == "__LDS_MISSING_CREDENTIALS__" ]]; then
+    P_LEVEL="warn"; P_NOTE="probe_unavailable_missing_credentials"; return 0
   fi
+  if [[ -z "$status_out" ]]; then P_LEVEL="warn"; P_NOTE="mysql_probe_failed"; return 0; fi
 
   local connected running slow max_conn
   connected="$(printf '%s\n' "$status_out" | awk '$1=="Threads_connected"{print $2; exit}')"
@@ -225,70 +156,42 @@ _probe_mysql() {
   P_ACTIVE="$(_num_or_default "$running" -1)"
   P_SLOW="$(_num_or_default "$slow" -1)"
   P_MAX_CONN="$(_num_or_default "$max_conn" -1)"
-  P_NOTE="ok"
-  P_LEVEL="pass"
-
+  P_NOTE="ok"; P_LEVEL="pass"
   if ((P_MAX_CONN > 0 && P_CONNECTIONS >= 0)); then
     P_MEM_PCT=$((P_CONNECTIONS * 100 / P_MAX_CONN))
-    if ((P_MEM_PCT >= 85)); then
-      P_LEVEL="warn"
-      P_NOTE="connection_pressure"
-    fi
+    if ((P_MEM_PCT >= 85)); then P_LEVEL="warn"; P_NOTE="connection_pressure"; fi
   fi
-  if ((P_SLOW > 0)); then
-    P_LEVEL="warn"
-    P_NOTE="slow_queries_detected"
-  fi
+  if ((P_SLOW > 0)); then P_LEVEL="warn"; P_NOTE="slow_queries_detected"; fi
 }
 
 _probe_postgres() {
   local name="${1:-}"
   _probe_defaults
 
-  local user db pass out
-  user="$(_container_env_value "$name" POSTGRES_USER)"
-  [[ -n "$user" ]] || user="postgres"
-  db="$(_container_env_value "$name" POSTGRES_DB)"
-  [[ -n "$db" ]] || db="postgres"
-  pass="$(_container_env_value "$name" POSTGRES_PASSWORD)"
+  local out
+  out="$(_docker_exec_pref_shell "$name" '
+    user="${POSTGRES_USER:-}"
+    pass="${POSTGRES_PASSWORD:-}"
+    db="${POSTGRES_DB:-$user}"
+    if [ -z "$user" ] || [ -z "$db" ] || [ -z "$pass" ]; then
+      printf "__LDS_MISSING_CREDENTIALS__"
+      exit 0
+    fi
+    PGPASSWORD="$pass" psql -U "$user" -d "$db" -At -F "|" -c "
+      SELECT
+        COALESCE((SELECT sum(numbackends) FROM pg_stat_database),0),
+        COALESCE((SELECT count(*) FROM pg_stat_activity WHERE state='\''active'\''),0),
+        COALESCE((SELECT setting::bigint FROM pg_settings WHERE name='\''max_connections'\''),0),
+        CASE WHEN pg_is_in_recovery() THEN '\''replica'\'' ELSE '\''primary'\'' END,
+        COALESCE(EXTRACT(EPOCH FROM now()-pg_last_xact_replay_timestamp())::bigint,0),
+        COALESCE((SELECT sum(xact_commit+xact_rollback) FROM pg_stat_database),0)
+    " 2>/dev/null
+  ')"
 
-  out="$(
-    docker exec \
-      -e LDS_PG_USER="$user" \
-      -e LDS_PG_DB="$db" \
-      -e PGPASSWORD="$pass" \
-      "$name" bash -c '
-        psql -U "$LDS_PG_USER" -d "$LDS_PG_DB" -At -F "|" -c "
-          SELECT
-            COALESCE((SELECT sum(numbackends) FROM pg_stat_database),0),
-            COALESCE((SELECT count(*) FROM pg_stat_activity WHERE state='\''active'\''),0),
-            COALESCE((SELECT setting::bigint FROM pg_settings WHERE name='\''max_connections'\''),0),
-            CASE WHEN pg_is_in_recovery() THEN '\''replica'\'' ELSE '\''primary'\'' END,
-            COALESCE(EXTRACT(EPOCH FROM now()-pg_last_xact_replay_timestamp())::bigint,0),
-            COALESCE((SELECT sum(xact_commit+xact_rollback) FROM pg_stat_database),0)
-        " 2>/dev/null
-      ' 2>/dev/null || docker exec \
-      -e LDS_PG_USER="$user" \
-      -e LDS_PG_DB="$db" \
-      -e PGPASSWORD="$pass" \
-      "$name" sh -c '
-        psql -U "$LDS_PG_USER" -d "$LDS_PG_DB" -At -F "|" -c "
-          SELECT
-            COALESCE((SELECT sum(numbackends) FROM pg_stat_database),0),
-            COALESCE((SELECT count(*) FROM pg_stat_activity WHERE state='\''active'\''),0),
-            COALESCE((SELECT setting::bigint FROM pg_settings WHERE name='\''max_connections'\''),0),
-            CASE WHEN pg_is_in_recovery() THEN '\''replica'\'' ELSE '\''primary'\'' END,
-            COALESCE(EXTRACT(EPOCH FROM now()-pg_last_xact_replay_timestamp())::bigint,0),
-            COALESCE((SELECT sum(xact_commit+xact_rollback) FROM pg_stat_database),0)
-        " 2>/dev/null
-      ' 2>/dev/null || true
-  )"
-
-  if [[ -z "$out" ]]; then
-    P_LEVEL="fail"
-    P_NOTE="postgres_probe_failed"
-    return 0
+  if [[ "$out" == "__LDS_MISSING_CREDENTIALS__" ]]; then
+    P_LEVEL="warn"; P_NOTE="probe_unavailable_missing_credentials"; return 0
   fi
+  if [[ -z "$out" ]]; then P_LEVEL="warn"; P_NOTE="postgres_probe_failed"; return 0; fi
 
   local conn active max_conn replica lag ops
   IFS='|' read -r conn active max_conn replica lag ops <<<"$out"
@@ -298,19 +201,13 @@ _probe_postgres() {
   P_REPLICA="${replica:--}"
   P_REPL_LAG="$(_num_or_default "$lag" -1)"
   P_OPS="$(_num_or_default "$ops" -1)"
-  P_NOTE="ok"
-  P_LEVEL="pass"
-
+  P_NOTE="ok"; P_LEVEL="pass"
   if ((P_MAX_CONN > 0 && P_CONNECTIONS >= 0)); then
     P_MEM_PCT=$((P_CONNECTIONS * 100 / P_MAX_CONN))
-    if ((P_MEM_PCT >= 85)); then
-      P_LEVEL="warn"
-      P_NOTE="connection_pressure"
-    fi
+    if ((P_MEM_PCT >= 85)); then P_LEVEL="warn"; P_NOTE="connection_pressure"; fi
   fi
   if [[ "$P_REPLICA" == "replica" && "$P_REPL_LAG" =~ ^-?[0-9]+$ && "$P_REPL_LAG" -gt 30 ]]; then
-    P_LEVEL="warn"
-    P_NOTE="replication_lag"
+    P_LEVEL="warn"; P_NOTE="replication_lag"
   fi
 }
 
@@ -318,47 +215,34 @@ _probe_mongodb() {
   local name="${1:-}"
   _probe_defaults
 
-  local user pass out
-  user="$(_container_env_value "$name" MONGO_INITDB_ROOT_USERNAME)"
-  [[ -n "$user" ]] || user="$(_container_env_value "$name" MONGODB_ROOT_USERNAME)"
-  [[ -n "$user" ]] || user="root"
-  pass="$(_container_env_value "$name" MONGO_INITDB_ROOT_PASSWORD)"
-  [[ -n "$pass" ]] || pass="$(_container_env_value "$name" MONGODB_ROOT_PASSWORD)"
-  [[ -n "$pass" ]] || pass="12345"
+  local out
+  out="$(_docker_exec_pref_shell "$name" '
+    user="${MONGO_INITDB_ROOT_USERNAME:-${MONGODB_ROOT_USERNAME:-}}"
+    pass="${MONGO_INITDB_ROOT_PASSWORD:-${MONGODB_ROOT_PASSWORD:-}}"
+    if [ -z "$user" ] || [ -z "$pass" ]; then
+      printf "__LDS_MISSING_CREDENTIALS__"
+      exit 0
+    fi
+    mongosh --quiet \
+      --host 127.0.0.1 \
+      --port 27017 \
+      --username "$user" \
+      --password "$pass" \
+      --authenticationDatabase admin \
+      --eval "
+        var s=db.serverStatus();
+        var cur=(s.connections&&s.connections.current)||0;
+        var active=(s.globalLock&&s.globalLock.activeClients&&s.globalLock.activeClients.total)||0;
+        var max=cur+((s.connections&&s.connections.available)||0);
+        var ops=(s.opcounters&&((s.opcounters.insert||0)+(s.opcounters.query||0)+(s.opcounters.update||0)+(s.opcounters.delete||0)))||0;
+        print(cur + \"|\" + active + \"|\" + max + \"|\" + ops);
+      " 2>/dev/null
+  ')"
 
-  out="$(
-    docker exec \
-      -e LDS_MONGO_USER="$user" \
-      -e LDS_MONGO_PASS="$pass" \
-      "$name" bash -c '
-        mongosh --quiet "mongodb://$LDS_MONGO_USER:$LDS_MONGO_PASS@localhost:27017/admin" --eval "
-          var s=db.serverStatus();
-          var cur=(s.connections&&s.connections.current)||0;
-          var active=(s.globalLock&&s.globalLock.activeClients&&s.globalLock.activeClients.total)||0;
-          var max=cur+((s.connections&&s.connections.available)||0);
-          var ops=(s.opcounters&&((s.opcounters.insert||0)+(s.opcounters.query||0)+(s.opcounters.update||0)+(s.opcounters.delete||0)))||0;
-          print(cur + \"|\" + active + \"|\" + max + \"|\" + ops);
-        " 2>/dev/null
-      ' 2>/dev/null || docker exec \
-      -e LDS_MONGO_USER="$user" \
-      -e LDS_MONGO_PASS="$pass" \
-      "$name" sh -c '
-        mongosh --quiet "mongodb://$LDS_MONGO_USER:$LDS_MONGO_PASS@localhost:27017/admin" --eval "
-          var s=db.serverStatus();
-          var cur=(s.connections&&s.connections.current)||0;
-          var active=(s.globalLock&&s.globalLock.activeClients&&s.globalLock.activeClients.total)||0;
-          var max=cur+((s.connections&&s.connections.available)||0);
-          var ops=(s.opcounters&&((s.opcounters.insert||0)+(s.opcounters.query||0)+(s.opcounters.update||0)+(s.opcounters.delete||0)))||0;
-          print(cur + \"|\" + active + \"|\" + max + \"|\" + ops);
-        " 2>/dev/null
-      ' 2>/dev/null || true
-  )"
-
-  if [[ -z "$out" ]]; then
-    P_LEVEL="fail"
-    P_NOTE="mongodb_probe_failed"
-    return 0
+  if [[ "$out" == "__LDS_MISSING_CREDENTIALS__" ]]; then
+    P_LEVEL="warn"; P_NOTE="probe_unavailable_missing_credentials"; return 0
   fi
+  if [[ -z "$out" ]]; then P_LEVEL="warn"; P_NOTE="mongodb_probe_failed"; return 0; fi
 
   local conn active max_conn ops
   IFS='|' read -r conn active max_conn ops <<<"$out"
@@ -366,15 +250,10 @@ _probe_mongodb() {
   P_ACTIVE="$(_num_or_default "$active" -1)"
   P_MAX_CONN="$(_num_or_default "$max_conn" -1)"
   P_OPS="$(_num_or_default "$ops" -1)"
-  P_NOTE="ok"
-  P_LEVEL="pass"
-
+  P_NOTE="ok"; P_LEVEL="pass"
   if ((P_MAX_CONN > 0 && P_CONNECTIONS >= 0)); then
     P_MEM_PCT=$((P_CONNECTIONS * 100 / P_MAX_CONN))
-    if ((P_MEM_PCT >= 85)); then
-      P_LEVEL="warn"
-      P_NOTE="connection_pressure"
-    fi
+    if ((P_MEM_PCT >= 85)); then P_LEVEL="warn"; P_NOTE="connection_pressure"; fi
   fi
 }
 
@@ -384,11 +263,7 @@ _probe_elasticsearch() {
 
   local health_json status nodes active_shards unassigned pct
   health_json="$(_docker_exec_pref_shell "$name" 'curl -fsS http://localhost:9200/_cluster/health 2>/dev/null || true')"
-  if [[ -z "$health_json" ]]; then
-    P_LEVEL="fail"
-    P_NOTE="elasticsearch_probe_failed"
-    return 0
-  fi
+  if [[ -z "$health_json" ]]; then P_LEVEL="warn"; P_NOTE="elasticsearch_probe_failed"; return 0; fi
 
   status="$(printf '%s' "$health_json" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p' | head -n1)"
   nodes="$(printf '%s' "$health_json" | sed -n 's/.*"number_of_nodes":[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)"
@@ -400,9 +275,7 @@ _probe_elasticsearch() {
   P_ACTIVE="$(_num_or_default "$active_shards" -1)"
   P_SLOW="$(_num_or_default "$unassigned" -1)"
   P_MEM_PCT="$(_num_or_default "${pct%%.*}" -1)"
-  P_NOTE="ok"
-  P_LEVEL="pass"
-
+  P_NOTE="ok"; P_LEVEL="pass"
   case "${status,,}" in
     green) P_LEVEL="pass"; P_NOTE="cluster_green" ;;
     yellow) P_LEVEL="warn"; P_NOTE="cluster_yellow" ;;
@@ -414,19 +287,10 @@ _probe_elasticsearch() {
 _probe_db_client() {
   local health="${1:-}"
   _probe_defaults
-
   local h="${health,,}"
-  P_LEVEL="pass"
-  P_NOTE="client_ok"
-  if [[ "$h" == "unhealthy" ]]; then
-    P_LEVEL="fail"
-    P_NOTE="client_unhealthy"
-    return 0
-  fi
-  if [[ "$h" == "starting" ]]; then
-    P_LEVEL="warn"
-    P_NOTE="client_starting"
-  fi
+  P_LEVEL="pass"; P_NOTE="client_ok"
+  if [[ "$h" == "unhealthy" ]]; then P_LEVEL="fail"; P_NOTE="client_unhealthy"; return 0; fi
+  if [[ "$h" == "starting" ]]; then P_LEVEL="warn"; P_NOTE="client_starting"; fi
 }
 
 usage() {
@@ -458,26 +322,27 @@ main() {
   esac
 
   if ! _has docker; then
-    printf '{"ok":false,"error":"docker_missing","message":"docker command is required.","generated_at":"%s","project":"unknown"}\n' \
-      "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+    printf '{"ok":false,"error":"docker_missing","message":"docker command is required.","generated_at":"%s","project":"unknown"}\n' "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
     return 1
   fi
   if ! docker info >/dev/null 2>&1; then
-    printf '{"ok":false,"error":"docker_unreachable","message":"Docker daemon is not reachable.","generated_at":"%s","project":"unknown"}\n' \
-      "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+    printf '{"ok":false,"error":"docker_unreachable","message":"Docker daemon is not reachable.","generated_at":"%s","project":"unknown"}\n' "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
     return 1
   fi
 
   local project
   project="$(_infer_project)"
+  if [[ "$project" == "unknown" || -z "$project" ]]; then
+    if ((json)); then
+      printf '{"ok":false,"error":"project_unresolved","message":"LocalDevStack Compose project could not be determined; host-wide discovery is disabled.","generated_at":"%s","project":"unknown","summary":{"targets":0,"pass":0,"warn":0,"fail":0},"items":[]}\n' "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+    else
+      printf 'DB Health | project=unknown targets=0 degraded=project_unresolved\n'
+    fi
+    return 0
+  fi
 
   local -a names=()
-  if [[ "$project" != "unknown" && -n "$project" ]]; then
-    mapfile -t names < <(docker ps -a --filter "label=com.docker.compose.project=${project}" --format '{{.Names}}' 2>/dev/null | sed '/^[[:space:]]*$/d')
-  fi
-  if ((${#names[@]} == 0)); then
-    mapfile -t names < <(docker ps -a --format '{{.Names}}' 2>/dev/null | sed '/^[[:space:]]*$/d')
-  fi
+  mapfile -t names < <(docker ps -a --filter "label=com.docker.compose.project=${project}" --format '{{.Names}}' 2>/dev/null | sed '/^[[:space:]]*$/d')
 
   local raw=""
   if ((${#names[@]})); then
@@ -492,9 +357,7 @@ main() {
     [[ -n "$name" ]] || continue
     engine="$(_engine_from "$name $service $image")"
     [[ -n "$engine" ]] || continue
-    if [[ "$engine_filter" != "all" && "$engine_filter" != "$engine" ]]; then
-      continue
-    fi
+    if [[ "$engine_filter" != "all" && "$engine_filter" != "$engine" ]]; then continue; fi
 
     case "$engine" in
       redis) ((++redis_n)) ;;
@@ -507,34 +370,24 @@ main() {
     esac
 
     _probe_defaults
-    level="pass"
-    note="ok"
+    level="pass"; note="ok"
     if [[ "$state" != "running" ]]; then
-      level="fail"
-      note="container_not_running"
-      ((++not_running))
+      level="fail"; note="container_not_running"; ((++not_running))
     else
       ((++running))
       case "$engine" in
         redis) _probe_redis "$name" ;;
-        mysql) _probe_mysql "$name" ;;
-        mariadb) _probe_mysql "$name" ;;
+        mysql|mariadb) _probe_mysql "$name" ;;
         postgres) _probe_postgres "$name" ;;
         mongodb) _probe_mongodb "$name" ;;
         elasticsearch) _probe_elasticsearch "$name" ;;
         db-client) _probe_db_client "$health" ;;
       esac
-      level="$P_LEVEL"
-      note="$P_NOTE"
+      level="$P_LEVEL"; note="$P_NOTE"
     fi
 
-    case "$level" in
-      pass) ((++pass)) ;;
-      warn) ((++warn)) ;;
-      *) ((++fail)); level="fail" ;;
-    esac
+    case "$level" in pass) ((++pass)) ;; warn) ((++warn)) ;; *) ((++fail)); level="fail" ;; esac
     ((++total))
-
     items+=("$name|$service|$image|$engine|$state|$health|$level|$note|$P_CONNECTIONS|$P_ACTIVE|$P_MAX_CONN|$P_SLOW|$P_EVICTED|$P_USED_MEM|$P_MAX_MEM|$P_MEM_PCT|$P_REPLICA|$P_REPL_LAG|$P_OPS")
   done <<<"$raw"
 
@@ -556,8 +409,7 @@ main() {
   local connections active max_conn slow evicted used_mem max_mem mem_pct replica repl_lag ops
   for row in "${items[@]}"; do
     IFS='|' read -r name service image engine state health level note connections active max_conn slow evicted used_mem max_mem mem_pct replica repl_lag ops <<<"$row"
-    ((f)) || printf ','
-    f=0
+    ((f)) || printf ','; f=0
     printf '{'
     printf '"container":"%s",' "$(_json_escape "$name")"
     printf '"service":"%s",' "$(_json_escape "${service:--}")"

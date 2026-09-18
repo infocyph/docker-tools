@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
+workflow='.github/workflows/docker.publish.yml'
+[[ -f "$workflow" ]] || { echo 'publish workflow missing' >&2; exit 1; }
+
+require() {
+  grep -Fq "$1" "$workflow" || { echo "publish contract missing: $1" >&2; exit 1; }
+}
+
+for expected in \
+  'release:' \
+  'types: [published]' \
+  'workflow_dispatch:' \
+  'RELEASE_TAG="$EVENT_RELEASE_TAG"' \
+  'EVENT_RELEASE_PRERELEASE:' \
+  'Stable publish workflow refuses draft/prerelease releases.' \
+  'release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest")"' \
+  'Check out exact Tools release source' \
+  'ref: ${{ env.RELEASE_TAG }}' \
+  'actions/checkout@v7' \
+  'docker/setup-qemu-action@v4' \
+  'docker/setup-buildx-action@v4' \
+  'Snapshot rolling upstream inputs' \
+  'ALPINE_REF="alpine:latest@${ALPINE_DIGEST}"' \
+  'SCRIPTOMATIC_REF="$(retry get_scriptomatic_sha)"' \
+  'TOOLSET_INSTALLER_SHA256=' \
+  'MKCERT_SHA256_AMD64=' \
+  'MKCERT_SHA256_ARM64=' \
+  'Generated template runtime compatibility' \
+  'docker/login-action@v4' \
+  'docker/metadata-action@v6' \
+  'docker/build-push-action@v7' \
+  'actions/attest@v4' \
+  'platforms: linux/amd64,linux/arm64' \
+  'provenance: mode=max' \
+  'sbom: true' \
+  'PUBLISH_RELEASE_TAG=false' \
+  'Enforce immutable release tags' \
+  'scripts/tests/release-gate.sh' \
+  'Gate published image digest'; do
+  require "$expected"
+done
+
+
+publish_block="$(awk '
+  /- name: Build and push multi-architecture image/ { in_block=1 }
+  in_block { print }
+  /- name: Generate Docker Hub provenance attestation/ { exit }
+' "$workflow")"
+grep -Fq 'pull: false' <<<"$publish_block" || {
+  echo 'final publish build must reuse tested candidate caches without forcing another rolling base pull' >&2
+  exit 1
+}
+grep -Fq 'bash scripts/tests/release-gate.sh "$image"' "$workflow" || {
+  echo 'published amd64 digest is not re-gated' >&2
+  exit 1
+}
+grep -Fq 'docker pull --platform linux/arm64 "$image"' "$workflow" || {
+  echo 'published arm64 digest verification missing' >&2
+  exit 1
+}
+grep -Fq 'tools-publish-arm64-' "$workflow" || {
+  echo 'arm64 candidate does not exercise the real Tools lifecycle' >&2
+  exit 1
+}
+grep -Fq 'tools-published-arm64-' "$workflow" || {
+  echo 'published arm64 digest does not exercise the real Tools lifecycle' >&2
+  exit 1
+}
+grep -Fq 'CANDIDATE_ALPINE_VERSION=' "$workflow" || {
+  echo 'candidate rolling-version capture missing' >&2
+  exit 1
+}
+grep -Fq 'dockerhub_image="docker.io/' "$workflow" || {
+  echo 'Docker Hub published digest verification missing' >&2
+  exit 1
+}
+grep -Fq '[[ "$alpine_version" == "$CANDIDATE_ALPINE_VERSION" ]]' "$workflow" || {
+  echo 'candidate/published Alpine parity check missing' >&2
+  exit 1
+}
+grep -Fq '[[ "$gitx_version" == "$CANDIDATE_GITX_VERSION" ]]' "$workflow" || {
+  echo 'candidate/published Toolset gitx parity check missing' >&2
+  exit 1
+}
+grep -Fq '[[ "$composer_version" == "$CANDIDATE_COMPOSER_VERSION" ]]' "$workflow" || {
+  echo 'candidate/published Composer parity check missing' >&2
+  exit 1
+}
+grep -Fq '[[ "$runtime_generated_at" == "$CANDIDATE_RUNTIME_GENERATED_AT" ]]' "$workflow" || {
+  echo 'candidate/published runtime metadata parity check missing' >&2
+  exit 1
+}
+grep -Fq '[[ "$banner_sha256" == "$CANDIDATE_BANNER_SHA256" ]]' "$workflow" || {
+  echo 'candidate/published Scriptomatic banner parity check missing' >&2
+  exit 1
+}
+
+if grep -Eq 'actions/checkout@v[1-6]([^0-9]|$)|docker/build-push-action@v[1-6]([^0-9]|$)|docker/login-action@v[1-3]([^0-9]|$)|docker/metadata-action@v[1-5]([^0-9]|$)' "$workflow"; then
+  echo 'publish workflow contains a superseded action major' >&2
+  exit 1
+fi
+
+grep -Fq 'askai --help' scripts/tests/release-gate.sh || {
+  echo 'release gate does not validate askai' >&2
+  exit 1
+}
+grep -Fq 'aiops --help' scripts/tests/release-gate.sh || {
+  echo 'release gate does not validate aiops' >&2
+  exit 1
+}
+grep -Fq 'tools-healthcheck' scripts/tests/release-gate.sh || {
+  echo 'release gate does not use the Tools-owned health contract' >&2
+  exit 1
+}
+grep -Fq 'bash scripts/tests/template-abi-contract.sh' .github/workflows/check.yml || {
+  echo 'static template ABI contract is not executed by CI' >&2
+  exit 1
+}
+grep -Fq 'bash scripts/tests/template-runtime-smoke.sh' .github/workflows/check.yml || {
+  echo 'runtime template ABI smoke is not executed by CI' >&2
+  exit 1
+}
+
+echo 'release contracts: ok'

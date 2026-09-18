@@ -184,7 +184,7 @@ write_yaml_template() {
   local out="$1" pub="${2:-AGE_PUBLIC_KEY_HERE}"
   cat >"$out" <<YAML
 creation_rules:
-  - path_regex: \\.env(\\..+)?\\.enc\$
+  - path_regex: \.env(\..+)?\.enc$
     age:
       - "$pub"
 YAML
@@ -278,6 +278,7 @@ ensure_project_default() {
     inferred="$(derive_project_from_git 2>/dev/null || true)"
     [[ -n "$inferred" ]] && SENV_PROJECT="$inferred"
   fi
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -540,12 +541,13 @@ do_enc() {
     out="$(resolve_alias_path "$out_raw")"
   fi
   ensure_safe_path_or_die "$out" "Output"
+  mkdir -p -- "$(dirname "$out")" || die "Cannot create output directory: $(dirname "$out")"
 
   local keyf yaml
   keyf="$(choose_key_file)"
   yaml="$(choose_sops_yaml)"
 
-  SOPS_AGE_KEY_FILE="$keyf" sops --config "$yaml" -e "$in" >"$out"
+  SOPS_AGE_KEY_FILE="$keyf" sops --config "$yaml" --filename-override "$out" -e "$in" >"$out"
   chmod 600 "$out" 2>/dev/null || true
 
   printf "%s %s\n" "$(_tag enc)" "$(_ok "ok")"

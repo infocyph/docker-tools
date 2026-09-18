@@ -100,6 +100,22 @@ aiops_collect_troubleshoot() {
     '{kind:"troubleshoot",status:$status,alerts:$alerts,slo:$slo}'
 }
 
+aiops_read_safe_file() {
+  local path="${1:-}" size
+  ai_assert_safe_file "$path" || return $?
+  ai_config_init || return $?
+  size="$(wc -c <"$path" | tr -d '[:space:]')"
+  if ! aiops_is_uint "$size"; then
+    aiops_error "unable to determine file size: $path"
+    return 65
+  fi
+  if ((10#$size > 10#$LDS_AI_MAX_CONTEXT_BYTES)); then
+    aiops_error "file is ${size} bytes; context limit is ${LDS_AI_MAX_CONTEXT_BYTES}"
+    return 65
+  fi
+  cat -- "$path"
+}
+
 aiops_repo_context() {
   command -v git >/dev/null 2>&1 || { aiops_error 'git command is required'; return 69; }
   local root
@@ -301,8 +317,7 @@ main() {
       ;;
     review|graphify)
       [[ -n "$file" ]] || { aiops_error "$command requires --file"; return 64; }
-      ai_assert_safe_file "$file" || return $?
-      context="$(cat -- "$file")"
+      context="$(aiops_read_safe_file "$file")" || return $?
       ;;
   esac
 

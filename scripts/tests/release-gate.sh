@@ -36,6 +36,8 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   test -x /usr/local/bin/aiops
   test -r "$LDS_AI_PROVIDER_LIB"
   test "$LDS_AI_URL" = "http://llm-sm:11434"
+  test "${NOTIFY_TOKEN+x}" = "x"
+  test "$NOTIFY_TOKEN" = ""
   test -x /usr/local/bin/chromacat
   test -x /usr/local/bin/sqlitex
   test -x /usr/local/bin/netx

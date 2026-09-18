@@ -824,6 +824,7 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `ADMIN_PANEL_BIND`      | `0.0.0.0`                         | internal admin listener bind; do not publish raw host port by default |
 | `ADMIN_PANEL_PORT`      | `9911`                            | internal admin listener used by `admin.localhost` |
 | `ADMIN_PANEL_TOKEN`     | (empty)                            | stack-scoped control token for mutations/sensitive downloads |
+| `ADMIN_PANEL_LOG_ROOTS` | `/global/log`                     | colon-separated admin log roots; legacy `LOGVIEW_ROOTS` is accepted as a compatibility fallback |
 | `LDS_AI_ENABLED`        | `auto`                            | `auto`, `0`, or `1`; AI remains optional |
 | `LDS_AI_PROVIDER`       | `ollama`                          | local provider type |
 | `LDS_AI_URL`            | `http://llm-sm:11434`            | internal provider endpoint |

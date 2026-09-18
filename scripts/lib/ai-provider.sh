@@ -271,9 +271,15 @@ ai_assert_safe_file() {
     ai_error "refusing private-key content: $path"
     return 77
   fi
-  if [[ -s "$path" ]] && rg -a -q '\x00' -- "$path"; then
-    ai_error "refusing binary file input: $path"
-    return 77
+  if [[ -s "$path" ]]; then
+    command -v rg >/dev/null 2>&1 || {
+      ai_error 'ripgrep (rg) is required for safe file classification'
+      return 69
+    }
+    if rg -a -q '\x00' -- "$path"; then
+      ai_error "refusing binary file input: $path"
+      return 77
+    fi
   fi
   return 0
 }

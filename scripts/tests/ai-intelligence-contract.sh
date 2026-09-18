@@ -36,7 +36,10 @@ grep -q 'graphify' "$AIOPS" || fail 'Graphify analysis helper missing'
 if grep -Eq '(^|[[:space:]])eval([[:space:]]|$)|bash[[:space:]]+-c|sh[[:space:]]+-c' "$AIOPS"; then
   fail 'aiops introduced command-string execution'
 fi
-if grep -Eq 'git[[:space:]].*diff[^[:alnum:]-].*--patch|git[[:space:]].*show' "$AIOPS"; then
+grep -Fq 'diff --no-ext-diff --stat' "$AIOPS" || fail 'repo-review diff stat contract missing'
+grep -Fq 'diff --no-ext-diff --name-status' "$AIOPS" || fail 'repo-review unstaged metadata contract missing'
+grep -Fq 'diff --cached --no-ext-diff --name-status' "$AIOPS" || fail 'repo-review staged metadata contract missing'
+if grep -q -- '--patch' "$AIOPS" || grep -Eq 'git[[:space:]].*show([[:space:]]|$)' "$AIOPS"; then
   fail 'repo-review started sending repository content implicitly'
 fi
 

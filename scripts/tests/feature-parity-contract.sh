@@ -88,9 +88,10 @@ grep -Fq 'init --local' scripts/shells/senv.sh || fail 'senv local init contract
 grep -Fq 'init --local-only' scripts/shells/senv.sh || fail 'senv local-only init contract missing'
 grep -Fq 'Use --unsafe to bypass.' scripts/shells/senv.sh || fail 'senv unsafe override contract missing'
 
-# Notifier token authentication is an existing optional feature, including an
-# explicitly empty image default so compose/env overrides continue to work.
-grep -Fq 'NOTIFY_TOKEN=""' Dockerfile || fail 'NOTIFY_TOKEN image contract missing'
+# Notifier token authentication is an existing optional feature. Preserve the
+# empty runtime default without baking token-shaped metadata into the image.
+grep -Fq ': "${NOTIFY_TOKEN:=}"' scripts/shells/entrypoint.sh || fail 'NOTIFY_TOKEN runtime default missing'
+grep -Fq 'export NOTIFY_TOKEN' scripts/shells/entrypoint.sh || fail 'NOTIFY_TOKEN runtime export missing'
 grep -Fq 'TOKEN="${NOTIFY_TOKEN:-}"' scripts/shells/notifierd.sh || fail 'notifierd token contract missing'
 grep -Fq 'TOKEN="${NOTIFY_TOKEN:-}"' scripts/shells/notify.sh || fail 'notify token contract missing'
 

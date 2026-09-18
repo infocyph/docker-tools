@@ -3,6 +3,9 @@ set -euo pipefail
 
 HOST_OS="$(printf '%s' "${HOST_OS:-linux}" | tr '[:upper:]' '[:lower:]')" && export HOST_OS
 
+: "${NOTIFY_TOKEN:=}"
+export NOTIFY_TOKEN
+
 init_project_scope() {
   local project="${STATUS_PROJECT:-${LDS_COMPOSE_PROJECT:-${COMPOSE_PROJECT_NAME:-}}}"
   local candidate detected=""

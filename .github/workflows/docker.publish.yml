@@ -256,9 +256,12 @@ jobs:
             echo "- lazydocker: \`$lazydocker_version\`"
             echo "- Composer: \`$composer_version\`"
             echo "- gitx: \`$gitx_version\`"
-            echo "- Toolset latest release: \`$toolset_release\`"
-            echo "- Scriptomatic main: \`$scriptomatic_main\`"
+            echo "- Toolset release: \`$TOOLSET_RELEASE\`"
+            echo "- Scriptomatic revision: \`$SCRIPTOMATIC_REF\`"
+            echo "- mkcert release: \`$MKCERT_RELEASE\`"
+            echo "- lazydocker release: \`$LAZYDOCKER_RELEASE\`"
             echo "- Runtime metadata generated at: \`$runtime_generated_at\`"
+            echo "- Installed banner SHA-256: \`$banner_sha256\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Final amd64 release-candidate gate

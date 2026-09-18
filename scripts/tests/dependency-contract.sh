@@ -28,13 +28,21 @@ assert_absent 'ollama[[:space:]]+serve'
 assert_absent 'EXPOSE[[:space:]]+11434'
 assert_absent 'mkcert/latest\?for=linux/amd64'
 
-assert_present 'FROM alpine:latest' Dockerfile
+assert_present 'ARG ALPINE_REF=alpine:latest' Dockerfile
+assert_present 'FROM \$\{ALPINE_REF\}' Dockerfile
 assert_present 'ARG TARGETARCH' Dockerfile
+assert_present 'ARG MKCERT_RELEASE=latest' Dockerfile
 assert_present 'mkcert/latest\?for=\$\{TARGETOS\}/\$\{TARGETARCH\}' Dockerfile
+assert_present 'mkcert-\$\{MKCERT_RELEASE\}-\$\{TARGETOS\}-\$\{TARGETARCH\}' Dockerfile
+assert_present 'ARG TOOLSET_RELEASE=latest' Dockerfile
+assert_present 'ARG TOOLSET_INSTALLER_SHA256=' Dockerfile
 assert_present 'Toolset/releases/latest/download/install\.sh' Dockerfile
+assert_present 'Toolset/releases/download/\$\{TOOLSET_RELEASE\}/install\.sh' Dockerfile
 assert_present 'SCRIPTOMATIC_REF=main' Dockerfile
 assert_present 'Scriptomatic/\$\{SCRIPTOMATIC_REF\}/bash/banner\.sh' Dockerfile
+assert_present 'ARG LAZYDOCKER_RELEASE=latest' Dockerfile
 assert_present 'lazydocker/releases/latest' Dockerfile
+assert_present 'lazydocker/releases/tags/\$\{LAZYDOCKER_RELEASE\}' Dockerfile
 assert_present 'checksums\.txt' Dockerfile
 assert_present 'def version_parts: split\("\."\) \| map\(tonumber\);' Dockerfile
 assert_present 'netcat-openbsd gzip flock' Dockerfile

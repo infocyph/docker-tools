@@ -36,8 +36,6 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   test -x /usr/local/bin/aiops
   test -r "$LDS_AI_PROVIDER_LIB"
   test "$LDS_AI_URL" = "http://llm-sm:11434"
-  test "${NOTIFY_TOKEN+x}" = "x"
-  test "$NOTIFY_TOKEN" = ""
   test -x /usr/local/bin/chromacat
   test -x /usr/local/bin/sqlitex
   test -x /usr/local/bin/netx
@@ -96,6 +94,7 @@ name="tools-release-gate-${RANDOM}"
 trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 
 docker run -d --name "$name" "$IMAGE" >/dev/null
+docker exec "$name" sh -lc 'tr "\0" "\n" </proc/1/environ | grep -qx "NOTIFY_TOKEN="' || fail 'entrypoint notifier token default missing'
 for _ in $(seq 1 30); do
   if docker exec "$name" tools-healthcheck >/dev/null 2>&1 \
     && docker exec "$name" sh -lc 'wget -qO- http://127.0.0.1:9911/ >/dev/null && tr "\0" " " </proc/1/cmdline | grep -q notifierd'; then

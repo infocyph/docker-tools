@@ -1,236 +1,206 @@
 <?php
 declare(strict_types=1);
-
-$kpis = [
-    ['label' => 'Monthly Revenue', 'value' => '$87,460', 'delta' => '+11.3%', 'state' => 'up', 'icon' => 'bi-cash-coin'],
-    ['label' => 'Active Projects', 'value' => '126', 'delta' => '+7', 'state' => 'up', 'icon' => 'bi-kanban'],
-    ['label' => 'Containers Healthy', 'value' => '23 / 24', 'delta' => '95.8%', 'state' => 'up', 'icon' => 'bi-hdd-network'],
-    ['label' => 'Error Rate', 'value' => '0.43%', 'delta' => '-0.12%', 'state' => 'down', 'icon' => 'bi-exclamation-triangle'],
-];
-
-$trafficSources = [
-    ['name' => 'Proxy Requests', 'value' => '46%'],
-    ['name' => 'Direct App Hits', 'value' => '28%'],
-    ['name' => 'CLI Triggers', 'value' => '17%'],
-    ['name' => 'Scheduled Jobs', 'value' => '9%'],
-];
-
-$recentDeployments = [
-    ['id' => '#DEP-2104', 'service' => 'nginx-router', 'owner' => 'platform', 'status' => 'Completed', 'time' => '3 min ago'],
-    ['id' => '#DEP-2103', 'service' => 'php-fpm-main', 'owner' => 'runtime', 'status' => 'Processing', 'time' => '12 min ago'],
-    ['id' => '#DEP-2102', 'service' => 'worker-queue', 'owner' => 'jobs', 'status' => 'Failed', 'time' => '28 min ago'],
-    ['id' => '#DEP-2101', 'service' => 'redis-cache', 'owner' => 'platform', 'status' => 'Completed', 'time' => '53 min ago'],
-];
-
-$healthRows = [
-    ['service' => 'Nginx', 'status' => 'Healthy', 'uptime' => '99.99%', 'load' => 92],
-    ['service' => 'PHP-FPM', 'status' => 'Healthy', 'uptime' => '99.82%', 'load' => 76],
-    ['service' => 'MySQL', 'status' => 'Healthy', 'uptime' => '99.91%', 'load' => 68],
-    ['service' => 'Redis', 'status' => 'Warning', 'uptime' => '98.45%', 'load' => 54],
-];
-
-$timeline = [
-    ['time' => '19:04', 'text' => 'Project profile switched to `team-a` by admin.'],
-    ['time' => '18:42', 'text' => 'Container `worker-queue` restarted after memory threshold warning.'],
-    ['time' => '18:13', 'text' => 'Vhost map refreshed from `sites-enabled` (12 domains).'],
-    ['time' => '17:57', 'text' => 'New log archive generated for `api.error.log`.'],
-];
 ?>
 
 <section class="ap-page-head">
   <div>
     <p class="ap-breadcrumb mb-1">Home / Dashboard</p>
     <h2 class="ap-page-title mb-1">Operations Overview</h2>
-    <p class="ap-page-sub mb-0">TailAdmin-style summary shell for LDS runtime and deployment health.</p>
+    <p class="ap-page-sub mb-0">Live LocalDevStack status. No synthetic business or uptime data is displayed.</p>
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
-    <button class="btn ap-ghost-btn" type="button" disabled><i class="bi bi-calendar3 me-1"></i> Last 30 Days</button>
-    <button class="btn ap-primary-btn" type="button" disabled><i class="bi bi-plus-lg me-1"></i> New Deployment</button>
+    <span id="apDashboardGenerated" class="small text-body-secondary">Waiting for status…</span>
+    <button id="apDashboardRefresh" class="btn ap-primary-btn" type="button">
+      <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+    </button>
   </div>
 </section>
 
 <section class="row g-3 mt-1">
-  <?php foreach ($kpis as $kpi): ?>
-    <div class="col-12 col-sm-6 col-xxl-3">
-      <article class="card ap-card ap-kpi-card h-100">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-start">
-            <div>
-              <p class="ap-kpi-label mb-1"><?= htmlspecialchars($kpi['label'], ENT_QUOTES, 'UTF-8') ?></p>
-              <h3 class="ap-kpi-value mb-1"><?= htmlspecialchars($kpi['value'], ENT_QUOTES, 'UTF-8') ?></h3>
-              <p class="ap-kpi-meta mb-0">
-                <span class="ap-kpi-trend ap-<?= htmlspecialchars($kpi['state'], ENT_QUOTES, 'UTF-8') ?>">
-                  <?= $kpi['state'] === 'up' ? '<i class="bi bi-arrow-up-right"></i>' : '<i class="bi bi-arrow-down-right"></i>' ?>
-                </span>
-                <?= htmlspecialchars($kpi['delta'], ENT_QUOTES, 'UTF-8') ?>
-              </p>
-            </div>
-            <div class="ap-kpi-icon">
-              <i class="bi <?= htmlspecialchars($kpi['icon'], ENT_QUOTES, 'UTF-8') ?>"></i>
-            </div>
-          </div>
-        </div>
-      </article>
-    </div>
-  <?php endforeach; ?>
-</section>
-
-<section class="row g-3 mt-1">
-  <div class="col-12 col-xxl-8">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Revenue Analytics</h4>
-          <p class="ap-card-sub mb-0">Monthly flow from all service tiers</p>
-        </div>
-        <button class="btn ap-ghost-btn btn-sm" type="button" disabled>View Report</button>
-      </header>
+  <div class="col-12 col-sm-6 col-xxl-3">
+    <article class="card ap-card ap-kpi-card h-100">
       <div class="card-body">
-        <div class="ap-chart-wrap">
-          <canvas id="apRevenueChart" height="128" aria-label="Revenue chart"></canvas>
-        </div>
+        <p class="ap-kpi-label mb-1">Compose Project</p>
+        <h3 id="apDashboardProject" class="ap-kpi-value mb-1">—</h3>
+        <p id="apDashboardProfiles" class="ap-kpi-meta mb-0">Profiles: —</p>
       </div>
     </article>
   </div>
-
-  <div class="col-12 col-xxl-4">
-    <article class="card ap-card h-100">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Traffic Sources</h4>
-          <p class="ap-card-sub mb-0">Live routing entry points</p>
-        </div>
-      </header>
+  <div class="col-12 col-sm-6 col-xxl-3">
+    <article class="card ap-card ap-kpi-card h-100">
       <div class="card-body">
-        <div class="ap-chart-wrap ap-chart-sm">
-          <canvas id="apTrafficChart" height="188" aria-label="Traffic sources chart"></canvas>
-        </div>
-        <ul class="ap-legend-list list-unstyled mb-0 mt-3">
-          <?php foreach ($trafficSources as $item): ?>
-            <li>
-              <span class="ap-legend-label"><?= htmlspecialchars($item['name'], ENT_QUOTES, 'UTF-8') ?></span>
-              <strong class="ap-legend-value"><?= htmlspecialchars($item['value'], ENT_QUOTES, 'UTF-8') ?></strong>
-            </li>
-          <?php endforeach; ?>
-        </ul>
+        <p class="ap-kpi-label mb-1">Containers Running</p>
+        <h3 id="apDashboardContainers" class="ap-kpi-value mb-1">—</h3>
+        <p id="apDashboardHealth" class="ap-kpi-meta mb-0">Health: —</p>
+      </div>
+    </article>
+  </div>
+  <div class="col-12 col-sm-6 col-xxl-3">
+    <article class="card ap-card ap-kpi-card h-100">
+      <div class="card-body">
+        <p class="ap-kpi-label mb-1">Detected Problems</p>
+        <h3 id="apDashboardProblems" class="ap-kpi-value mb-1">—</h3>
+        <p id="apDashboardChecks" class="ap-kpi-meta mb-0">Checks: —</p>
+      </div>
+    </article>
+  </div>
+  <div class="col-12 col-sm-6 col-xxl-3">
+    <article class="card ap-card ap-kpi-card h-100">
+      <div class="card-body">
+        <p class="ap-kpi-label mb-1">Discovered URLs</p>
+        <h3 id="apDashboardUrls" class="ap-kpi-value mb-1">—</h3>
+        <p id="apDashboardPorts" class="ap-kpi-meta mb-0">Ports: —</p>
       </div>
     </article>
   </div>
 </section>
 
 <section class="row g-3 mt-1">
-  <div class="col-12 col-xxl-8">
+  <div class="col-12 col-xl-7">
     <article class="card ap-card h-100">
       <header class="card-header ap-card-head">
         <div>
-          <h4 class="ap-card-title mb-1">Recent Deployments</h4>
-          <p class="ap-card-sub mb-0">Latest build and rollout queue events</p>
-        </div>
-      </header>
-      <div class="table-responsive">
-        <table class="table ap-table mb-0">
-          <thead>
-            <tr>
-              <th>Deployment</th>
-              <th>Service</th>
-              <th>Owner</th>
-              <th>Status</th>
-              <th class="text-end">Time</th>
-            </tr>
-          </thead>
-          <tbody>
-          <?php foreach ($recentDeployments as $row): ?>
-            <tr>
-              <td class="fw-semibold"><?= htmlspecialchars($row['id'], ENT_QUOTES, 'UTF-8') ?></td>
-              <td><?= htmlspecialchars($row['service'], ENT_QUOTES, 'UTF-8') ?></td>
-              <td><?= htmlspecialchars($row['owner'], ENT_QUOTES, 'UTF-8') ?></td>
-              <td>
-                <?php $statusClass = strtolower((string)$row['status']); ?>
-                <span class="ap-badge ap-badge-<?= htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8') ?>">
-                  <?= htmlspecialchars($row['status'], ENT_QUOTES, 'UTF-8') ?>
-                </span>
-              </td>
-              <td class="text-end"><?= htmlspecialchars($row['time'], ENT_QUOTES, 'UTF-8') ?></td>
-            </tr>
-          <?php endforeach; ?>
-          </tbody>
-        </table>
-      </div>
-    </article>
-  </div>
-
-  <div class="col-12 col-xxl-4">
-    <div class="row g-3">
-      <div class="col-12">
-        <article class="card ap-card h-100">
-          <header class="card-header ap-card-head">
-            <div>
-              <h4 class="ap-card-title mb-1">Order Status</h4>
-              <p class="ap-card-sub mb-0">Automation job outcomes</p>
-            </div>
-          </header>
-          <div class="card-body">
-            <div class="ap-chart-wrap ap-chart-sm">
-              <canvas id="apOrderStatusChart" height="170" aria-label="Order status chart"></canvas>
-            </div>
-          </div>
-        </article>
-      </div>
-
-      <div class="col-12">
-        <article class="card ap-card h-100">
-          <header class="card-header ap-card-head">
-            <div>
-              <h4 class="ap-card-title mb-1">Service Health</h4>
-              <p class="ap-card-sub mb-0">Current host and workload reliability</p>
-            </div>
-          </header>
-          <div class="card-body">
-            <ul class="ap-status-list list-unstyled mb-0">
-              <?php foreach ($healthRows as $row): ?>
-                <li class="ap-status-row">
-                  <div class="d-flex justify-content-between align-items-end mb-2">
-                    <div>
-                      <p class="ap-status-label mb-0"><?= htmlspecialchars($row['service'], ENT_QUOTES, 'UTF-8') ?></p>
-                      <small class="ap-status-kicker"><?= htmlspecialchars($row['status'], ENT_QUOTES, 'UTF-8') ?></small>
-                    </div>
-                    <strong><?= htmlspecialchars($row['uptime'], ENT_QUOTES, 'UTF-8') ?></strong>
-                  </div>
-                  <div class="ap-progress">
-                    <span class="ap-progress-bar" style="width: <?= (int)$row['load'] ?>%"></span>
-                  </div>
-                </li>
-              <?php endforeach; ?>
-            </ul>
-          </div>
-        </article>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="row g-3 mt-1">
-  <div class="col-12">
-    <article class="card ap-card">
-      <header class="card-header ap-card-head">
-        <div>
-          <h4 class="ap-card-title mb-1">Activity Timeline</h4>
-          <p class="ap-card-sub mb-0">Last platform actions in this session</p>
+          <h4 class="ap-card-title mb-1">Deterministic Checks</h4>
+          <p class="ap-card-sub mb-0">Summaries reported by the existing status command.</p>
         </div>
       </header>
       <div class="card-body">
-        <ul class="ap-timeline list-unstyled mb-0">
-          <?php foreach ($timeline as $item): ?>
-            <li class="ap-timeline-item">
-              <span class="ap-timeline-dot"></span>
-              <div>
-                <p class="ap-timeline-time mb-1"><?= htmlspecialchars($item['time'], ENT_QUOTES, 'UTF-8') ?></p>
-                <p class="ap-timeline-text mb-0"><?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?></p>
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <div class="border rounded p-3 h-100">
+              <p class="fw-semibold mb-2">System</p>
+              <div class="d-flex gap-2 flex-wrap">
+                <span id="apSystemPass" class="badge text-bg-success">Pass —</span>
+                <span id="apSystemWarn" class="badge text-bg-warning">Warn —</span>
+                <span id="apSystemFail" class="badge text-bg-danger">Fail —</span>
               </div>
-            </li>
-          <?php endforeach; ?>
-        </ul>
+            </div>
+          </div>
+          <div class="col-12 col-md-6">
+            <div class="border rounded p-3 h-100">
+              <p class="fw-semibold mb-2">Project</p>
+              <div class="d-flex gap-2 flex-wrap">
+                <span id="apProjectPass" class="badge text-bg-success">Pass —</span>
+                <span id="apProjectWarn" class="badge text-bg-warning">Warn —</span>
+                <span id="apProjectFail" class="badge text-bg-danger">Fail —</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3 border rounded p-3">
+          <div class="d-flex justify-content-between gap-3 flex-wrap">
+            <div>
+              <p class="fw-semibold mb-1">Optional local AI</p>
+              <p class="small text-body-secondary mb-0">Provider state only; opening the dashboard never starts generation.</p>
+            </div>
+            <span id="apDashboardAi" class="badge text-bg-secondary align-self-start">Checking…</span>
+          </div>
+        </div>
+
+        <div id="apDashboardError" class="alert alert-warning mt-3 mb-0 d-none" role="alert"></div>
+      </div>
+    </article>
+  </div>
+
+  <div class="col-12 col-xl-5">
+    <article class="card ap-card h-100">
+      <header class="card-header ap-card-head">
+        <div>
+          <h4 class="ap-card-title mb-1">Operational Views</h4>
+          <p class="ap-card-sub mb-0">Open deeper deterministic diagnostics only when needed.</p>
+        </div>
+      </header>
+      <div class="card-body">
+        <div class="list-group list-group-flush">
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('live-stats'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-activity me-2"></i>Live Stack Telemetry</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('db-health'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-database-check me-2"></i>Database Health</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('queue-health'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-list-task me-2"></i>Queue / Cron Health</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('tls-monitor'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-shield-lock me-2"></i>TLS / mTLS Monitor</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('volume-monitor'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-device-ssd me-2"></i>Volumes / Inodes</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('drift-monitor'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-sliders me-2"></i>Configuration Drift</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('logs'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-file-earmark-text me-2"></i>File Logs</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('ai-assistant'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-stars me-2"></i>AI Assistant</a>
+        </div>
       </div>
     </article>
   </div>
 </section>
+
+<script>
+(() => {
+  const base = document.body.dataset.apBase || '';
+  const refresh = document.getElementById('apDashboardRefresh');
+  const error = document.getElementById('apDashboardError');
+
+  const setText = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(value);
+  };
+
+  const count = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+
+  const setCheckSummary = (prefix, summary) => {
+    const s = summary && typeof summary === 'object' ? summary : {};
+    setText(prefix + 'Pass', 'Pass ' + count(s.pass));
+    setText(prefix + 'Warn', 'Warn ' + count(s.warn));
+    setText(prefix + 'Fail', 'Fail ' + count(s.fail));
+  };
+
+  const fetchJson = async (path) => {
+    const res = await fetch(base + path, {headers: {'Accept': 'application/json'}, cache: 'no-store'});
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.message || data.error || ('Request failed: ' + path));
+    }
+    return data;
+  };
+
+  const load = async () => {
+    refresh.disabled = true;
+    error.classList.add('d-none');
+    setText('apDashboardGenerated', 'Refreshing…');
+
+    const [statusResult, aiResult] = await Promise.allSettled([
+      fetchJson('/api/live-stats'),
+      fetchJson('/api/ai-assistant')
+    ]);
+
+    if (statusResult.status === 'fulfilled') {
+      const payload = statusResult.value;
+      const summary = payload.summary || {};
+      const core = (payload.data && payload.data.core) || {};
+
+      setText('apDashboardProject', core.project || 'unknown');
+      setText('apDashboardProfiles', 'Profiles: ' + (core.profiles || 'default'));
+      setText('apDashboardContainers', count(summary.running) + ' / ' + count(summary.total));
+      setText('apDashboardHealth', 'Health: ' + count(summary.healthy) + ' healthy · ' + count(summary.unhealthy) + ' unhealthy · ' + count(summary.no_health) + ' unchecked');
+      setText('apDashboardProblems', count(summary.problem_count));
+      setText('apDashboardChecks', 'Project checks: ' + count((summary.project_checks || {}).pass) + ' pass · ' + count((summary.project_checks || {}).fail) + ' fail');
+      setText('apDashboardUrls', count(summary.url_count));
+      setText('apDashboardPorts', 'Published ports: ' + count(summary.port_count));
+      setCheckSummary('apSystem', summary.system_checks);
+      setCheckSummary('apProject', summary.project_checks);
+      setText('apDashboardGenerated', payload.generated_at ? ('Updated ' + payload.generated_at) : 'Updated');
+    } else {
+      error.textContent = 'Stack status unavailable: ' + String(statusResult.reason && statusResult.reason.message ? statusResult.reason.message : statusResult.reason);
+      error.classList.remove('d-none');
+      setText('apDashboardGenerated', 'Status unavailable');
+    }
+
+    const ai = document.getElementById('apDashboardAi');
+    if (aiResult.status === 'fulfilled' && aiResult.value.available) {
+      ai.className = 'badge text-bg-success align-self-start';
+      ai.textContent = 'Available' + (aiResult.value.model ? ' · ' + aiResult.value.model : '');
+    } else {
+      ai.className = 'badge text-bg-secondary align-self-start';
+      ai.textContent = 'Unavailable / optional';
+    }
+
+    refresh.disabled = false;
+  };
+
+  refresh.addEventListener('click', load);
+  load();
+})();
+</script>

@@ -30,6 +30,16 @@ LocalDevStack control-plane and developer toolbox image for:
 
 ---
 
+## 🚢 Release publication
+
+Published GitHub releases are the immutable source for versioned images.
+
+- A GitHub **release published** event builds from that exact release tag, publishes the same immutable tag plus `latest`, and refuses to overwrite an existing version tag.
+- Scheduled/manual refreshes rebuild from the **latest published release source** and update `latest` only, allowing rolling inputs such as `alpine:latest`, mkcert, lazydocker, Toolset, and runtime metadata to refresh without mutating historical version tags.
+- amd64 and arm64 release candidates are built and gated first; the final multi-architecture publish reuses those candidate caches rather than forcing another rolling-base pull.
+- The exact published digest is then re-gated against the LocalDevStack compatibility contract before the workflow is considered successful.
+- Docker Hub and GHCR receive the same multi-architecture image, BuildKit SBOM/provenance, and GitHub/Sigstore attestations.
+
 ## 🚀 Features (what’s included)
 
 ### 1) SSL + local CA automation

@@ -182,6 +182,29 @@ _pick_probe_runtime() {
   printf '|'
 }
 
+_volume_size_bytes() {
+  local vname="${1:-}" targets="${2:-}" helper_image="${3:-}" helper_shell="${4:-}"
+  local target probe_container probe_path out
+  [[ -n "$vname" ]] || { printf '0'; return 0; }
+
+  if [[ -n "$targets" ]]; then
+    while IFS= read -r target; do
+      [[ -n "$target" ]] || continue
+      IFS='|' read -r probe_container probe_path <<<"$target"
+      [[ -n "$probe_container" && -n "$probe_path" ]] || continue
+      out="$(docker exec --user 0 -e AP_MONITOR_PATH="$probe_path" "$probe_container" sh -c 'du -sb "$AP_MONITOR_PATH" 2>/dev/null | awk "NR==1{print \$1}"' 2>/dev/null || true)"
+      [[ "$out" =~ ^[0-9]+$ ]] && { printf '%s' "$out"; return 0; }
+    done <<<"$targets"
+  fi
+
+  if [[ -n "$helper_image" && -n "$helper_shell" ]]; then
+    out="$(docker run --rm --user 0 --entrypoint "$helper_shell" -v "${vname}:/v:ro" "$helper_image" -c 'du -sb /v 2>/dev/null | awk "NR==1{print \$1}"' 2>/dev/null || true)"
+    [[ "$out" =~ ^[0-9]+$ ]] && { printf '%s' "$out"; return 0; }
+  fi
+
+  printf '0'
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -243,7 +266,7 @@ main() {
     mapfile -t cids < <(docker ps -aq --filter "label=com.docker.compose.project=${project}" 2>/dev/null | sed '/^[[:space:]]*$/d')
   fi
 
-  declare -A vol_service=() vol_present=() vol_probe_targets=()
+  declare -A vol_service=() vol_present=() vol_probe_targets=() vol_links=()
   local cid cname crunning service mounts m mname mdest
   for cid in "${cids[@]}"; do
     [[ -n "$cid" ]] || continue
@@ -259,6 +282,7 @@ main() {
       IFS='|' read -r mname mdest <<<"$m"
       [[ -n "$mname" ]] || continue
       vol_present["$mname"]=1
+      vol_links["$mname"]=$((${vol_links[$mname]:-0} + 1))
       if [[ -z "${vol_service[$mname]:-}" ]]; then
         vol_service["$mname"]="$service"
       elif [[ ",${vol_service[$mname]}," != *",$service,"* ]]; then
@@ -274,33 +298,20 @@ main() {
     done <<<"$mounts"
   done
 
-  local raw_df
-  raw_df="$(docker system df -v 2>/dev/null || true)"
-  local -a volume_rows=()
-  mapfile -t volume_rows < <(
-    printf '%s\n' "$raw_df" | awk '
-      BEGIN{sec=0;hdr=0;seen=0}
-      /^Local Volumes space usage:/ {sec=1; next}
-      sec==1 && /^VOLUME NAME[[:space:]]+LINKS[[:space:]]+SIZE/ {hdr=1; next}
-      sec==1 && hdr==1 {
-        if ($0 ~ /^[[:space:]]*$/) {
-          if (seen) exit
-          next
-        }
-        seen=1
-        name=$1; links=$2; size=$3
-        if (name != "" && links ~ /^[0-9]+$/) print name "|" links "|" size
-      }
-    '
-  )
+  local helper_image helper_shell helper_rt
+  helper_rt="$(_pick_probe_runtime "$project")"
+  IFS='|' read -r helper_image helper_shell <<<"$helper_rt"
 
-  if ((${#volume_rows[@]} == 0)); then
-    mapfile -t volume_rows < <(
-      docker volume ls --format '{{.Name}}' 2>/dev/null |
-        sed '/^[[:space:]]*$/d' |
-        awk '{print $1"|0|0B"}'
-    )
-  fi
+  local -a volume_rows=()
+  local scoped_volume scoped_links scoped_size_b scoped_size_h
+  for scoped_volume in "${!vol_present[@]}"; do
+    [[ -n "$scoped_volume" ]] || continue
+    scoped_links="${vol_links[$scoped_volume]:-0}"
+    scoped_size_b="$(_volume_size_bytes "$scoped_volume" "${vol_probe_targets[$scoped_volume]:-}" "$helper_image" "$helper_shell")"
+    scoped_size_b="$(_num_or_default "$scoped_size_b" 0)"
+    scoped_size_h="$(_bytes_human "$scoped_size_b")"
+    volume_rows+=("$scoped_volume|$scoped_links|$scoped_size_h|$scoped_size_b")
+  done
 
   local state_dir history_file
   state_dir="$(_state_dir)"
@@ -344,15 +355,8 @@ main() {
   local -a rows=()
   local row vname links size_h size_b svc delta dt growth_bph eta_h pressure level note
   for row in "${volume_rows[@]}"; do
-    IFS='|' read -r vname links size_h <<<"$row"
+    IFS='|' read -r vname links size_h size_b <<<"$row"
     [[ -n "$vname" ]] || continue
-    if [[ "$project" != "unknown" && -n "$project" ]]; then
-      if [[ -z "${vol_present[$vname]:-}" ]]; then
-        continue
-      fi
-    fi
-
-    size_b="$(_to_bytes "$size_h")"
     size_b="$(_num_or_default "$size_b" 0)"
     svc="${vol_service[$vname]:--}"
     delta=0
@@ -424,10 +428,7 @@ main() {
     mapfile -t sorted < <(printf '%s\n' "${rows[@]}" | sort -t'|' -k5,5nr | head -n "$effective_top_n")
   fi
 
-  # Optional inode scan for biggest volumes.
-  local helper_image helper_shell helper_rt
-  helper_rt="$(_pick_probe_runtime "$project")"
-  IFS='|' read -r helper_image helper_shell <<<"$helper_rt"
+  # Optional inode scan for biggest project volumes.
   if [[ "$effective_inode_top_n" -gt 0 && ${#sorted[@]} -gt 0 ]]; then
     local -a inode_targets=()
     mapfile -t inode_targets < <(printf '%s\n' "${sorted[@]}" | head -n "$effective_inode_top_n")

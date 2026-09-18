@@ -138,6 +138,13 @@ rc=$?
 set -e
 [[ "$rc" -eq 77 ]] || fail "sensitive review input returned $rc instead of 77"
 
+dd if=/dev/zero bs=1000 count=600 2>/dev/null | tr '\000' x >"$tmp/large.txt"
+set +e
+bash "$AIOPS" review --file "$tmp/large.txt" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+[[ "$rc" -eq 65 ]] || fail "oversized review input returned $rc instead of 65"
+
 printf '5/6 repository review is metadata-only\n'
 repo_context="$(cd "$ROOT" && bash "$AIOPS" repo-review --context-only)"
 grep -q '"kind":"repository-metadata"' <<<"$repo_context" || fail 'repo review metadata contract missing'

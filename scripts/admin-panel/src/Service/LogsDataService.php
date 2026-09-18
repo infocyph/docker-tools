@@ -30,7 +30,7 @@ final class LogsDataService
             return;
         }
 
-        $configuredRootsRaw = trim((string)(getenv('LOGVIEW_ROOTS') ?: ''));
+        $configuredRootsRaw = trim((string)(getenv('ADMIN_PANEL_LOG_ROOTS') ?: getenv('LOGVIEW_ROOTS') ?: ''));
         $configuredRoots = array_values(array_filter(
             array_map(static fn(string $v): string => trim($v), explode(':', $configuredRootsRaw)),
             static fn(string $v): bool => $v !== ''

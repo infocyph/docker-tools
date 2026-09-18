@@ -97,6 +97,40 @@ grep -q 'MYSQL_ROOT_PASSWORD' scripts/shells/monitor-db.sh || fail 'MySQL root-o
 grep -q 'POSTGRES_DB:-\$user' scripts/shells/monitor-db.sh || fail 'PostgreSQL default database fallback missing'
 grep -q -- '--authenticationDatabase admin' scripts/shells/monitor-db.sh || fail 'MongoDB explicit authentication database probe missing'
 
+# Every Docker-backed monitor must degrade instead of widening to the host daemon.
+for monitor in \
+  scripts/shells/status.sh \
+  scripts/shells/monitor-db.sh \
+  scripts/shells/monitor-drift.sh \
+  scripts/shells/monitor-flows.sh \
+  scripts/shells/monitor-log-heatmap.sh \
+  scripts/shells/monitor-queue.sh \
+  scripts/shells/monitor-tls.sh \
+  scripts/shells/monitor-volumes.sh; do
+  if grep -Fq "docker ps --format '{{.Label \"com.docker.compose.project\"}}'" "$monitor"; then
+    fail "daemon-wide Compose-project inference remains: $monitor"
+  fi
+  if grep -Fq "docker ps -a --format '{{.Names}}'" "$monitor"; then
+    fail "daemon-wide container-name discovery remains: $monitor"
+  fi
+  if grep -Fq 'docker ps -aq 2>/dev/null' "$monitor"; then
+    fail "daemon-wide container-id discovery remains: $monitor"
+  fi
+  if grep -Fq "docker ps -aq --filter 'label=com.docker.compose.service=server-tools'" "$monitor"; then
+    fail "unscoped server-tools discovery remains: $monitor"
+  fi
+done
+
+grep -q 'project_unresolved' scripts/shells/monitor-volumes.sh || fail 'volume monitor unresolved-project degradation missing'
+grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-drift.sh || fail 'drift monitor project env contract missing'
+grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-flows.sh || fail 'flow monitor project env contract missing'
+grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-log-heatmap.sh || fail 'log heatmap project env contract missing'
+grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-queue.sh || fail 'queue monitor project env contract missing'
+grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-volumes.sh || fail 'volume monitor project env contract missing'
+if grep -Eq '_docker_exec_pref_shell .*redis-cli|redis-cli (ZCARD|ZRANGE|LLEN) .*\$key.*bash -c' scripts/shells/monitor-queue.sh; then
+  fail 'queue monitor interpolates Redis keys into shell commands'
+fi
+
 # TLS user credential material must be explicit and password protected.
 grep -q 'LDS_USER_P12_ENABLED.*:-0' scripts/shells/certify.sh || fail 'user P12 must be disabled by default'
 grep -q 'requires a non-empty LDS_USER_P12_PASSWORD' scripts/shells/certify.sh || fail 'password-protected P12 guard missing'

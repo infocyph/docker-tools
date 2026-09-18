@@ -50,8 +50,21 @@ export LDS_AI_MAX_REQUEST_BYTES=1048576
 export LDS_AI_MAX_RESPONSE_BYTES=2097152
 export LDS_AI_CACHE_DIR="$tmp/cache"
 export LDS_AIOPS_COLLECT_TIMEOUT=2
-export ADMIN_PANEL_AIOPS_BIN="$AIOPS"
-export ADMIN_PANEL_ASKAI_BIN="$ASKAI"
+export AI_ADMIN_AIOPS_TARGET="$AIOPS"
+export AI_ADMIN_ASKAI_TARGET="$ASKAI"
+
+mkdir -p "$tmp/admin-bin"
+cat >"$tmp/admin-bin/aiops" <<'WRAP'
+#!/usr/bin/env bash
+exec bash "$AI_ADMIN_AIOPS_TARGET" "$@"
+WRAP
+cat >"$tmp/admin-bin/askai" <<'WRAP'
+#!/usr/bin/env bash
+exec bash "$AI_ADMIN_ASKAI_TARGET" "$@"
+WRAP
+chmod 700 "$tmp/admin-bin/aiops" "$tmp/admin-bin/askai"
+export ADMIN_PANEL_AIOPS_BIN="$tmp/admin-bin/aiops"
+export ADMIN_PANEL_ASKAI_BIN="$tmp/admin-bin/askai"
 
 for _ in $(seq 1 30); do
   if curl -fsS --connect-timeout 1 --max-time 1 "$LDS_AI_URL/api/tags" >/dev/null 2>&1; then

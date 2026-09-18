@@ -12,6 +12,13 @@ require() {
 }
 
 for expected in \
+  'release:' \
+  'types: [published]' \
+  'workflow_dispatch:' \
+  'RELEASE_TAG="$EVENT_RELEASE_TAG"' \
+  'gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name' \
+  'Check out exact Tools release source' \
+  'ref: ${{ env.RELEASE_TAG }}' \
   'actions/checkout@v7' \
   'docker/setup-qemu-action@v4' \
   'docker/setup-buildx-action@v4' \
@@ -45,6 +52,30 @@ grep -Fq 'bash scripts/tests/release-gate.sh "$image"' "$workflow" || {
 }
 grep -Fq 'docker pull --platform linux/arm64 "$image"' "$workflow" || {
   echo 'published arm64 digest verification missing' >&2
+  exit 1
+}
+grep -Fq 'tools-publish-arm64-' "$workflow" || {
+  echo 'arm64 candidate does not exercise the real Tools lifecycle' >&2
+  exit 1
+}
+grep -Fq 'tools-published-arm64-' "$workflow" || {
+  echo 'published arm64 digest does not exercise the real Tools lifecycle' >&2
+  exit 1
+}
+grep -Fq 'CANDIDATE_ALPINE_VERSION=' "$workflow" || {
+  echo 'candidate rolling-version capture missing' >&2
+  exit 1
+}
+grep -Fq 'dockerhub_image="docker.io/' "$workflow" || {
+  echo 'Docker Hub published digest verification missing' >&2
+  exit 1
+}
+grep -Fq '[[ "$alpine_version" == "$CANDIDATE_ALPINE_VERSION" ]]' "$workflow" || {
+  echo 'candidate/published Alpine parity check missing' >&2
+  exit 1
+}
+grep -Fq '[[ "$gitx_version" == "$CANDIDATE_GITX_VERSION" ]]' "$workflow" || {
+  echo 'candidate/published Toolset gitx parity check missing' >&2
   exit 1
 }
 

@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Base: Alpine](https://img.shields.io/badge/Base-Alpine-brightgreen.svg)](https://alpinelinux.org)
 
-A lightweight, multi-tool Docker image for:
+LocalDevStack control-plane and developer toolbox image for:
 
 - ✅ SSL automation (`mkcert` + `certify`)
 - ✅ Interactive vhost generation (`mkhost`) + templates
@@ -16,6 +16,8 @@ A lightweight, multi-tool Docker image for:
 - ✅ Docker ops + TUI (`docker-cli` + compose + `lazydocker`)
 - ✅ Network diagnostics (`netx`, `dig`, `mtr`, `traceroute`, `nmap`, etc.)
 - ✅ Daily dev/ops utilities (`git`, `jq`, `yq`, `rg`, `fd`, `sqlite`, `shellcheck`, `nano`, etc.)
+- ✅ Privileged LocalDevStack admin panel routed through `https://admin.localhost`
+- ✅ Optional local AI consumer commands (`askai`, `aiops`) backed by the separate `llm-sm` service
 
 ---
 
@@ -82,6 +84,23 @@ A lightweight, multi-tool Docker image for:
   - `/etc/nanorc` is configured to load syntax rules when available
 - `chromacat`, `figlet`, `show-banner` shell hook
 
+### 8) LocalDevStack control plane + admin panel
+- Admin panel remains deterministic first and is intended to be reached through the LocalDevStack Nginx route: `https://admin.localhost`
+- Mutating/sensitive API actions use the stack-scoped admin authorization and same-origin boundary
+- External commands are executed through the bounded PHP `ProcessRunner`
+- Tools health checks only Tools-owned processes; Docker/database/AI availability does not make the container unhealthy
+- Docker-socket operations are expected to stay scoped to the current Compose project rather than unrelated host containers
+
+### 9) Optional local AI consumer
+- `docker-tools` never embeds, starts, pulls, or stores Ollama models
+- The provider/runtime is the separate `docker-llm-sm` service
+- Container-to-container endpoint: `http://llm-sm:11434`
+- User-facing endpoint remains Nginx-owned at `https://llm.localhost`
+- `askai` provides direct prompt/file/stdin access
+- `aiops` explains bounded deterministic diagnostics, reviews explicitly supplied safe files, summarizes repository metadata, and can analyze Graphify output files
+- `gitx ai-commit` is forced to the local Ollama path when enabled; there is no implicit Gemini/external-provider fallback
+- AI output is advisory only and is never auto-executed
+
 ---
 
 ## 🧰 Included commands
@@ -101,13 +120,68 @@ A lightweight, multi-tool Docker image for:
 | `profile-chooser` | Interactive profile+env collector for host-side compose flush |
 | `domain-which` | Resolve app/container/profile/docroot for a domain (supports `--json`) |
 | `es-policy` | Bootstrap/update Elasticsearch ILM + templates + Kibana data views |
-| `gitx` | Git helper CLI |
+| `gitx` | Git helper CLI; AI commit mode is pinned to local Ollama when enabled |
+| `askai` | Direct optional local-LLM client with file/stdin/JSON/stream support |
+| `aiops` | Bounded AI explanations for stack diagnostics, troubleshooting, review, and Graphify output |
 | `chromacat` | Colorized output |
 | `sqlitex` | SQLite helper CLI |
 | `netx` | Networking helper wrapper |
 | `composer` | PHP dependency manager |
 
 ---
+
+## 🤖 Optional local AI
+
+AI is an optional consumer feature. All ordinary Tools/admin/monitor behavior works without `llm-sm`.
+
+Default provider contract:
+
+```text
+LDS_AI_ENABLED=auto
+LDS_AI_PROVIDER=ollama
+LDS_AI_URL=http://llm-sm:11434
+LDS_AI_MODEL=
+```
+
+Useful commands:
+
+```bash
+askai "Explain this error"
+
+# direct safe-file input; secret-looking/private-key/binary files are refused
+askai --file ./nginx.conf "Review this configuration"
+
+# provider status only; no generation
+aiops provider
+
+# deterministic collector -> redacted context -> local model
+aiops explain status
+aiops explain alerts --json
+aiops explain logs --context-only
+aiops troubleshoot --stream
+
+# explicitly supplied review inputs
+aiops review --file ./nginx.conf
+aiops graphify --file ./graphify-output.json
+
+# repository metadata only; it does not implicitly send file/diff contents
+aiops repo-review
+```
+
+AI safety contract:
+
+- provider preflight and generation use separate timeouts;
+- positive/negative availability is cached briefly;
+- context, request, and response bytes are independently bounded;
+- generation is not retried after partial streamed output;
+- multiple installed models require explicit `LDS_AI_MODEL` instead of silently choosing one;
+- known secrets/tokens/credential values are deterministically redacted;
+- `.env`, `.ssh`, private keys, credential/secret files, P12/PFX, and binary inputs are refused for automatic file ingestion;
+- monitor/log/config/repository data is treated as untrusted data inside a fixed prompt boundary;
+- raw prompts/responses are not persisted by default;
+- model output is never executed as shell, SQL, code, or Docker commands.
+
+The Admin Panel exposes an explicit **AI Assistant** page. It performs only a provider availability check on load; analysis starts only after the user presses **Run Analysis**. The response shows the redacted context that was supplied to the provider and can be cancelled/bounded by the UI/server timeout.
 
 ## 📂 Directory layout (recommended)
 
@@ -211,7 +285,9 @@ services:
 Use as:
 
 * one-shot cert generator: `docker run --rm ... infocyph/tools certify`
-* long-lived utility box: default CMD runs `notifierd`
+* long-lived utility/control-plane box: default CMD runs `notifierd`
+
+> Security: mounting `/var/run/docker.sock` gives Tools privileged access to the Docker daemon. LocalDevStack operations should remain scoped to the current Compose project. Do not publish the raw admin port by default; use `https://admin.localhost` through the hardened Nginx route.
 
 ---
 
@@ -734,12 +810,22 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `NOTIFY_FIFO`         | `/run/notify.fifo`                 | internal FIFO path                   |
 | `NOTIFY_PREFIX`       | `__HOST_NOTIFY__`                  | stdout prefix                        |
 | `NOTIFY_TOKEN`        | (empty)                            | optional token auth                  |
-| `LOGVIEW_AUTOSTART`   | `1`                                | start built-in LogViewer on container start |
-| `LOGVIEW_BIND`        | `0.0.0.0`                          | bind address for LogViewer PHP server |
-| `LOGVIEW_PORT`        | `9911`                             | listen port for LogViewer |
-| `LOGVIEW_ROOTS`       | `/global/log`                      | colon-separated log roots for LogViewer |
-| `LOGVIEW_MAX_TAIL_LINES` | `25000`                         | maximum tail lines returned by LogViewer APIs |
-| `LOGVIEW_CACHE_TTL`   | `2`                                | LogViewer cache ttl (seconds) |
+| `ADMIN_PANEL_AUTOSTART` | `1`                              | start the built-in admin panel |
+| `ADMIN_PANEL_BIND`      | `0.0.0.0`                         | internal admin listener bind; do not publish raw host port by default |
+| `ADMIN_PANEL_PORT`      | `9911`                            | internal admin listener used by `admin.localhost` |
+| `ADMIN_PANEL_TOKEN`     | (empty)                            | stack-scoped control token for mutations/sensitive downloads |
+| `LDS_AI_ENABLED`        | `auto`                            | `auto`, `0`, or `1`; AI remains optional |
+| `LDS_AI_PROVIDER`       | `ollama`                          | local provider type |
+| `LDS_AI_URL`            | `http://llm-sm:11434`            | internal provider endpoint |
+| `LDS_AI_MODEL`          | (empty)                            | explicit model override; required when installed-model choice is ambiguous |
+| `LDS_AI_CONNECT_TIMEOUT` | `2`                              | provider connect timeout seconds |
+| `LDS_AI_PREFLIGHT_TIMEOUT` | `5`                            | provider availability/model preflight timeout seconds |
+| `LDS_AI_TIMEOUT`        | `600`                             | CLI generation timeout seconds |
+| `LDS_AI_AVAILABILITY_TTL` | `5`                            | positive/negative availability cache TTL |
+| `LDS_AI_MAX_CONTEXT_BYTES` | `524288`                       | maximum context bytes |
+| `LDS_AI_MAX_REQUEST_BYTES` | `1048576`                      | maximum serialized request bytes |
+| `LDS_AI_MAX_RESPONSE_BYTES` | `2097152`                     | maximum response/stream bytes |
+| `LDS_AIOPS_COLLECT_TIMEOUT` | `15`                          | per deterministic collector timeout used by `aiops` |
 | `SOPS_BASE_DIR`       | `/etc/share/sops`                  | global SOPS base directory           |
 | `SOPS_KEYS_DIR`       | `/etc/share/sops/keys`             | per-project keys directory           |
 | `SOPS_CFG_DIR`        | `/etc/share/sops/config`           | per-project config directory         |

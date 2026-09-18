@@ -1,5 +1,14 @@
 <?php
 declare(strict_types=1);
+
+$dashboardScriptName = (string)($_SERVER['SCRIPT_NAME'] ?? '/index.php');
+$dashboardBasePath = str_replace('\\\\', '/', dirname($dashboardScriptName));
+if ($dashboardBasePath === '.' || $dashboardBasePath === '/') {
+    $dashboardBasePath = '';
+}
+$dashboardRouteHref = static function (string $slug) use ($dashboardBasePath): string {
+    return $dashboardBasePath . '/' . trim($slug, '/');
+};
 ?>
 
 <section class="ap-page-head">
@@ -113,14 +122,14 @@ declare(strict_types=1);
       </header>
       <div class="card-body">
         <div class="list-group list-group-flush">
-          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('live-stats'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-activity me-2"></i>Live Stack Telemetry</a>
-          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('db-health'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-database-check me-2"></i>Database Health</a>
-          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('queue-health'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-list-task me-2"></i>Queue / Cron Health</a>
-          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('tls-monitor'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-shield-lock me-2"></i>TLS / mTLS Monitor</a>
-          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('volume-monitor'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-device-ssd me-2"></i>Volumes / Inodes</a>
-          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('drift-monitor'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-sliders me-2"></i>Configuration Drift</a>
-          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('logs'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-file-earmark-text me-2"></i>File Logs</a>
-          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($routeHref('ai-assistant'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-stars me-2"></i>AI Assistant</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($dashboardRouteHref('live-stats'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-activity me-2"></i>Live Stack Telemetry</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($dashboardRouteHref('db-health'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-database-check me-2"></i>Database Health</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($dashboardRouteHref('queue-health'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-list-task me-2"></i>Queue / Cron Health</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($dashboardRouteHref('tls-monitor'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-shield-lock me-2"></i>TLS / mTLS Monitor</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($dashboardRouteHref('volume-monitor'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-device-ssd me-2"></i>Volumes / Inodes</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($dashboardRouteHref('drift-monitor'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-sliders me-2"></i>Configuration Drift</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($dashboardRouteHref('logs'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-file-earmark-text me-2"></i>File Logs</a>
+          <a class="list-group-item list-group-item-action px-0" href="<?= htmlspecialchars($dashboardRouteHref('ai-assistant'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-stars me-2"></i>AI Assistant</a>
         </div>
       </div>
     </article>

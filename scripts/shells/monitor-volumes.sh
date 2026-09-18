@@ -31,27 +31,6 @@ _infer_project() {
   printf 'unknown'
 }
 
-_to_bytes() {
-  local v="${1:-}"
-  v="${v//,/}"
-  local num unit
-  num="$(printf '%s' "$v" | awk '{gsub(/[^0-9.]/,""); print}')"
-  unit="$(printf '%s' "$v" | awk '{gsub(/[0-9.]/,""); print}')"
-  awk -v n="${num:-0}" -v u="$unit" 'BEGIN{
-    mul=1
-    if(u=="B"||u=="") mul=1
-    else if(u=="kB"||u=="KB") mul=1000
-    else if(u=="MB") mul=1000^2
-    else if(u=="GB") mul=1000^3
-    else if(u=="TB") mul=1000^4
-    else if(u=="KiB") mul=1024
-    else if(u=="MiB") mul=1024^2
-    else if(u=="GiB") mul=1024^3
-    else if(u=="TiB") mul=1024^4
-    printf "%.0f", (n+0)*mul
-  }'
-}
-
 _num_or_default() {
   local v="${1:-}" d="${2:-0}"
   if [[ "$v" =~ ^-?[0-9]+$ ]]; then
@@ -172,7 +151,7 @@ _pick_probe_runtime() {
   local shell image
   for image in "${candidates[@]}"; do
     for shell in bash sh; do
-      if docker run --rm --entrypoint "$shell" "$image" -c 'command -v df >/dev/null 2>&1 && command -v find >/dev/null 2>&1' >/dev/null 2>&1; then
+      if docker run --rm --entrypoint "$shell" "$image" -c 'command -v df >/dev/null 2>&1 && command -v find >/dev/null 2>&1 && command -v du >/dev/null 2>&1 && command -v awk >/dev/null 2>&1' >/dev/null 2>&1; then
         printf '%s|%s' "$image" "$shell"
         return 0
       fi
@@ -192,13 +171,13 @@ _volume_size_bytes() {
       [[ -n "$target" ]] || continue
       IFS='|' read -r probe_container probe_path <<<"$target"
       [[ -n "$probe_container" && -n "$probe_path" ]] || continue
-      out="$(docker exec --user 0 -e AP_MONITOR_PATH="$probe_path" "$probe_container" sh -c 'du -sb "$AP_MONITOR_PATH" 2>/dev/null | awk "NR==1{print \$1}"' 2>/dev/null || true)"
+      out="$(docker exec --user 0 -e AP_MONITOR_PATH="$probe_path" "$probe_container" sh -c 'du -sk "$AP_MONITOR_PATH" 2>/dev/null | awk "NR==1{printf \"%.0f\", \$1 * 1024}"' 2>/dev/null || true)"
       [[ "$out" =~ ^[0-9]+$ ]] && { printf '%s' "$out"; return 0; }
     done <<<"$targets"
   fi
 
   if [[ -n "$helper_image" && -n "$helper_shell" ]]; then
-    out="$(docker run --rm --user 0 --entrypoint "$helper_shell" -v "${vname}:/v:ro" "$helper_image" -c 'du -sb /v 2>/dev/null | awk "NR==1{print \$1}"' 2>/dev/null || true)"
+    out="$(docker run --rm --user 0 --entrypoint "$helper_shell" -v "${vname}:/v:ro" "$helper_image" -c 'du -sk /v 2>/dev/null | awk "NR==1{printf \"%.0f\", \$1 * 1024}"' 2>/dev/null || true)"
     [[ "$out" =~ ^[0-9]+$ ]] && { printf '%s' "$out"; return 0; }
   fi
 

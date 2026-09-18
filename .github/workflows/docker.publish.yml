@@ -193,6 +193,15 @@ jobs:
           no-cache: true
           push: false
           tags: infocyph/tools:publish-candidate
+          build-args: |
+            ALPINE_REF=${{ env.ALPINE_REF }}
+            SCRIPTOMATIC_REF=${{ env.SCRIPTOMATIC_REF }}
+            TOOLSET_RELEASE=${{ env.TOOLSET_RELEASE }}
+            TOOLSET_INSTALLER_SHA256=${{ env.TOOLSET_INSTALLER_SHA256 }}
+            MKCERT_RELEASE=${{ env.MKCERT_RELEASE }}
+            MKCERT_SHA256_AMD64=${{ env.MKCERT_SHA256_AMD64 }}
+            MKCERT_SHA256_ARM64=${{ env.MKCERT_SHA256_ARM64 }}
+            LAZYDOCKER_RELEASE=${{ env.LAZYDOCKER_RELEASE }}
           cache-to: type=gha,scope=publish-candidate-amd64,mode=max
 
       - name: Record candidate upstream resolution
@@ -240,6 +249,15 @@ jobs:
           no-cache: true
           push: false
           tags: infocyph/tools:publish-candidate-arm64
+          build-args: |
+            ALPINE_REF=${{ env.ALPINE_REF }}
+            SCRIPTOMATIC_REF=${{ env.SCRIPTOMATIC_REF }}
+            TOOLSET_RELEASE=${{ env.TOOLSET_RELEASE }}
+            TOOLSET_INSTALLER_SHA256=${{ env.TOOLSET_INSTALLER_SHA256 }}
+            MKCERT_RELEASE=${{ env.MKCERT_RELEASE }}
+            MKCERT_SHA256_AMD64=${{ env.MKCERT_SHA256_AMD64 }}
+            MKCERT_SHA256_ARM64=${{ env.MKCERT_SHA256_ARM64 }}
+            LAZYDOCKER_RELEASE=${{ env.LAZYDOCKER_RELEASE }}
           cache-to: type=gha,scope=publish-candidate-arm64,mode=max
 
       - name: Final arm64 release-candidate gate
@@ -336,6 +354,15 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ALPINE_REF=${{ env.ALPINE_REF }}
+            SCRIPTOMATIC_REF=${{ env.SCRIPTOMATIC_REF }}
+            TOOLSET_RELEASE=${{ env.TOOLSET_RELEASE }}
+            TOOLSET_INSTALLER_SHA256=${{ env.TOOLSET_INSTALLER_SHA256 }}
+            MKCERT_RELEASE=${{ env.MKCERT_RELEASE }}
+            MKCERT_SHA256_AMD64=${{ env.MKCERT_SHA256_AMD64 }}
+            MKCERT_SHA256_ARM64=${{ env.MKCERT_SHA256_ARM64 }}
+            LAZYDOCKER_RELEASE=${{ env.LAZYDOCKER_RELEASE }}
           cache-from: |
             type=gha,scope=publish-candidate-amd64
             type=gha,scope=publish-candidate-arm64

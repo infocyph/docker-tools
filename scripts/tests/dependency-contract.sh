@@ -50,6 +50,7 @@ assert_present 'WORKDIR /app' Dockerfile
 assert_present 'STOPSIGNAL SIGTERM' Dockerfile
 assert_present 'ENTRYPOINT \["/usr/local/bin/entrypoint"\]' Dockerfile
 assert_present 'CMD \["/usr/local/bin/notifierd"\]' Dockerfile
+assert_present 'NOTIFY_TOKEN=""' Dockerfile
 assert_present 'CMD \["/usr/local/bin/tools-healthcheck"\]' Dockerfile
 
 ripgrep_count="$(grep -oE '(^|[[:space:]])ripgrep([[:space:]\\]|$)' Dockerfile | wc -l | tr -d ' ')"

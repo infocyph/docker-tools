@@ -113,6 +113,8 @@ for monitor in \
   scripts/shells/monitor-flows.sh \
   scripts/shells/monitor-log-heatmap.sh \
   scripts/shells/monitor-queue.sh \
+  scripts/shells/monitor-runtime.sh \
+  scripts/shells/monitor-slo.sh \
   scripts/shells/monitor-tls.sh \
   scripts/shells/monitor-volumes.sh; do
   if grep -Fq "docker ps --format '{{.Label \"com.docker.compose.project\"}}'" "$monitor"; then
@@ -134,6 +136,8 @@ grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-drift.sh || fail 'drift mon
 grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-flows.sh || fail 'flow monitor project env contract missing'
 grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-log-heatmap.sh || fail 'log heatmap project env contract missing'
 grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-queue.sh || fail 'queue monitor project env contract missing'
+grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-runtime.sh || fail 'runtime monitor project env contract missing'
+grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-slo.sh || fail 'SLO monitor project env contract missing'
 grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-volumes.sh || fail 'volume monitor project env contract missing'
 if grep -Eq '_docker_exec_pref_shell .*redis-cli|redis-cli (ZCARD|ZRANGE|LLEN) .*\$key.*bash -c' scripts/shells/monitor-queue.sh; then
   fail 'queue monitor interpolates Redis keys into shell commands'

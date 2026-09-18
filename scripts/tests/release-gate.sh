@@ -32,6 +32,10 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   test -x /usr/local/bin/lazydocker
   test -x /usr/local/bin/composer
   test -x /usr/local/bin/gitx
+  test -x /usr/local/bin/askai
+  test -x /usr/local/bin/aiops
+  test -r "$LDS_AI_PROVIDER_LIB"
+  test "$LDS_AI_URL" = "http://llm-sm:11434"
   test -x /usr/local/bin/chromacat
   test -x /usr/local/bin/sqlitex
   test -x /usr/local/bin/netx
@@ -42,6 +46,8 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   lazydocker --version >/dev/null
   composer --version --no-ansi >/dev/null
   gitx --version >/dev/null
+  askai --help >/dev/null
+  aiops --help >/dev/null
   chromacat --version >/dev/null
   sqlitex --version >/dev/null
   netx --version >/dev/null
@@ -56,7 +62,8 @@ trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 
 docker run -d --name "$name" "$IMAGE" >/dev/null
 for _ in $(seq 1 30); do
-  if docker exec "$name" sh -lc 'wget -qO- http://127.0.0.1:9911/ >/dev/null && tr "\0" " " </proc/1/cmdline | grep -q notifierd'; then
+  if docker exec "$name" tools-healthcheck >/dev/null 2>&1 \
+    && docker exec "$name" sh -lc 'wget -qO- http://127.0.0.1:9911/ >/dev/null && tr "\0" " " </proc/1/cmdline | grep -q notifierd'; then
     echo 'release gate: ok'
     exit 0
   fi

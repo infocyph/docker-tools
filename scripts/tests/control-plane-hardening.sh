@@ -132,6 +132,10 @@ for monitor in \
 done
 
 grep -q 'project_unresolved' scripts/shells/monitor-volumes.sh || fail 'volume monitor unresolved-project degradation missing'
+if grep -Fq 'docker system df -v' scripts/shells/monitor-volumes.sh || grep -Fq 'docker volume ls' scripts/shells/monitor-volumes.sh; then
+  fail 'volume monitor still reads daemon-wide volume metadata'
+fi
+grep -q '_volume_size_bytes' scripts/shells/monitor-volumes.sh || fail 'project-scoped volume size probe missing'
 grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-drift.sh || fail 'drift monitor project env contract missing'
 grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-flows.sh || fail 'flow monitor project env contract missing'
 grep -q 'LDS_COMPOSE_PROJECT' scripts/shells/monitor-log-heatmap.sh || fail 'log heatmap project env contract missing'

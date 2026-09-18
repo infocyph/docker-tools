@@ -45,7 +45,7 @@ for expected in \
   'PUBLISH_RELEASE_TAG=false' \
   'Enforce immutable release tags' \
   'scripts/tests/release-gate.sh' \
-  'Gate published image digest'; do
+  'Verify and summarize published image'; do
   require "$expected"
 done
 
@@ -55,24 +55,16 @@ publish_block="$(awk '
   in_block { print }
   /- name: Generate Docker Hub provenance attestation/ { exit }
 ' "$workflow")"
-grep -Fq 'pull: false' <<<"$publish_block" || {
-  echo 'final publish build must reuse tested candidate caches without forcing another rolling base pull' >&2
+grep -Fq 'pull: true' <<<"$publish_block" || {
+  echo 'final multi-architecture publish must follow docker-runner and pull pinned bases' >&2
   exit 1
 }
-grep -Fq 'bash scripts/tests/release-gate.sh "$image"' "$workflow" || {
-  echo 'published amd64 digest is not re-gated' >&2
+if grep -Fq 'Gate published image digest' "$workflow"; then
+  echo 'publish workflow must not add a second post-push runtime gate after Runner-style verification' >&2
   exit 1
-}
-grep -Fq 'docker pull --platform linux/arm64 "$image"' "$workflow" || {
-  echo 'published arm64 digest verification missing' >&2
-  exit 1
-}
+fi
 grep -Fq 'tools-publish-arm64-' "$workflow" || {
   echo 'arm64 candidate does not exercise the real Tools lifecycle' >&2
-  exit 1
-}
-grep -Fq 'tools-published-arm64-' "$workflow" || {
-  echo 'published arm64 digest does not exercise the real Tools lifecycle' >&2
   exit 1
 }
 grep -Fq 'CANDIDATE_ALPINE_VERSION=' "$workflow" || {

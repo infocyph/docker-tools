@@ -16,12 +16,21 @@ for expected in \
   'types: [published]' \
   'workflow_dispatch:' \
   'RELEASE_TAG="$EVENT_RELEASE_TAG"' \
-  'gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name' \
+  'EVENT_RELEASE_PRERELEASE:' \
+  'Stable publish workflow refuses draft/prerelease releases.' \
+  'release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest")"' \
   'Check out exact Tools release source' \
   'ref: ${{ env.RELEASE_TAG }}' \
   'actions/checkout@v7' \
   'docker/setup-qemu-action@v4' \
   'docker/setup-buildx-action@v4' \
+  'Snapshot rolling upstream inputs' \
+  'ALPINE_REF=alpine:latest@${ALPINE_DIGEST}' \
+  'SCRIPTOMATIC_REF="$(retry get_scriptomatic_sha)"' \
+  'TOOLSET_INSTALLER_SHA256=' \
+  'MKCERT_SHA256_AMD64=' \
+  'MKCERT_SHA256_ARM64=' \
+  'Generated template runtime compatibility' \
   'docker/login-action@v4' \
   'docker/metadata-action@v6' \
   'docker/build-push-action@v7' \
@@ -78,6 +87,18 @@ grep -Fq '[[ "$gitx_version" == "$CANDIDATE_GITX_VERSION" ]]' "$workflow" || {
   echo 'candidate/published Toolset gitx parity check missing' >&2
   exit 1
 }
+grep -Fq '[[ "$composer_version" == "$CANDIDATE_COMPOSER_VERSION" ]]' "$workflow" || {
+  echo 'candidate/published Composer parity check missing' >&2
+  exit 1
+}
+grep -Fq '[[ "$runtime_generated_at" == "$CANDIDATE_RUNTIME_GENERATED_AT" ]]' "$workflow" || {
+  echo 'candidate/published runtime metadata parity check missing' >&2
+  exit 1
+}
+grep -Fq '[[ "$banner_sha256" == "$CANDIDATE_BANNER_SHA256" ]]' "$workflow" || {
+  echo 'candidate/published Scriptomatic banner parity check missing' >&2
+  exit 1
+}
 
 if grep -Eq 'actions/checkout@v[1-6]([^0-9]|$)|docker/build-push-action@v[1-6]([^0-9]|$)|docker/login-action@v[1-3]([^0-9]|$)|docker/metadata-action@v[1-5]([^0-9]|$)' "$workflow"; then
   echo 'publish workflow contains a superseded action major' >&2
@@ -94,6 +115,14 @@ grep -Fq 'aiops --help' scripts/tests/release-gate.sh || {
 }
 grep -Fq 'tools-healthcheck' scripts/tests/release-gate.sh || {
   echo 'release gate does not use the Tools-owned health contract' >&2
+  exit 1
+}
+grep -Fq 'bash scripts/tests/template-abi-contract.sh' .github/workflows/check.yml || {
+  echo 'static template ABI contract is not executed by CI' >&2
+  exit 1
+}
+grep -Fq 'bash scripts/tests/template-runtime-smoke.sh' .github/workflows/check.yml || {
+  echo 'runtime template ABI smoke is not executed by CI' >&2
   exit 1
 }
 

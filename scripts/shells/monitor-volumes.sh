@@ -16,29 +16,19 @@ _json_escape() {
 }
 
 _infer_project() {
-  if [[ -n "${STATUS_PROJECT:-}" ]]; then
-    printf '%s' "$STATUS_PROJECT"
-    return 0
-  fi
-  if ! _has docker; then
-    printf 'unknown'
-    return 0
-  fi
-
   local p
-  p="$(
-    docker ps --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null |
-      sed '/^[[:space:]]*$/d' |
-      sort |
-      uniq -c |
-      sort -nr |
-      awk 'NR==1{print $2}'
-  )"
-  if [[ -z "$p" ]]; then
-    printf 'unknown'
-  else
-    printf '%s' "$p"
+  for p in "${STATUS_PROJECT:-}" "${LDS_COMPOSE_PROJECT:-}" "${COMPOSE_PROJECT_NAME:-}"; do
+    if [[ -n "$p" && "$p" != "unknown" ]]; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+  if _has docker; then
+    p="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' SERVER_TOOLS 2>/dev/null || true)"
+    [[ "$p" == "<no value>" ]] && p=""
+    [[ -n "$p" ]] && { printf '%s' "$p"; return 0; }
   fi
+  printf 'unknown'
 }
 
 _to_bytes() {
@@ -144,37 +134,40 @@ _emit_json_csv_array() {
 }
 
 _helper_image() {
-  local name img
-  for name in SERVER_TOOLS "$(docker ps -q --filter 'label=com.docker.compose.service=server-tools' | head -n1)"; do
-    [[ -n "$name" ]] || continue
-    img="$(docker inspect -f '{{.Config.Image}}' "$name" 2>/dev/null || true)"
-    if [[ -n "$img" ]]; then
-      printf '%s' "$img"
-      return 0
-    fi
-  done
-  img="$(docker ps --format '{{.Image}}' 2>/dev/null | head -n1 || true)"
-  printf '%s' "$img"
+  local project="${1:-}" cid img
+  [[ -n "$project" && "$project" != "unknown" ]] || return 0
+
+  cid="$(docker ps -q \
+    --filter "label=com.docker.compose.project=${project}" \
+    --filter 'label=com.docker.compose.service=server-tools' \
+    2>/dev/null | head -n1 || true)"
+  if [[ -n "$cid" ]]; then
+    img="$(docker inspect -f '{{.Config.Image}}' "$cid" 2>/dev/null || true)"
+    [[ -n "$img" ]] && { printf '%s' "$img"; return 0; }
+  fi
 }
 
 _pick_probe_runtime() {
+  local project="${1:-}"
   local -a candidates=()
   local img
 
-  img="$(_helper_image)"
+  img="$(_helper_image "$project")"
   [[ -n "$img" ]] && candidates+=("$img")
 
   while IFS= read -r img; do
     [[ -n "$img" ]] || continue
     local seen=0 existing
     for existing in "${candidates[@]}"; do
-      if [[ "$existing" == "$img" ]]; then
-        seen=1
-        break
-      fi
+      [[ "$existing" == "$img" ]] && { seen=1; break; }
     done
     ((seen == 0)) && candidates+=("$img")
-  done < <(docker ps --format '{{.Image}}' 2>/dev/null | sed '/^[[:space:]]*$/d')
+  done < <(
+    docker ps \
+      --filter "label=com.docker.compose.project=${project}" \
+      --format '{{.Image}}' 2>/dev/null |
+      sed '/^[[:space:]]*$/d'
+  )
 
   local shell image
   for image in "${candidates[@]}"; do
@@ -235,13 +228,19 @@ main() {
 
   local project
   project="$(_infer_project)"
+  if [[ -z "$project" || "$project" == "unknown" ]]; then
+    if ((json)); then
+      printf '{"ok":false,"error":"project_unresolved","message":"LocalDevStack Compose project could not be determined; host-wide volume discovery is disabled.","generated_at":"%s","project":"unknown","filters":{"top":%d,"inode_top":%d},"summary":{"volumes":0,"pass":0,"warn":0,"fail":0,"inode_scanned":0,"docker_root_free_bytes":-1},"items":[]}\n' \
+        "$(_json_escape "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" "$effective_top_n" "$effective_inode_top_n"
+    else
+      printf 'Volume Monitor | project=unknown volumes=0 degraded=project_unresolved\n'
+    fi
+    return 0
+  fi
 
   local -a cids=()
   if [[ "$project" != "unknown" && -n "$project" ]]; then
     mapfile -t cids < <(docker ps -aq --filter "label=com.docker.compose.project=${project}" 2>/dev/null | sed '/^[[:space:]]*$/d')
-  fi
-  if ((${#cids[@]} == 0)); then
-    mapfile -t cids < <(docker ps -aq 2>/dev/null | sed '/^[[:space:]]*$/d')
   fi
 
   declare -A vol_service=() vol_present=() vol_probe_targets=()
@@ -427,7 +426,7 @@ main() {
 
   # Optional inode scan for biggest volumes.
   local helper_image helper_shell helper_rt
-  helper_rt="$(_pick_probe_runtime)"
+  helper_rt="$(_pick_probe_runtime "$project")"
   IFS='|' read -r helper_image helper_shell <<<"$helper_rt"
   if [[ "$effective_inode_top_n" -gt 0 && ${#sorted[@]} -gt 0 ]]; then
     local -a inode_targets=()

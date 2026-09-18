@@ -63,6 +63,9 @@ jobs:
       - name: Control-plane hardening contracts
         run: bash scripts/tests/control-plane-hardening.sh
 
+      - name: Template ABI static contract
+        run: bash scripts/tests/template-abi-contract.sh
+
       - name: AI architecture contracts
         run: bash scripts/tests/ai-contract.sh
 
@@ -107,6 +110,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
+
+      - name: Generated template runtime compatibility
+        run: bash scripts/tests/template-runtime-smoke.sh
 
       - name: Build amd64 image
         uses: docker/build-push-action@v7

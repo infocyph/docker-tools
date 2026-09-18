@@ -712,6 +712,22 @@ _status_show_disk() {
   docker system df
 }
 
+_status_project_volume_size_rows() {
+  _has monitor-volumes || return 0
+  _has jq || return 0
+
+  local payload
+  payload="$(MONITOR_VOLUMES_MAX_ROWS=1000 monitor-volumes --json --skip-inodes 2>/dev/null || true)"
+  [[ -n "$payload" ]] || return 0
+  printf '%s' "$payload" | jq -r '
+    if .ok == true then
+      .items[]? | [.volume, (.size // "-")] | @tsv
+    else
+      empty
+    end
+  ' 2>/dev/null || true
+}
+
 _status_show_volumes() {
   local project
   project="$(lds_project)"
@@ -739,6 +755,13 @@ _status_show_volumes() {
     return 0
   fi
 
+  declare -A vol_size=()
+  local size_name size_value
+  while IFS=$'\t' read -r size_name size_value; do
+    [[ -n "$size_name" ]] || continue
+    vol_size["$size_name"]="${size_value:--}"
+  done < <(_status_project_volume_size_rows)
+
   local -a rows=()
   mapfile -t rows < <(docker volume inspect -f '{{.Name}}|{{.Driver}}' "${vols[@]}" 2>/dev/null | sed '/^[[:space:]]*$/d')
   if ((${#rows[@]} == 0)); then
@@ -755,19 +778,25 @@ _status_show_volumes() {
   ((w_name > 40)) && w_name=40
   ((w_drv > 12)) && w_drv=12
 
-  printf "  %b%-*s%b  %b%-*s%b\n" \
+  printf "  %b%-*s%b  %b%-*s%b  %b%s%b\n" \
     "$BOLD" "$w_name" "NAME" "$NC" \
-    "$BOLD" "$w_drv" "DRIVER" "$NC"
+    "$BOLD" "$w_drv" "DRIVER" "$NC" \
+    "$BOLD" "SIZE" "$NC"
 
+  local any_size=0 sz
   for line in "${rows[@]}"; do
     IFS='|' read -r name drv <<<"$line"
     local n_disp="$name" d_disp="$drv"
     if ((${#n_disp} > w_name)); then n_disp="${n_disp:0:w_name-3}..."; fi
     if ((${#d_disp} > w_drv)); then d_disp="${d_disp:0:w_drv-3}..."; fi
-    printf "  %-*s  %-*s\n" "$w_name" "$n_disp" "$w_drv" "${d_disp:-'-'}"
+    sz="${vol_size[$name]:--}"
+    [[ "$sz" != "-" ]] && any_size=1
+    printf "  %-*s  %-*s  %s\n" "$w_name" "$n_disp" "$w_drv" "${d_disp:-'-'}" "$sz"
   done
 
-  printf "\n  %bSize/inode details:%b use monitor-volumes (project-scoped)\n" "$DIM" "$NC"
+  if ((any_size == 0)); then
+    printf "\n  %bNote:%b project-scoped volume sizes unavailable\n" "$YELLOW" "$NC"
+  fi
 }
 
 _status_show_networks() {
@@ -1643,27 +1672,44 @@ _status_json_volumes() {
     mapfile -t vols < <(printf "%s\n" "${vols[@]}" | awk '!seen[$0]++')
   fi
 
+  declare -A vol_size=()
+  local size_name size_value
+  while IFS=$'\t' read -r size_name size_value; do
+    [[ -n "$size_name" ]] || continue
+    vol_size["$size_name"]="${size_value:--}"
+  done < <(_status_project_volume_size_rows)
+
   local -a rows=()
   if ((${#vols[@]})); then
     mapfile -t rows < <(docker volume inspect -f '{{.Name}}|{{.Driver}}' "${vols[@]}" 2>/dev/null | sed '/^[[:space:]]*$/d')
   fi
 
+  local any_size=0
   printf '{"items":['
-  local first=1 line name drv
+  local first=1 line name drv sz
   for line in "${rows[@]}"; do
     IFS='|' read -r name drv <<<"$line"
     [[ -n "$name" ]] || continue
+    sz="${vol_size[$name]:--}"
+    [[ "$sz" != "-" ]] && any_size=1
     ((first)) || printf ","
     first=0
     printf '{'
     printf '"name":"%s",' "$(_json_escape "$name")"
     printf '"driver":"%s",' "$(_json_escape "${drv:--}")"
-    printf '"size":"-"'
+    printf '"size":"%s"' "$(_json_escape "$sz")"
     printf '}'
   done
   printf '],'
-  printf '"size_table_available":false,'
-  printf '"note":"%s"' "$(_json_escape "Use monitor-volumes for project-scoped size and inode details.")"
+  printf '"size_table_available":'
+  if ((any_size)); then
+    printf 'true'
+  else
+    printf 'false'
+    if ((${#rows[@]} > 0)); then
+      printf ',"note":"%s"' "$(_json_escape "Project-scoped volume sizes unavailable.")"
+    fi
+  fi
   printf '}'
 }
 

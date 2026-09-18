@@ -256,6 +256,17 @@ jobs:
           docker exec "$name" bash -c 'test "$LDS_AI_ENABLED" = auto && ! askai --status >/dev/null 2>&1'
           docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
 
+      - name: Checkout LocalDevStack main
+        uses: actions/checkout@v7
+        with:
+          repository: infocyph/LocalDevStack
+          ref: main
+          path: .localdevstack
+          persist-credentials: false
+
+      - name: Final Tools release gate
+        run: bash scripts/tests/release-gate.sh infocyph/tools:ci .localdevstack/docker/compose/companion.yaml
+
   arm64:
     name: arm64 image smoke
     needs: static

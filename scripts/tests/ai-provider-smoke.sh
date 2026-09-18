@@ -63,7 +63,20 @@ ai_available || fail 'single-model provider should be available'
 [[ "$(ai_model)" == 'qwen2.5:3b' ]] || fail 'single installed model was not selected'
 
 printf '2/10 redaction + untrusted-data boundary\n'
-context=
+context="$(cat <<'EOF'
+DB_PASSWORD=hunter2
+Authorization: Bearer bearer-secret
+https://user:pass@example.test/path
+postgresql://dbuser:pg-secret@db/app
+redis://:redis-secret@redis:6379/0
+mongodb+srv://mongo:mongo-secret@cluster/app
+amqps://mq:mq-secret@broker/vhost
+{"api_key":"json-secret"}
+-----BEGIN PRIVATE KEY-----
+private-secret
+-----END PRIVATE KEY-----
+EOF
+)"
 [[ "$(ai_generate_context 'Explain this diagnostic.' "$context")" == ok ]] || fail 'context generation failed'
 request_json="$(tail -n 1 "$capture_file" | base64 -d)"
 for secret in hunter2 bearer-secret user:pass pg-secret redis-secret mongo-secret mq-secret json-secret private-secret; do

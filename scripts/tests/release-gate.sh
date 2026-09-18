@@ -94,10 +94,12 @@ name="tools-release-gate-${RANDOM}"
 trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 
 docker run -d --name "$name" "$IMAGE" >/dev/null
-docker exec "$name" sh -lc 'tr "\0" "\n" </proc/1/environ | grep -qx "NOTIFY_TOKEN="' || fail 'entrypoint notifier token default missing'
+
 for _ in $(seq 1 30); do
   if docker exec "$name" tools-healthcheck >/dev/null 2>&1 \
-    && docker exec "$name" sh -lc 'wget -qO- http://127.0.0.1:9911/ >/dev/null && tr "\0" " " </proc/1/cmdline | grep -q notifierd'; then
+    && docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd' \
+    && docker exec "$name" sh -lc 'tr "\0" "\n" </proc/1/environ | grep -qx "NOTIFY_TOKEN="' \
+    && docker exec "$name" sh -lc 'wget -qO- http://127.0.0.1:9911/ >/dev/null'; then
     echo 'release gate: ok'
     exit 0
   fi
@@ -105,4 +107,4 @@ for _ in $(seq 1 30); do
 done
 
 docker logs "$name" >&2 || true
-fail 'container/admin-panel startup smoke did not become ready'
+fail 'container runtime did not reach the full release-ready state'

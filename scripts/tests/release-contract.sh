@@ -143,4 +143,17 @@ grep -Fq 'bash scripts/tests/template-runtime-smoke.sh' .github/workflows/check.
   exit 1
 }
 
+grep -Fq 'repository: infocyph/LocalDevStack' .github/workflows/check.yml || {
+  echo 'normal CI does not check out LocalDevStack for the final release gate' >&2
+  exit 1
+}
+grep -Fq 'bash scripts/tests/release-gate.sh infocyph/tools:ci .localdevstack/docker/compose/companion.yaml' .github/workflows/check.yml || {
+  echo 'normal amd64 CI does not execute the exact Tools release gate' >&2
+  exit 1
+}
+grep -Fq 'docker exec "$name" tools-healthcheck >/dev/null 2>&1 \' scripts/tests/release-gate.sh || {
+  echo 'release gate does not wait on Tools health before runtime assertions' >&2
+  exit 1
+}
+
 echo 'release contracts: ok'

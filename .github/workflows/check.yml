@@ -54,6 +54,9 @@ jobs:
       - name: Dependency and architecture contracts
         run: bash scripts/tests/dependency-contract.sh
 
+      - name: Baseline feature parity contracts
+        run: bash scripts/tests/feature-parity-contract.sh
+
       - name: Publication contracts
         run: bash scripts/tests/release-contract.sh
 

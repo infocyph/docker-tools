@@ -1,11 +1,16 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: fetch native tools + Composer + runtime versions metadata
 # ─────────────────────────────────────────────────────────────────────────────
-FROM alpine:latest AS fetch
+ARG ALPINE_REF=alpine:latest
+FROM ${ALPINE_REF} AS fetch
 SHELL ["/bin/sh", "-euo", "pipefail", "-c"]
 
 ARG TARGETOS=linux
 ARG TARGETARCH
+ARG MKCERT_RELEASE=latest
+ARG MKCERT_SHA256_AMD64=
+ARG MKCERT_SHA256_ARM64=
+ARG LAZYDOCKER_RELEASE=latest
 
 ENV DIR=/usr/local/bin
 
@@ -17,14 +22,29 @@ RUN apk add --no-cache curl bash ca-certificates jq file php php-phar php-common
        linux/amd64|linux/arm64) ;; \
        *) echo "Unsupported target: ${TARGETOS}/${TARGETARCH}" >&2; exit 1 ;; \
      esac \
+  && case "$TARGETARCH" in \
+       amd64) mkcert_checksum="$MKCERT_SHA256_AMD64" ;; \
+       arm64) mkcert_checksum="$MKCERT_SHA256_ARM64" ;; \
+     esac \
+  && if [ "$MKCERT_RELEASE" = latest ]; then \
+       mkcert_url="https://dl.filippo.io/mkcert/latest?for=${TARGETOS}/${TARGETARCH}"; \
+     else \
+       mkcert_url="https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_RELEASE}/mkcert-${MKCERT_RELEASE}-${TARGETOS}-${TARGETARCH}"; \
+     fi \
   && curl -fsSJL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 \
-       -o /out/mkcert "https://dl.filippo.io/mkcert/latest?for=${TARGETOS}/${TARGETARCH}" \
+       -o /out/mkcert "$mkcert_url" \
   && test -s /out/mkcert \
+  && if [ -n "$mkcert_checksum" ]; then printf '%s  %s\n' "$mkcert_checksum" /out/mkcert | sha256sum -c -; fi \
   && chmod +x /out/mkcert \
   && file /out/mkcert | grep -q 'ELF' \
   && /out/mkcert -version \
   && tmp="$(mktemp -d)" \
-  && release_json="$(curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 https://api.github.com/repos/jesseduffield/lazydocker/releases/latest)" \
+  && if [ "$LAZYDOCKER_RELEASE" = latest ]; then \
+       lazy_release_api="https://api.github.com/repos/jesseduffield/lazydocker/releases/latest"; \
+     else \
+       lazy_release_api="https://api.github.com/repos/jesseduffield/lazydocker/releases/tags/${LAZYDOCKER_RELEASE}"; \
+     fi \
+  && release_json="$(curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 "$lazy_release_api")" \
   && lazy_tag="$(printf '%s' "$release_json" | jq -er '.tag_name')" \
   && lazy_version="${lazy_tag#v}" \
   && case "$TARGETARCH" in amd64) lazy_arch=x86_64 ;; arm64) lazy_arch=arm64 ;; esac \
@@ -144,9 +164,11 @@ SH
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: runtime/tools image
 # ─────────────────────────────────────────────────────────────────────────────
-FROM alpine:latest
+FROM ${ALPINE_REF}
 
 ARG SCRIPTOMATIC_REF=main
+ARG TOOLSET_RELEASE=latest
+ARG TOOLSET_INSTALLER_SHA256=
 
 LABEL org.opencontainers.image.source="https://github.com/infocyph/docker-tools"
 LABEL org.opencontainers.image.description="Tools"
@@ -282,11 +304,20 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
       -o /usr/local/bin/show-banner \
   && test -s /usr/local/bin/show-banner \
   && bash -n /usr/local/bin/show-banner \
-  && curl -fsSLo /tmp/toolset-install.sh \
-      "https://github.com/infocyph/Toolset/releases/latest/download/install.sh" \
+  && if [ "$TOOLSET_RELEASE" = latest ]; then \
+       toolset_installer_url="https://github.com/infocyph/Toolset/releases/latest/download/install.sh"; \
+     else \
+       toolset_installer_url="https://github.com/infocyph/Toolset/releases/download/${TOOLSET_RELEASE}/install.sh"; \
+     fi \
+  && curl -fsSLo /tmp/toolset-install.sh "$toolset_installer_url" \
   && test -s /tmp/toolset-install.sh \
+  && if [ -n "$TOOLSET_INSTALLER_SHA256" ]; then printf '%s  %s\n' "$TOOLSET_INSTALLER_SHA256" /tmp/toolset-install.sh | sha256sum -c -; fi \
   && bash -n /tmp/toolset-install.sh \
-  && bash /tmp/toolset-install.sh --prefix /usr/local/bin gitx chromacat sqlitex netx \
+  && if [ "$TOOLSET_RELEASE" = latest ]; then \
+       bash /tmp/toolset-install.sh --latest --prefix /usr/local/bin gitx chromacat sqlitex netx; \
+     else \
+       bash /tmp/toolset-install.sh --release "$TOOLSET_RELEASE" --prefix /usr/local/bin gitx chromacat sqlitex netx; \
+     fi \
   && /usr/local/bin/gitx --version \
   && chromacat --version \
   && sqlitex --version \

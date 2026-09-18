@@ -72,42 +72,13 @@ _normalize_label_value() {
 }
 
 _detect_project_from_containers() {
-  local p cid
-
+  local p
   p="$(_normalize_label_value "$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' SERVER_TOOLS 2>/dev/null || true)")"
-  [[ -n "$p" ]] && {
-    printf "%s" "$p"
-    return 0
-  }
-
-  cid="$(docker ps -aq --filter 'label=com.docker.compose.service=server-tools' 2>/dev/null | head -n1 || true)"
-  if [[ -n "$cid" ]]; then
-    p="$(_normalize_label_value "$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$cid" 2>/dev/null || true)")"
-    [[ -n "$p" ]] && {
-      printf "%s" "$p"
-      return 0
-    }
-  fi
-
-  p="$(docker ps -a --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null |
-    sed '/^[[:space:]]*$/d' |
-    sort |
-    uniq -c |
-    sort -nr |
-    awk 'NR==1{print $2}')"
   printf "%s" "${p:-}"
 }
 
 _project_name_from_server_tools() {
-  local cid line
-  for cid in SERVER_TOOLS "$(docker ps -aq --filter 'label=com.docker.compose.service=server-tools' 2>/dev/null | head -n1 || true)"; do
-    [[ -n "$cid" ]] || continue
-    while IFS= read -r line; do
-      [[ "$line" == "COMPOSE_PROJECT_NAME="* ]] || continue
-      printf "%s" "${line#*=}"
-      return 0
-    done < <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null || true)
-  done
+  _detect_project_from_containers
 }
 
 _detect_workdir_from_containers() {
@@ -491,24 +462,26 @@ _status_project_names() {
   docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Names}}' 2>/dev/null | sed '/^[[:space:]]*$/d' || true
 }
 
-_container_env_value() {
-  local cid="${1:-}" key="${2:-}" line
-  [[ -n "$cid" && -n "$key" ]] || return 0
-  while IFS= read -r line; do
-    [[ "$line" == "$key="* ]] || continue
-    printf "%s" "${line#*=}"
-    return 0
-  done < <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null || true)
+_server_tools_cid() {
+  local project
+  project="$(lds_project)"
+  [[ -n "$project" && "$project" != "unknown" ]] || return 0
+  docker ps -aq \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter 'label=com.docker.compose.service=server-tools' \
+    2>/dev/null | head -n1 || true
 }
 
 _profiles_from_server_tools() {
-  local cid
-  cid="$(docker ps -aq --filter 'name=SERVER_TOOLS' 2>/dev/null | head -n1 || true)"
-  if [[ -z "$cid" ]]; then
-    cid="$(docker ps -aq --filter 'label=com.docker.compose.service=server-tools' 2>/dev/null | head -n1 || true)"
+  if [[ -n "${COMPOSE_PROFILES:-}" ]]; then
+    printf "%s" "$COMPOSE_PROFILES"
+    return 0
   fi
+
+  local cid
+  cid="$(_server_tools_cid)"
   [[ -n "$cid" ]] || return 0
-  _container_env_value "$cid" "COMPOSE_PROFILES"
+  docker exec "$cid" sh -c 'printf "%s" "${COMPOSE_PROFILES:-}"' 2>/dev/null || true
 }
 
 _status_running_names() {
@@ -952,14 +925,13 @@ _status_urls() {
   fi
 
   if _has docker; then
-    for n in SERVER_TOOLS "$(docker ps -aq --filter 'label=com.docker.compose.service=server-tools' 2>/dev/null | head -n1 || true)"; do
-      [[ -n "$n" ]] || continue
+    n="$(_server_tools_cid)"
+    if [[ -n "$n" ]]; then
       while IFS= read -r d; do
         _is_valid_domain_name "$d" || continue
         urls_tools+=("https://$d")
       done < <(docker exec "$n" domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
-      ((${#urls_tools[@]})) && break
-    done
+    fi
   fi
 
   if ((${#urls_tools[@]} > ${#urls_local[@]})); then

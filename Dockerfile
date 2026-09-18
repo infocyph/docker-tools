@@ -160,6 +160,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     NOTIFY_FIFO=/run/notify.fifo \
     NOTIFY_TCP_PORT=9901 \
     NOTIFY_PREFIX=__HOST_NOTIFY__ \
+    NOTIFY_TOKEN="" \
     RUNTIME_VERSIONS_DB=/etc/share/runtime-versions.json \
     LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8 \

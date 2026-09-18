@@ -25,7 +25,7 @@ for expected in \
   'docker/setup-qemu-action@v4' \
   'docker/setup-buildx-action@v4' \
   'Snapshot rolling upstream inputs' \
-  'ALPINE_REF=alpine:latest@${ALPINE_DIGEST}' \
+  'ALPINE_REF="alpine:latest@${ALPINE_DIGEST}"' \
   'SCRIPTOMATIC_REF="$(retry get_scriptomatic_sha)"' \
   'TOOLSET_INSTALLER_SHA256=' \
   'MKCERT_SHA256_AMD64=' \

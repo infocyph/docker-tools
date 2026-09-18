@@ -134,7 +134,9 @@ done
 if grep -Fq 'docker system df -v' scripts/shells/status.sh; then
   fail 'status project volume view still reads daemon-wide detailed volume metadata'
 fi
-grep -q 'Use monitor-volumes for project-scoped size and inode details' scripts/shells/status.sh || fail 'status volume scope handoff missing'
+grep -q '_status_project_volume_size_rows' scripts/shells/status.sh || fail 'status project-scoped volume size helper missing'
+grep -q 'monitor-volumes --json --skip-inodes' scripts/shells/status.sh || fail 'status does not preserve volume sizes through scoped monitor'
+grep -q -- '--skip-inodes' scripts/shells/monitor-volumes.sh || fail 'lightweight scoped volume-size mode missing'
 grep -q 'project_unresolved' scripts/shells/monitor-volumes.sh || fail 'volume monitor unresolved-project degradation missing'
 if grep -Fq 'docker system df -v' scripts/shells/monitor-volumes.sh || grep -Fq 'docker volume ls' scripts/shells/monitor-volumes.sh; then
   fail 'volume monitor still reads daemon-wide volume metadata'

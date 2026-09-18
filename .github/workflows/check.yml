@@ -27,7 +27,7 @@ jobs:
       - name: Install static-check dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends shellcheck php-cli jq
+          sudo apt-get install -y --no-install-recommends shellcheck php-cli jq ripgrep
 
       - name: Validate shell syntax
         run: |

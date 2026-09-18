@@ -74,6 +74,8 @@ done
 # Preserve user-facing CLI forms/options from main.
 grep -Fq 'status [--json] [--quiet] [service]' scripts/shells/status.sh || fail 'status primary CLI contract missing'
 grep -Fq 'status --docker-logs-json [--service <svc>] [--since <dur>] [--grep <text>] [--tail <n>]' scripts/shells/status.sh || fail 'status Docker-log CLI contract missing'
+grep -Fq '_status_project_volume_size_rows' scripts/shells/status.sh || fail 'status volume-size feature missing'
+grep -Fq 'size_table_available' scripts/shells/status.sh || fail 'status JSON volume-size contract missing'
 grep -Fq 'monitor-runtime [--json] [--project <name>] [--since <dur>] [--restart-threshold <n>] [--event-limit <n>]' scripts/shells/monitor-runtime.sh || fail 'runtime monitor CLI contract missing'
 grep -Fq 'monitor-tls [--json] [--domain <pattern>] [--timeout <sec>] [--retries <n>]' scripts/shells/monitor-tls.sh || fail 'TLS monitor CLI contract missing'
 grep -Fq 'monitor-db [--json] [--engine <all|mysql|mariadb|postgres|redis|mongodb|elasticsearch|db-client>]' scripts/shells/monitor-db.sh || fail 'DB monitor CLI contract missing'

@@ -831,7 +831,7 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `LDS_AI_MODEL`          | (empty)                            | explicit model override; required when installed-model choice is ambiguous |
 | `LDS_AI_CONNECT_TIMEOUT` | `2`                              | provider connect timeout seconds |
 | `LDS_AI_PREFLIGHT_TIMEOUT` | `5`                            | provider availability/model preflight timeout seconds |
-| `LDS_AI_TIMEOUT`        | `600`                             | CLI generation timeout seconds |
+| `LDS_AI_TIMEOUT`        | `1800`                            | generation timeout seconds shared by CLI and Admin AI analysis |
 | `LDS_AI_AVAILABILITY_TTL` | `5`                            | positive/negative availability cache TTL |
 | `LDS_AI_MAX_CONTEXT_BYTES` | `524288`                       | maximum context bytes |
 | `LDS_AI_MAX_REQUEST_BYTES` | `1048576`                      | maximum serialized request bytes |

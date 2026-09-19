@@ -25,10 +25,10 @@ if grep -REn --exclude='docker-tools-hardening-ai-plan.md' --exclude='ai-contrac
   fail 'embedded Ollama runtime/lifecycle contract reappeared'
 fi
 
-grep -q 'LDS_AI_URL=http://llm-sm:11434' Dockerfile || fail 'Docker image AI URL default is not llm-sm:11434'
-grep -q 'LDS_AI_URL:=http://llm-sm:11434' "$PROVIDER" || fail 'provider AI URL default is not llm-sm:11434'
+grep -q 'LDS_AI_URL=http://llm-ollama:11434' Dockerfile || fail 'Docker image AI URL default is not llm-ollama:11434'
+grep -q 'LDS_AI_URL:=http://llm-ollama:11434' "$PROVIDER" || fail 'provider AI URL default is not llm-ollama:11434'
 if grep -R -n 'https://llm\.localhost' "$PROVIDER" "$ASKAI" "$GITX" "$ENTRYPOINT"; then
-  fail 'container-side AI client references user-facing llm.localhost route'
+  fail 'container-side AI client references user-facing llm-ollama.localhost route'
 fi
 
 grep -q 'LDS_AI_PROVIDER:=ollama' "$PROVIDER" || fail 'Ollama provider default missing'
@@ -61,7 +61,7 @@ grep -q 'init_ai_env' "$ENTRYPOINT" || fail 'entrypoint AI config initialization
 if grep -Eq 'ai_available|/api/tags|/api/generate' "$ENTRYPOINT"; then
   fail 'entrypoint probes optional AI provider during Tools startup'
 fi
-if grep -Eq 'LDS_AI|llm-sm|askai' "$HEALTH"; then
+if grep -Eq 'LDS_AI|llm-ollama|askai' "$HEALTH"; then
   fail 'Tools health was coupled to optional AI availability'
 fi
 

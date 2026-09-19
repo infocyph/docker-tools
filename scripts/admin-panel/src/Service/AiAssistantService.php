@@ -136,7 +136,7 @@ final class AiAssistantService
     private static function analysisTimeoutSeconds(): int
     {
         $raw = trim((string)getenv('LDS_AI_TIMEOUT'));
-        if ($raw === '' || !ctype_digit($raw)) {
+        if ($raw === '' || preg_match('/^[0-9]+$/D', $raw) !== 1) {
             return self::DEFAULT_ANALYSIS_TIMEOUT_SECONDS;
         }
 

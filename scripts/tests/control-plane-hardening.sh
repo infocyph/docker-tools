@@ -176,3 +176,30 @@ grep -q 'HEALTHCHECK' Dockerfile || fail 'Tools image healthcheck missing'
 grep -q 'tools-healthcheck' Dockerfile || fail 'Tools health command missing from image'
 
 printf 'control-plane-hardening: ok\n'
+
+
+# Admin Panel time display follows the configured LocalDevStack TZ.
+grep -q 'date_default_timezone_set' scripts/admin-panel/app/bootstrap.php || fail 'admin timezone bootstrap missing'
+grep -q 'data-ap-timezone' scripts/admin-panel/app/pages/_layout_top.php || fail 'admin timezone is not exposed to browser formatter'
+grep -q 'window.AdminPanelTime' scripts/admin-panel/public/js/time.js || fail 'shared admin time formatter missing'
+grep -q 'formatEpochSeconds' scripts/admin-panel/app/pages/logs.php || fail 'file logs do not use shared local-time formatter'
+grep -q 'localizeDockerLine' scripts/admin-panel/app/pages/docker_logs.php || fail 'Docker log timestamp localization missing'
+if grep -Fq 'toISOString().slice(11, 16)' scripts/admin-panel/app/pages/logs.php scripts/admin-panel/app/pages/docker_logs.php; then
+  fail 'log heatmap still renders UTC clock labels'
+fi
+
+# Docker Logs intentionally exposes only concrete service tabs.
+if grep -Eq 'data-service-tab="all"|>All</button>|All services' scripts/admin-panel/app/pages/docker_logs.php; then
+  fail 'Docker Logs aggregate All tab/state reappeared'
+fi
+
+# TLS monitor wrapper budget must scale beyond the old fixed 20s ceiling.
+grep -q 'PROBES_PER_HOST = 5' scripts/admin-panel/src/Service/TlsMonitorService.php || fail 'TLS probe budget multiplier missing'
+grep -q 'MAX_COMMAND_TIMEOUT_SECONDS = 600' scripts/admin-panel/src/Service/TlsMonitorService.php || fail 'TLS monitor hard ceiling missing'
+grep -q 'commandTimeoutSeconds' scripts/admin-panel/src/Service/TlsMonitorService.php || fail 'TLS dynamic command timeout missing'
+
+grep -q '/public/js/time.js' scripts/admin-panel/app/pages/_layout_bottom.php || fail 'admin time helper is not loaded'
+
+
+core_js_size="$(wc -c < scripts/admin-panel/public/js/core.js)"
+((core_js_size > 2000000)) || fail "admin core.js appears truncated/replaced"

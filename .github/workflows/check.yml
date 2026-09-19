@@ -2,6 +2,7 @@ name: Check
 
 on:
   push:
+    branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master", "develop", "development" ]
   workflow_dispatch:
@@ -49,6 +50,7 @@ jobs:
             php -l "$file" >/dev/null
           done < <(find scripts/admin-panel -type f -name '*.php' -print0)
           php -l scripts/tests/process-runner-smoke.php >/dev/null
+          php -l scripts/tests/admin-monitoring-smoke.php >/dev/null
           php -l scripts/tests/fake-ollama-router.php >/dev/null
 
       - name: Dependency and architecture contracts
@@ -86,6 +88,9 @@ jobs:
 
       - name: Bounded admin process runner
         run: php scripts/tests/process-runner-smoke.php
+
+      - name: Admin monitoring time and timeout smoke
+        run: php scripts/tests/admin-monitoring-smoke.php
 
       - name: Install actionlint
         env:

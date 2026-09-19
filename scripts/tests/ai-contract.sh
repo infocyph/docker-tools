@@ -46,6 +46,7 @@ grep -q 'mv /usr/local/bin/gitx /usr/local/libexec/gitx-toolset' Dockerfile || f
 grep -q 'LDS_AI_CONNECT_TIMEOUT' "$PROVIDER" || fail 'separate AI connect timeout missing'
 grep -q 'LDS_AI_PREFLIGHT_TIMEOUT' "$PROVIDER" || fail 'separate AI preflight timeout missing'
 grep -q 'LDS_AI_TIMEOUT' "$PROVIDER" || fail 'AI generation timeout missing'
+grep -Fq 'LDS_AI_TIMEOUT:=1800' "$PROVIDER" || fail 'AI generation timeout default is not 1800 seconds'
 grep -q 'LDS_AI_AVAILABILITY_TTL' "$PROVIDER" || fail 'AI availability cache TTL missing'
 grep -q 'LDS_AI_MAX_CONTEXT_BYTES' "$PROVIDER" || fail 'AI context bound missing'
 grep -q 'LDS_AI_MAX_REQUEST_BYTES' "$PROVIDER" || fail 'AI request bound missing'

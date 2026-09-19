@@ -82,7 +82,7 @@ try {
     }
 
     $expectedAccess = (new DateTimeImmutable('2026-09-19T12:30:00+06:00'))->getTimestamp();
-    if (($epochsByMessage['19/Sep/2026:12:30:00 +0600 ERROR access-timezone-check'] ?? 0) !== $expectedAccess) {
+    if (($epochsByMessage['ERROR access-timezone-check'] ?? 0) !== $expectedAccess) {
         fail('offset-bearing access-log timestamp was not parsed correctly');
     }
 

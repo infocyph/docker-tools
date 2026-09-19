@@ -512,6 +512,8 @@ final class LogsDataService
         $desc = trim($line);
         $desc = preg_replace('/^\[[^\]]+\]\s*[A-Za-z0-9_.-]+\.[A-Z]+:\s*/', '', $desc) ?? $desc;
         $desc = preg_replace('/^\[[^\]]+\]\s*/', '', $desc) ?? $desc;
+        $desc = preg_replace('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})\s*/', '', $desc) ?? $desc;
+        $desc = preg_replace('/^\d{2}\/[A-Za-z]{3}\/\d{4}:\d{2}:\d{2}:\d{2}\s[+-]\d{4}\s*/', '', $desc) ?? $desc;
         $desc = preg_replace('/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\s*/', '', $desc) ?? $desc;
         $desc = trim($desc);
         if ($desc === '') {

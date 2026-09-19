@@ -7,7 +7,10 @@ use AdminPanel\Support\ProcessRunner;
 
 final class TlsMonitorService
 {
-    private const COMMAND_TIMEOUT_SECONDS = 20;
+    private const MIN_COMMAND_TIMEOUT_SECONDS = 30;
+    private const MAX_COMMAND_TIMEOUT_SECONDS = 600;
+    private const PROBES_PER_HOST = 5;
+    private const COMMAND_OVERHEAD_SECONDS = 10;
 
     /**
      * @return array<string,mixed>
@@ -25,7 +28,8 @@ final class TlsMonitorService
             $cmd[] = $domain;
         }
 
-        $res = $this->runCommand($cmd);
+        $commandTimeout = $this->commandTimeoutSeconds($domain, $timeout, $retries);
+        $res = $this->runCommand($cmd, $commandTimeout);
         if (!$res['ok']) {
             if ($res['stdout'] !== '') {
                 $decodedOnError = json_decode($res['stdout'], true);
@@ -110,12 +114,57 @@ final class TlsMonitorService
         return $decoded;
     }
 
+    private function commandTimeoutSeconds(string $domain, int $timeout, int $retries): int
+    {
+        $hostCount = $this->estimatedHostCount($domain);
+        $budget = self::COMMAND_OVERHEAD_SECONDS
+            + ($hostCount * self::PROBES_PER_HOST * $timeout * $retries);
+
+        return max(
+            self::MIN_COMMAND_TIMEOUT_SECONDS,
+            min(self::MAX_COMMAND_TIMEOUT_SECONDS, $budget)
+        );
+    }
+
+    private function estimatedHostCount(string $domain): int
+    {
+        $nginxDir = trim((string)(getenv('TLS_MONITOR_NGINX_DIR') ?: '/etc/share/vhosts/nginx'));
+        if ($nginxDir === '' || !is_dir($nginxDir)) {
+            return 1;
+        }
+
+        $filter = strtolower(trim($domain));
+        $files = glob(rtrim($nginxDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . '*.conf') ?: [];
+        $count = 0;
+        foreach ($files as $file) {
+            $candidate = strtolower((string)pathinfo($file, PATHINFO_FILENAME));
+            if ($candidate === '') {
+                continue;
+            }
+            if ($filter === '') {
+                ++$count;
+                continue;
+            }
+            if (str_contains($filter, '*') || str_contains($filter, '?')) {
+                if (fnmatch($filter, $candidate)) {
+                    ++$count;
+                }
+                continue;
+            }
+            if (str_contains($candidate, $filter)) {
+                ++$count;
+            }
+        }
+
+        return max(1, $count);
+    }
+
     /**
      * @param list<string> $command
      * @return array{ok:bool,stdout:string,stderr:string,exit_code:int}
      */
-    private function runCommand(array $command): array
+    private function runCommand(array $command, int $timeoutSeconds): array
     {
-        return ProcessRunner::run($command, self::COMMAND_TIMEOUT_SECONDS);
+        return ProcessRunner::run($command, $timeoutSeconds);
     }
 }

@@ -101,16 +101,12 @@ declare(strict_types=1);
           <label class="form-label mb-1">Services</label>
           <div class="ap-docker-tabs-wrap">
             <ul id="apDockerLogsTabs" class="nav nav-tabs ap-docker-tabs" role="tablist" aria-label="Docker log services">
-              <li class="nav-item" role="presentation">
-                <button class="nav-link active" id="apDockerTab-all" data-bs-toggle="tab" data-bs-target="#apDockerTabPane" type="button" role="tab" aria-controls="apDockerTabPane" aria-selected="true" data-service-tab="all">All</button>
-              </li>
+              <li class="nav-item" role="presentation"><span class="nav-link disabled">Loading services...</span></li>
             </ul>
           </div>
-          <select id="apDockerLogsService" class="form-select d-none" aria-hidden="true" tabindex="-1">
-            <option value="all">All services</option>
-          </select>
+          <select id="apDockerLogsService" class="form-select d-none" aria-hidden="true" tabindex="-1"></select>
           <div class="tab-content mt-2">
-            <div class="tab-pane fade show active" id="apDockerTabPane" role="tabpanel" aria-labelledby="apDockerTab-all" tabindex="0">
+            <div class="tab-pane fade show active" id="apDockerTabPane" role="tabpanel" aria-label="Selected Docker service logs" tabindex="0">
               <section id="apDockerLogsGroups" class="row g-3"></section>
             </div>
           </div>
@@ -288,23 +284,9 @@ declare(strict_types=1);
       if (!raw) {
         return "-";
       }
-      var parsed = new Date(raw);
-      if (!parsed || !isFinite(parsed.getTime())) {
-        return raw;
-      }
-      try {
-        return parsed.toLocaleString(undefined, {
-          year: "numeric",
-          month: "short",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: false
-        });
-      } catch (e) {
-        return parsed.toISOString();
-      }
+      return window.AdminPanelTime
+        ? window.AdminPanelTime.formatDateTime(raw, raw)
+        : raw;
     }
 
     function clearNextRefresh() {
@@ -375,7 +357,7 @@ declare(strict_types=1);
     }
 
     function getFilters() {
-      var service = serviceEl ? String(serviceEl.value || "all").trim().toLowerCase() : "all";
+      var service = serviceEl ? String(serviceEl.value || "").trim().toLowerCase() : "";
       var since = sinceEl ? String(sinceEl.value || "").trim() : "";
       var grep = grepEl ? String(grepEl.value || "").trim() : "";
       var tail = 80;
@@ -400,7 +382,7 @@ declare(strict_types=1);
       Array.prototype.slice.call(tabsEl.querySelectorAll("[data-service-tab]")).forEach(function (btn) {
         btn.addEventListener("click", function (event) {
           event.preventDefault();
-          var selected = String(btn.getAttribute("data-service-tab") || "all").toLowerCase();
+          var selected = String(btn.getAttribute("data-service-tab") || "").toLowerCase();
           serviceEl.value = selected;
           Array.prototype.slice.call(tabsEl.querySelectorAll(".nav-link")).forEach(function (node) {
             node.classList.toggle("active", node === btn);
@@ -415,14 +397,21 @@ declare(strict_types=1);
       if (!tabsEl) {
         return;
       }
-      var services = Array.isArray(servicesAvailable) ? servicesAvailable : [];
-      var selected = String(activeService || "all").toLowerCase();
-      var items = ['<li class="nav-item" role="presentation"><button class="nav-link' + (selected === "all" ? ' active' : '') + '" id="apDockerTab-all" data-bs-toggle="tab" data-bs-target="#apDockerTabPane" type="button" role="tab" aria-controls="apDockerTabPane" aria-selected="' + (selected === "all" ? 'true' : 'false') + '" data-service-tab="all">All</button></li>'];
-      services.forEach(function (svc) {
-        var val = String(svc || "").trim().toLowerCase();
-        if (val === "") {
-          return;
-        }
+      var services = (Array.isArray(servicesAvailable) ? servicesAvailable : []).map(function (svc) {
+        return String(svc || "").trim().toLowerCase();
+      }).filter(function (svc, index, list) {
+        return svc !== "" && list.indexOf(svc) === index;
+      });
+      var selected = String(activeService || "").toLowerCase();
+      if (services.indexOf(selected) === -1) {
+        selected = services.length > 0 ? services[0] : "";
+      }
+      if (services.length === 0) {
+        tabsEl.innerHTML = '<li class="nav-item" role="presentation"><span class="nav-link disabled">No services</span></li>';
+        return;
+      }
+      var items = [];
+      services.forEach(function (val) {
         items.push('<li class="nav-item" role="presentation"><button class="nav-link' + (selected === val ? ' active' : '') + '" id="apDockerTab-' + esc(val) + '" data-bs-toggle="tab" data-bs-target="#apDockerTabPane" type="button" role="tab" aria-controls="apDockerTabPane" aria-selected="' + (selected === val ? 'true' : 'false') + '" data-service-tab="' + esc(val) + '">' + esc(val) + '</button></li>');
       });
       tabsEl.innerHTML = items.join("");
@@ -433,23 +422,23 @@ declare(strict_types=1);
       if (!serviceEl) {
         return;
       }
-      var selected = String(serviceEl.value || "all").toLowerCase();
-      var options = ['<option value="all">All services</option>'];
-      (Array.isArray(servicesAvailable) ? servicesAvailable : []).forEach(function (svc) {
-        var val = String(svc || "").trim().toLowerCase();
-        if (val === "") {
-          return;
-        }
-        options.push('<option value="' + esc(val) + '">' + esc(val) + "</option>");
+      var selected = String(serviceEl.value || "").toLowerCase();
+      var services = (Array.isArray(servicesAvailable) ? servicesAvailable : []).map(function (svc) {
+        return String(svc || "").trim().toLowerCase();
+      }).filter(function (svc, index, list) {
+        return svc !== "" && list.indexOf(svc) === index;
+      });
+      var options = services.map(function (val) {
+        return '<option value="' + esc(val) + '">' + esc(val) + "</option>";
       });
       serviceEl.innerHTML = options.join("");
 
-      if (selected !== "all" && Array.isArray(servicesAvailable) && servicesAvailable.indexOf(selected) !== -1) {
-        serviceEl.value = selected;
-      } else {
-        serviceEl.value = "all";
+      if (services.indexOf(selected) === -1) {
+        selected = services.length > 0 ? services[0] : "";
       }
-      renderServiceTabs(servicesAvailable, serviceEl.value || "all");
+      serviceEl.value = selected;
+      renderServiceTabs(services, selected);
+      return selected;
     }
 
     function renderGroups(payload) {
@@ -464,7 +453,11 @@ declare(strict_types=1);
         var lines = Array.isArray(group && group.lines) ? group.lines : [];
         var containers = Array.isArray(group && group.containers) ? group.containers : [];
         var lineCount = Number(group && group.line_count || lines.length || 0);
-        var preview = lines.length > 0 ? lines.join("\n") : "(no lines)";
+        var preview = lines.length > 0
+          ? lines.map(function (line) {
+              return window.AdminPanelTime ? window.AdminPanelTime.localizeDockerLine(line) : String(line || "");
+            }).join("\n")
+          : "(no lines)";
         var rows = (containers.length > 0 ? containers : [{}]).map(function (c) {
           var rawName = String(c && c.name || "unknown").trim();
           var name = rawName === "" ? "UNKNOWN" : rawName.toUpperCase();
@@ -541,8 +534,9 @@ declare(strict_types=1);
             if (!isFinite(ts) || ts <= 0) {
               return cnt;
             }
-            var d = new Date(ts * 1000);
-            var label = isFinite(d.getTime()) ? d.toISOString().slice(11, 16) : String(ts);
+            var label = window.AdminPanelTime
+              ? window.AdminPanelTime.formatEpochTime(ts, String(ts))
+              : String(ts);
             return label + " (" + cnt + ")";
           }).join(" | ");
           return ''
@@ -613,7 +607,7 @@ declare(strict_types=1);
       var filters = getFilters();
       var qp = new URLSearchParams();
       qp.set("tail", String(filters.tail));
-      if (filters.service !== "" && filters.service !== "all") {
+      if (filters.service !== "") {
         qp.set("service", filters.service);
       }
       if (filters.since !== "") {
@@ -633,6 +627,9 @@ declare(strict_types=1);
       setLoading(true);
       showError("");
 
+      var requestedService = getFilters().service;
+      var followupServiceRefresh = false;
+
       fetch(buildUrl(), {
         method: "GET",
         credentials: "same-origin",
@@ -651,10 +648,17 @@ declare(strict_types=1);
             throw new Error(msg);
           }
 
-          updateServiceOptions(payload.services_available || []);
-          renderGroups(payload);
+          var selectedService = updateServiceOptions(payload.services_available || []);
           lastGeneratedAt = String(payload.generated_at || "");
           activeProject = String(payload.project || "-");
+
+          if (requestedService === "" && selectedService !== "") {
+            followupServiceRefresh = true;
+            root.innerHTML = '<div class="col-12"><article class="card ap-card"><div class="card-body"><p class="ap-page-sub mb-0">Loading ' + esc(selectedService) + ' logs...</p></div></article></div>';
+            return;
+          }
+
+          renderGroups(payload);
           refreshDockerHeatmap(getFilters().since);
 
           if (metaEl) {
@@ -667,7 +671,10 @@ declare(strict_types=1);
         })
         .finally(function () {
           setLoading(false);
-          if (isAutoRefreshEnabled()) {
+          if (followupServiceRefresh) {
+            clearNextRefresh();
+            window.setTimeout(refreshLogs, 0);
+          } else if (isAutoRefreshEnabled()) {
             scheduleNextRefresh(5000);
           } else {
             clearNextRefresh();

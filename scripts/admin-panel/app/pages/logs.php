@@ -456,8 +456,9 @@ $serviceDomainsJson = '{}';
             if (!isFinite(ts) || ts <= 0) {
               return cnt;
             }
-            var d = new Date(ts * 1000);
-            var label = isFinite(d.getTime()) ? d.toISOString().slice(11, 16) : String(ts);
+            var label = window.AdminPanelTime
+              ? window.AdminPanelTime.formatEpochTime(ts, String(ts))
+              : String(ts);
             return label + " (" + cnt + ")";
           }).join(" | ");
           return ''
@@ -1098,7 +1099,11 @@ $serviceDomainsJson = '{}';
           var levelLabel = ui.label;
           var line = String((row && row.line) || "");
           var desc = String((row && row.description) || "");
-          var time = String((row && row.time) || "");
+          var timeTs = Number((row && row.timeTs) || 0);
+          var rawTime = String((row && row.time) || "");
+          var time = window.AdminPanelTime
+            ? window.AdminPanelTime.formatEpochSeconds(timeTs, rawTime)
+            : rawTime;
           var raw = String((row && row.raw) || desc);
           var detailMeta = "Service: " + String((fileMeta && fileMeta.service) || "N/A") + " · File: " + String((fileMeta && fileMeta.name) || "N/A") + " · Line: " + line;
           html.push(
@@ -1231,7 +1236,9 @@ $serviceDomainsJson = '{}';
               '<span class="ap-logv-file-size">' + escapeHtml(String((file && file.size) || "0 B")) + "</span>" +
             "</span>" +
             '<span class="ap-logv-file-meta">' +
-              '<span class="ap-logv-file-mtime">' + escapeHtml(String((file && file.mtime) || "Unknown")) + "</span>" +
+              '<span class="ap-logv-file-mtime">' + escapeHtml(window.AdminPanelTime
+                ? window.AdminPanelTime.formatEpochSeconds(mtimeTs, String((file && file.mtime) || "Unknown"))
+                : String((file && file.mtime) || "Unknown")) + "</span>" +
               '<span class="ap-logv-file-service">' + escapeHtml(String((file && file.service) || "UNKNOWN")) + "</span>" +
             "</span>" +
           "</button>"

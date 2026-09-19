@@ -96,13 +96,15 @@ final class LogsDataService
                 continue;
             }
             $level = $this->detectLevel($raw);
-            $time = $this->extractTime($raw);
-            if ($time === '') {
-                $time = (string)$selectedFile['mtime'];
+            $timeTs = $this->extractTimeEpoch($raw);
+            if ($timeTs <= 0) {
+                $timeTs = (int)$selectedFile['mtimeTs'];
             }
+            $time = $timeTs > 0 ? date('Y-m-d H:i:s', $timeTs) : (string)$selectedFile['mtime'];
             $rows[] = [
                 'level' => $level,
                 'time' => $time,
+                'timeTs' => $timeTs,
                 'description' => $this->normalizeDescription($raw),
                 'line' => number_format(max($lineIndex, 1)),
                 'raw' => $raw,
@@ -471,18 +473,24 @@ final class LogsDataService
         return 'Info';
     }
 
-    private function extractTime(string $line): string
+    private function extractTimeEpoch(string $line): int
     {
         if (preg_match('/\b(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\b/', $line, $matches) === 1) {
-            return str_replace('T', ' ', (string)$matches[1]);
-        }
-        if (preg_match('/\b(\d{2}-[A-Za-z]{3}-\d{4}\s\d{2}:\d{2}:\d{2})\b/', $line, $matches) === 1) {
-            $dt = DateTimeImmutable::createFromFormat('d-M-Y H:i:s', (string)$matches[1]);
-            if ($dt !== false) {
-                return $dt->format('Y-m-d H:i:s');
+            $value = str_replace(['T', ','], [' ', '.'], (string)$matches[1]);
+            foreach (['!Y-m-d H:i:s.u', '!Y-m-d H:i:s'] as $format) {
+                $dt = DateTimeImmutable::createFromFormat($format, $value);
+                if ($dt !== false) {
+                    return $dt->getTimestamp();
+                }
             }
         }
-        return '';
+        if (preg_match('/\b(\d{2}-[A-Za-z]{3}-\d{4}\s\d{2}:\d{2}:\d{2})\b/', $line, $matches) === 1) {
+            $dt = DateTimeImmutable::createFromFormat('!d-M-Y H:i:s', (string)$matches[1]);
+            if ($dt !== false) {
+                return $dt->getTimestamp();
+            }
+        }
+        return 0;
     }
 
     private function normalizeDescription(string $line): string

@@ -1,6 +1,14 @@
 <?php
 declare(strict_types=1);
 
+$adminTimezone = trim((string)(getenv('TZ') ?: 'UTC'));
+try {
+    new DateTimeZone($adminTimezone);
+} catch (Throwable) {
+    $adminTimezone = 'UTC';
+}
+date_default_timezone_set($adminTimezone);
+
 spl_autoload_register(static function (string $class): void {
     $prefix = 'AdminPanel\\';
     if (!str_starts_with($class, $prefix)) {

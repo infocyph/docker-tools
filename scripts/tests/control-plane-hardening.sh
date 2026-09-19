@@ -199,3 +199,7 @@ grep -q 'MAX_COMMAND_TIMEOUT_SECONDS = 600' scripts/admin-panel/src/Service/TlsM
 grep -q 'commandTimeoutSeconds' scripts/admin-panel/src/Service/TlsMonitorService.php || fail 'TLS dynamic command timeout missing'
 
 grep -q '/public/js/time.js' scripts/admin-panel/app/pages/_layout_bottom.php || fail 'admin time helper is not loaded'
+
+
+core_js_size="$(wc -c < scripts/admin-panel/public/js/core.js)"
+((core_js_size > 2000000)) || fail "admin core.js appears truncated/replaced"

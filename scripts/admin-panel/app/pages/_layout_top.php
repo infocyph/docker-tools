@@ -35,6 +35,10 @@ $chartJsVer = (int)@filemtime(__DIR__ . '/../../public/vendor/chart.js/chart.umd
 if ($chartJsVer <= 0) {
     $chartJsVer = $panelJsVer;
 }
+$timeJsVer = (int)@filemtime(__DIR__ . '/../../public/js/time.js');
+if ($timeJsVer <= 0) {
+    $timeJsVer = $panelJsVer;
+}
 $coreJsVer = (int)@filemtime(__DIR__ . '/../../public/js/core.js');
 if ($coreJsVer <= 0) {
     $coreJsVer = $panelJsVer;

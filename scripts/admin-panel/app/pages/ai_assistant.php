@@ -106,7 +106,6 @@ declare(strict_types=1);
   const context = document.getElementById('aiContext');
   const answer = document.getElementById('aiAnswer');
   let controller = null;
-  let timer = null;
 
   const setBusy = (busy) => {
     run.disabled = busy;
@@ -144,7 +143,6 @@ declare(strict_types=1);
     answer.textContent = 'Generating…';
 
     controller = new AbortController();
-    timer = window.setTimeout(() => controller.abort(), 45000);
 
     try {
       const res = await fetch(api, {
@@ -167,12 +165,8 @@ declare(strict_types=1);
       const aborted = err && err.name === 'AbortError';
       context.textContent = aborted ? 'Request cancelled before completion.' : context.textContent;
       answer.textContent = aborted ? 'Cancelled.' : 'Analysis failed.';
-      message.textContent = aborted ? 'Analysis cancelled or exceeded the 45-second UI bound.' : String(err.message || err);
+      message.textContent = aborted ? 'Analysis cancelled.' : String(err.message || err);
     } finally {
-      if (timer) {
-        window.clearTimeout(timer);
-      }
-      timer = null;
       controller = null;
       setBusy(false);
     }

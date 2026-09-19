@@ -7,7 +7,8 @@ use AdminPanel\Support\ProcessRunner;
 
 final class AiAssistantService
 {
-    private const ANALYSIS_TIMEOUT_SECONDS = 45;
+    private const DEFAULT_ANALYSIS_TIMEOUT_SECONDS = 1800;
+    private const MAX_ANALYSIS_TIMEOUT_SECONDS = 3600;
     private const STATUS_TIMEOUT_SECONDS = 6;
     private const MAX_OUTPUT_BYTES = 4194304;
     private const SOURCES = [
@@ -52,6 +53,7 @@ final class AiAssistantService
             'url' => (string)($fields['url'] ?? ''),
             'model' => (string)($fields['model'] ?? ''),
             'status_exit_code' => (int)$res['exit_code'],
+            'analysis_timeout_seconds' => self::analysisTimeoutSeconds(),
             'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
         ];
     }
@@ -86,12 +88,26 @@ final class AiAssistantService
             $cmd[] = $request;
         }
 
-        $res = ProcessRunner::run($cmd, self::ANALYSIS_TIMEOUT_SECONDS, null, self::MAX_OUTPUT_BYTES);
+        $analysisTimeout = self::analysisTimeoutSeconds();
+        $res = ProcessRunner::run($cmd, $analysisTimeout, null, self::MAX_OUTPUT_BYTES);
         if (!(bool)$res['ok']) {
+            $timedOut = !empty($res['timed_out']);
+            $outputLimited = !empty($res['output_limited']);
+            $message = trim((string)$res['stderr']);
+            if ($message === '') {
+                if ($timedOut) {
+                    $message = sprintf('AI analysis exceeded the configured %d-second generation timeout.', $analysisTimeout);
+                } elseif ($outputLimited) {
+                    $message = 'AI analysis exceeded the configured output limit.';
+                } else {
+                    $message = 'AI analysis failed.';
+                }
+            }
+
             return [
                 'ok' => false,
-                'error' => !empty($res['timed_out']) ? 'ai_timeout' : (!empty($res['output_limited']) ? 'ai_output_limited' : 'ai_analysis_failed'),
-                'message' => $res['stderr'] !== '' ? $res['stderr'] : 'AI analysis failed.',
+                'error' => $timedOut ? 'ai_timeout' : ($outputLimited ? 'ai_output_limited' : 'ai_analysis_failed'),
+                'message' => $message,
                 'exit_code' => (int)$res['exit_code'],
                 'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
             ];
@@ -115,6 +131,21 @@ final class AiAssistantService
     public function sources(): array
     {
         return self::SOURCES;
+    }
+
+    private static function analysisTimeoutSeconds(): int
+    {
+        $raw = trim((string)getenv('LDS_AI_TIMEOUT'));
+        if ($raw === '' || preg_match('/^[0-9]+$/D', $raw) !== 1) {
+            return self::DEFAULT_ANALYSIS_TIMEOUT_SECONDS;
+        }
+
+        $timeout = (int)$raw;
+        if ($timeout < 1 || $timeout > self::MAX_ANALYSIS_TIMEOUT_SECONDS) {
+            return self::DEFAULT_ANALYSIS_TIMEOUT_SECONDS;
+        }
+
+        return $timeout;
     }
 
     /** @return array<string,mixed> */

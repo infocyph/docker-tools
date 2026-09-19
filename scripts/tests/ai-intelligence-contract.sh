@@ -44,7 +44,11 @@ if grep -q -- '--patch' "$AIOPS" || grep -Eq 'git[[:space:]].*show([[:space:]]|$
 fi
 
 grep -q 'ProcessRunner::run' "$SERVICE" || fail 'admin AI service bypasses ProcessRunner'
-grep -q 'ANALYSIS_TIMEOUT_SECONDS = 45' "$SERVICE" || fail 'admin AI request bound missing'
+grep -q 'DEFAULT_ANALYSIS_TIMEOUT_SECONDS = 1800' "$SERVICE" || fail 'admin AI long-generation default missing'
+grep -q "getenv('LDS_AI_TIMEOUT')" "$SERVICE" || fail 'admin AI does not share the provider generation timeout'
+if grep -Eq 'ANALYSIS_TIMEOUT_SECONDS = 45|45000|45-second UI bound' "$SERVICE" "$PAGE"; then
+  fail 'legacy 45-second admin AI timeout reappeared'
+fi
 grep -q "source === 'troubleshoot'" "$SERVICE" || fail 'admin troubleshooting action missing'
 grep -q "REQUEST_METHOD" "$ENDPOINT" || fail 'admin AI endpoint method gate missing'
 grep -q "method === 'POST'" "$ENDPOINT" || fail 'admin AI generation is not POST-only'

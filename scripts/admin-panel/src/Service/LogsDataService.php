@@ -475,6 +475,14 @@ final class LogsDataService
 
     private function extractTimeEpoch(string $line): int
     {
+        if (preg_match('/\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2}))\b/', $line, $matches) === 1) {
+            $value = str_replace(',', '.', (string)$matches[1]);
+            try {
+                return (new DateTimeImmutable($value))->getTimestamp();
+            } catch (Throwable) {
+                // Continue with timezone-naive formats below.
+            }
+        }
         if (preg_match('/\b(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\b/', $line, $matches) === 1) {
             $value = str_replace(['T', ','], [' ', '.'], (string)$matches[1]);
             foreach (['!Y-m-d H:i:s.u', '!Y-m-d H:i:s'] as $format) {
@@ -482,6 +490,12 @@ final class LogsDataService
                 if ($dt !== false) {
                     return $dt->getTimestamp();
                 }
+            }
+        }
+        if (preg_match('/\b(\d{2}\/[A-Za-z]{3}\/\d{4}:\d{2}:\d{2}:\d{2}\s[+-]\d{4})\b/', $line, $matches) === 1) {
+            $dt = DateTimeImmutable::createFromFormat('!d/M/Y:H:i:s O', (string)$matches[1]);
+            if ($dt !== false) {
+                return $dt->getTimestamp();
             }
         }
         if (preg_match('/\b(\d{2}-[A-Za-z]{3}-\d{4}\s\d{2}:\d{2}:\d{2})\b/', $line, $matches) === 1) {

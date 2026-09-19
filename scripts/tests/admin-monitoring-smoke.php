@@ -45,7 +45,12 @@ $vhostRoot = $tmp . '/vhosts';
 
 try {
     $logPath = $logRoot . '/nginx/project.error.log';
-    file_put_contents($logPath, "2026-09-19 12:00:00 ERROR timezone-check\n");
+    file_put_contents(
+        $logPath,
+        "2026-09-19 12:00:00 ERROR timezone-check\n"
+        . "19/Sep/2026:12:30:00 +0600 ERROR access-timezone-check\n"
+        . "2026-09-19T06:45:00Z ERROR iso-timezone-check\n"
+    );
 
     $logs = new \AdminPanel\Service\LogsDataService([$logRoot]);
     $list = $logs->listFilesPayload();
@@ -55,17 +60,35 @@ try {
     }
 
     $entries = $logs->entriesPayload($token);
-    $row = $entries['rows'][0] ?? null;
-    if (!is_array($row)) {
-        fail('log row was not parsed');
+    $rows = is_array($entries['rows'] ?? null) ? $entries['rows'] : [];
+    if (count($rows) !== 3) {
+        fail('expected three parsed log rows');
     }
 
-    $expectedEpoch = (new DateTimeImmutable(
+    $epochsByMessage = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $epochsByMessage[(string)($row['description'] ?? '')] = (int)($row['timeTs'] ?? 0);
+    }
+
+    $expectedNaive = (new DateTimeImmutable(
         '2026-09-19 12:00:00',
         new DateTimeZone('Asia/Dhaka')
     ))->getTimestamp();
-    if ((int)($row['timeTs'] ?? 0) !== $expectedEpoch) {
+    if (($epochsByMessage['ERROR timezone-check'] ?? 0) !== $expectedNaive) {
         fail('timezone-naive file log timestamp was not interpreted in configured TZ');
+    }
+
+    $expectedAccess = (new DateTimeImmutable('2026-09-19T12:30:00+06:00'))->getTimestamp();
+    if (($epochsByMessage['19/Sep/2026:12:30:00 +0600 ERROR access-timezone-check'] ?? 0) !== $expectedAccess) {
+        fail('offset-bearing access-log timestamp was not parsed correctly');
+    }
+
+    $expectedIso = (new DateTimeImmutable('2026-09-19T06:45:00Z'))->getTimestamp();
+    if (($epochsByMessage['ERROR iso-timezone-check'] ?? 0) !== $expectedIso) {
+        fail('offset-bearing ISO timestamp was not parsed correctly');
     }
 
     foreach (['one.localhost', 'two.localhost', 'three.localhost'] as $domain) {

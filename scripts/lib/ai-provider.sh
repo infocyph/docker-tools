@@ -14,7 +14,7 @@ ai_is_uint() {
 ai_config_init() {
   : "${LDS_AI_ENABLED:=auto}"
   : "${LDS_AI_PROVIDER:=ollama}"
-  : "${LDS_AI_URL:=http://llm-sm:11434}"
+  : "${LDS_AI_URL:=http://llm-ollama:11434}"
   : "${LDS_AI_MODEL:=}"
   : "${LDS_AI_CONNECT_TIMEOUT:=2}"
   : "${LDS_AI_PREFLIGHT_TIMEOUT:=5}"

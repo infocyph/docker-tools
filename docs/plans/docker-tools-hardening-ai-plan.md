@@ -13,7 +13,7 @@ Baseline:
 - Runtime role: LocalDevStack control-plane / developer toolbox / admin panel / runtime-template generator
 - Completed lower layers: shared Scriptomatic/Toolset foundations, `runner:0.5`, `nginx:0.4.1`
 - Apache hardening is handled separately in `docker-apache`; this plan does not move Apache responsibilities into Tools.
-- Local LLM runtime is provided separately by `infocyph/docker-llm-sm`.
+- Local LLM runtime is provided separately by `infocyph/docker-llm-ollama`.
 
 This plan supersedes the older LocalDevStack ecosystem-only Tools draft and incorporates lessons from the previously reverted `feature/ai` experiment.
 
@@ -23,14 +23,14 @@ This plan supersedes the older LocalDevStack ecosystem-only Tools draft and inco
 
 Harden `docker-tools` as the LocalDevStack control plane while making it the primary **AI consumer** in the ecosystem.
 
-Tools should remain fully functional without AI. When `docker-llm-sm` is available, Tools should be able to use it through a small, reusable provider layer for many future developer/ops workflows.
+Tools should remain fully functional without AI. When `docker-llm-ollama` is available, Tools should be able to use it through a small, reusable provider layer for many future developer/ops workflows.
 
 The core architectural rule is:
 
 ```text
 LocalDevStack / docker-tools = AI consumer
 
-docker-llm-sm = AI runtime/provider
+docker-llm-ollama = AI runtime/provider
 ```
 
 Never embed or start Ollama inside `docker-tools` again.
@@ -50,7 +50,7 @@ The new architecture must explicitly avoid:
 - model downloads/storage in Tools;
 - Ollama process supervision in the Tools entrypoint;
 - coupling Tools startup to model availability;
-- duplicating `docker-llm-sm` CLI/model lifecycle logic.
+- duplicating `docker-llm-ollama` CLI/model lifecycle logic.
 
 Tools only needs HTTP/API access to the provider.
 
@@ -69,7 +69,7 @@ Preserve these responsibilities:
 - AI must be optional and failure-isolated.
 - Docker DNS/service names replace static-IP assumptions.
 - User/project content must never be sent to an external model provider implicitly.
-- Local `llm-sm` should be the preferred provider when present.
+- Local `llm-ollama` should be the preferred provider when present.
 
 ---
 
@@ -123,7 +123,7 @@ Recommended environment contract:
 ```text
 LDS_AI_ENABLED=auto
 LDS_AI_PROVIDER=ollama
-LDS_AI_URL=http://llm-sm:11434
+LDS_AI_URL=http://llm-ollama:11434
 LDS_AI_MODEL=
 LDS_AI_TIMEOUT=1800
 ```
@@ -134,11 +134,11 @@ Semantics:
 - `LDS_AI_ENABLED=0`: never attempt AI.
 - `LDS_AI_ENABLED=1`: AI-capable commands may fail clearly if provider is unavailable.
 - `LDS_AI_PROVIDER=ollama`: initial provider implementation.
-- `LDS_AI_URL`: defaults to Docker DNS name `http://llm-sm:11434` inside LocalDevStack.
+- `LDS_AI_URL`: defaults to Docker DNS name `http://llm-ollama:11434` inside LocalDevStack.
 - `LDS_AI_MODEL`: optional model override; if empty, provider/runtime default applies.
 - no API key is required for the local Ollama path.
 
-Do not use `https://llm.localhost` for container-to-container calls. Inside Docker, Tools should call `llm-sm:11434` directly. `https://llm.localhost` is the user-facing Nginx route.
+Do not use `https://llm-ollama.localhost` for container-to-container calls. Inside Docker, Tools should call `llm-ollama:11434` directly. `https://llm-ollama.localhost` is the user-facing Nginx route.
 
 ## 5.2 Provider library
 
@@ -205,7 +205,7 @@ Unlike the reverted branch, `askai` must use `LDS_AI_URL` / provider library rat
 Configure Toolset `gitx` to use:
 
 ```text
-GITX_OLLAMA_URL=http://llm-sm:11434
+GITX_OLLAMA_URL=http://llm-ollama:11434
 ```
 
 when LocalDevStack AI is enabled.
@@ -332,7 +332,7 @@ Plan:
 - inventory every Nginx/Apache/Node/PHP template;
 - ensure Docker DNS names are used;
 - align streaming/WebSocket behavior with Nginx 0.4.1;
-- no LLM-specific Nginx routing belongs here if Nginx owns reserved `llm.localhost`; avoid duplicate route sources.
+- no LLM-specific Nginx routing belongs here if Nginx owns reserved `llm-ollama.localhost`; avoid duplicate route sources.
 
 ## 8.5 `scripts/docker-templates/`
 
@@ -340,7 +340,7 @@ Plan:
 - remove duplicate service-version/profile truth where possible;
 - consume canonical service/runtime metadata;
 - keep PHP/Node as locally-built developer runtimes, not published generic images;
-- prepare optional environment injection for AI-aware developer tools without adding `llm-sm` lifecycle here.
+- prepare optional environment injection for AI-aware developer tools without adding `llm-ollama` lifecycle here.
 
 ## 8.6 `scripts/fpm-templates/`
 
@@ -404,7 +404,7 @@ Plan:
 - validate/sanitize user-controlled request parameters;
 - audit all shell-command construction;
 - introduce an internal API/helper layer for AI later rather than embedding curl logic in each PHP page;
-- add optional AI status indicator when `llm-sm` is reachable;
+- add optional AI status indicator when `llm-ollama` is reachable;
 - future AI actions remain explicitly user-triggered.
 
 ## 8.13 `README.md`
@@ -414,7 +414,7 @@ Update after implementation stabilizes:
 - define Tools as LocalDevStack control plane;
 - document shared foundations;
 - document AI as optional consumer functionality;
-- document `llm-sm` as separate provider;
+- document `llm-ollama` as separate provider;
 - document `LDS_AI_*` variables;
 - document Docker socket security boundary;
 - document admin panel and major command surfaces;
@@ -473,20 +473,20 @@ Tools should expect LocalDevStack to eventually supply:
 ```text
 LDS_AI_ENABLED=auto
 LDS_AI_PROVIDER=ollama
-LDS_AI_URL=http://llm-sm:11434
+LDS_AI_URL=http://llm-ollama:11434
 ```
 
-and network connectivity to the optional `llm-sm` service.
+and network connectivity to the optional `llm-ollama` service.
 
 User-facing browser/API access remains:
 
 ```text
-https://llm.localhost
+https://llm-ollama.localhost
 ```
 
 through Nginx 0.4.1+.
 
-Tools does not create/start/remove the `llm-sm` container itself.
+Tools does not create/start/remove the `llm-ollama` container itself.
 
 ---
 
@@ -498,9 +498,9 @@ The Tools hardening release is ready when:
 2. image builds from fresh rolling dependencies;
 3. Scriptomatic/Toolset contracts match completed foundations;
 4. no Ollama runtime exists inside Tools;
-5. all existing Tools workflows remain functional without `llm-sm`;
+5. all existing Tools workflows remain functional without `llm-ollama`;
 6. `askai`/AI-provider tests pass against a fake Ollama endpoint;
-7. `gitx` can use `llm-sm` through `GITX_OLLAMA_URL` when enabled;
+7. `gitx` can use `llm-ollama` through `GITX_OLLAMA_URL` when enabled;
 8. monitors remain deterministic and machine-readable;
 9. admin panel remains functional without AI;
 10. generated PHP/Node/Nginx/Apache configs pass representative syntax tests;
@@ -554,7 +554,7 @@ Each feature should remain small and reuse the same provider library.
 
 # 14. Additive extension — whole-ecosystem contract audit
 
-This section is **additive only**. Sections 1–13 above remain unchanged and retain their original requirements and priority. The requirements below were found by reviewing the current `docker-tools` codebase together with the connected `infocyph/docker-runner`, `infocyph/docker-nginx`, `infocyph/docker-apache`, `infocyph/docker-llm-sm`, and LocalDevStack integration contracts.
+This section is **additive only**. Sections 1–13 above remain unchanged and retain their original requirements and priority. The requirements below were found by reviewing the current `docker-tools` codebase together with the connected `infocyph/docker-runner`, `infocyph/docker-nginx`, `infocyph/docker-apache`, `infocyph/docker-llm-ollama`, and LocalDevStack integration contracts.
 
 ## 14.1 Treat connected images as one tested contract surface
 
@@ -565,7 +565,7 @@ Maintain an explicit compatibility matrix covering:
 - Tools -> Nginx: generated vhosts, TLS paths, FPM socket assumptions, proxy include names, streaming/WebSocket behavior and reserved localhost routes;
 - Tools -> Apache: generated vhosts, `/app`, log paths, TLS/mTLS certificate paths, HTTP/2 and PHP-FPM proxy behavior;
 - Tools -> Runner: cron/supervisor directories, generated config format and safe reload behavior;
-- Tools -> `llm-sm`: HTTP client contract at `http://llm-sm:11434`, with no lifecycle ownership;
+- Tools -> `llm-ollama`: HTTP client contract at `http://llm-ollama:11434`, with no lifecycle ownership;
 - Tools -> LocalDevStack: canonical service catalog, mounted state/config paths, network/service names, image compatibility and product-level orchestration ownership.
 
 Compatibility tests should use the actual hardened sibling images or explicit tested refs, not reimplement their syntax/contracts with local mocks. Floating `latest` may still exist operationally, but a LocalDevStack release should record which image versions/digests were compatibility-tested together.
@@ -668,13 +668,13 @@ Runtime metadata generation should also sort PHP/Node versions semantically/nume
 
 ## 14.7 Reserved LocalDevStack routes are an ecosystem ABI
 
-The hardened Nginx image owns predefined convenience routes such as `admin.localhost` and `llm.localhost`. `mkhost` must not allow generated user hosts to shadow reserved product routes.
+The hardened Nginx image owns predefined convenience routes such as `admin.localhost` and `llm-ollama.localhost`. `mkhost` must not allow generated user hosts to shadow reserved product routes.
 
 Requirements:
 
 - reject collisions with LocalDevStack-reserved convenience hostnames during host creation/edit;
 - source the reserved-route list from the canonical LocalDevStack catalog/route contract when that contract becomes available rather than maintaining another permanent hard-coded copy in Tools;
-- keep `llm.localhost` fully Nginx-owned; Tools does not generate a competing LLM vhost;
+- keep `llm-ollama.localhost` fully Nginx-owned; Tools does not generate a competing LLM vhost;
 - add a CI guard that renders every maintained Tools Nginx template against the actual hardened Nginx image and verifies every referenced include exists (`proxy_params`, timeout/buffer/streaming/WebSocket/H2/FastCGI snippets, etc.);
 - validate Apache templates against the hardened Apache image and its loaded-module/TLS/mTLS contract;
 - validate Runner scheduler paths against the hardened Runner image rather than assuming path compatibility.
@@ -684,7 +684,7 @@ Requirements:
 Extend the provider layer with the following operational rules:
 
 - separate a short provider/DNS/connect timeout from the potentially long generation timeout;
-- cache positive/negative availability briefly so a missing optional `llm-sm` does not add repeated connection latency to every command/panel render;
+- cache positive/negative availability briefly so a missing optional `llm-ollama` does not add repeated connection latency to every command/panel render;
 - bound request bytes, response bytes and diagnostic/context bytes independently;
 - retry safe reachability/preflight requests only; do not blindly replay a generation after partial streamed output;
 - if `LDS_AI_MODEL` is empty, auto-select only when the provider state makes the choice deterministic; if multiple installed models are plausible, return a clear ambiguity error rather than silently choosing the first result;
@@ -692,7 +692,7 @@ Extend the provider layer with the following operational rules:
 - make redaction deterministic and test it with credential/token/URL/header/.env fixtures before any content reaches the provider;
 - do not persist raw prompts/responses by default; optional debug telemetry should contain redacted metadata such as provider, model, duration, byte counts and a safe request/context hash rather than secret-bearing payloads;
 - admin-panel generations should support streaming/cancellation or another bounded UX rather than tying up a PHP request for the full maximum generation timeout;
-- keep fake-provider tests as the normal Tools CI path and add lightweight protocol/schema compatibility coverage for the `llm-sm` API without requiring a real model download in every Tools check.
+- keep fake-provider tests as the normal Tools CI path and add lightweight protocol/schema compatibility coverage for the `llm-ollama` API without requiring a real model download in every Tools check.
 
 ## 14.9 Tools-owned service health and lifecycle
 
@@ -703,7 +703,7 @@ The healthcheck should:
 - verify the main notifier/control process is alive and its FIFO/runtime state is sane;
 - verify the admin panel only when `ADMIN_PANEL_AUTOSTART=1`;
 - surface a dead background admin process instead of leaving the container permanently "healthy" because `notifierd` is still PID 1;
-- remain independent of Docker daemon reachability, database availability and `llm-sm` availability;
+- remain independent of Docker daemon reachability, database availability and `llm-ollama` availability;
 - keep AI strictly optional, so an absent LLM can never make Tools unhealthy.
 
 The notifier TCP listener should remain an internal LocalDevStack transport by default. Do not publish it to the host unless explicitly requested; if future external exposure is supported, require authentication rather than relying on the current optional empty token.
@@ -721,7 +721,7 @@ In addition to Sections 9 and 12, add focused gates for:
 7. host-edit failure rollback preserving the previous working host;
 8. cron/supervisor invalid-update rollback preserving the previous Runner config;
 9. concurrent `env-store` writers without lost/corrupt updates;
-10. rejection of reserved LocalDevStack hostnames including `llm.localhost`;
+10. rejection of reserved LocalDevStack hostnames including `llm-ollama.localhost`;
 11. actual Nginx include/template ABI validation against the hardened Nginx image;
 12. actual Apache/FPM/TLS template validation against the hardened Apache/runtime contract;
 13. AI-disabled, provider-unreachable, ambiguous-model, redaction, oversized-context, timeout and interrupted-stream behavior;

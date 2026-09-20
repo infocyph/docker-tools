@@ -162,7 +162,9 @@ fi
 
 # Reserved LocalDevStack route ABI.
 grep -q 'admin.localhost' scripts/admin-panel/src/Api/HostManagerEndpoint.php || fail 'reserved route guard missing admin.localhost'
+grep -q 'llm.localhost' scripts/admin-panel/src/Api/HostManagerEndpoint.php || fail 'reserved route guard missing llm.localhost'
 grep -q 'llm-ollama.localhost' scripts/admin-panel/src/Api/HostManagerEndpoint.php || fail 'reserved route guard missing llm-ollama.localhost'
+grep -q 'llm-fastflow.localhost' scripts/admin-panel/src/Api/HostManagerEndpoint.php || fail 'reserved route guard missing llm-fastflow.localhost'
 
 # Host mutations must stage first, keep certify out of staging, then validate live runtime.
 grep -q 'HostTransactionService' scripts/admin-panel/src/Api/HostManagerEndpoint.php || fail 'host mutations bypass staging transaction'

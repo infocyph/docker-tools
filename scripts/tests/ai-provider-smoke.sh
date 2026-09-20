@@ -58,12 +58,12 @@ for _ in $(seq 1 30); do
 done
 curl -fsS --connect-timeout 1 --max-time 1 "$LDS_AI_URL/v1/models" >/dev/null || fail 'fake provider did not start'
 
-printf '1/10 availability + deterministic model\n'
+printf '1/11 availability + deterministic model\n'
 rm -rf -- "$LDS_AI_CACHE_DIR"
 ai_available || fail 'single-model provider should be available'
 [[ "$(ai_model)" == 'qwen2.5:3b' ]] || fail 'single installed model was not selected'
 
-printf '2/10 redaction + untrusted-data boundary\n'
+printf '2/11 redaction + untrusted-data boundary\n'
 context="$(cat <<'EOF'
 DB_PASSWORD=hunter2
 Authorization: Bearer bearer-secret

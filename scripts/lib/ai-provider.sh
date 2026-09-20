@@ -13,8 +13,8 @@ ai_is_uint() {
 
 ai_config_init() {
   : "${LDS_AI_ENABLED:=auto}"
-  : "${LDS_AI_PROVIDER:=ollama}"
-  : "${LDS_AI_URL:=http://llm-ollama:11434}"
+  : "${LDS_AI_PROVIDER:=llm}"
+  : "${LDS_AI_URL:=http://llm:11434}"
   : "${LDS_AI_MODEL:=}"
   : "${LDS_AI_CONNECT_TIMEOUT:=2}"
   : "${LDS_AI_PREFLIGHT_TIMEOUT:=5}"
@@ -31,8 +31,8 @@ ai_config_init() {
   esac
 
   case "$LDS_AI_PROVIDER" in
-    ollama) ;;
-    *) ai_error "unsupported LDS_AI_PROVIDER=$LDS_AI_PROVIDER (only ollama is currently supported)"; return 64 ;;
+    llm) ;;
+    *) ai_error "unsupported LDS_AI_PROVIDER=$LDS_AI_PROVIDER (expected llm)"; return 64 ;;
   esac
 
   if [[ "$LDS_AI_URL" == *$'\n'* || "$LDS_AI_URL" == *$'\r'* || "$LDS_AI_URL" == *' '* || "$LDS_AI_URL" == *'@'* ]]; then
@@ -79,7 +79,7 @@ ai__cache_key() {
 ai__cache_paths() {
   local key
   key="$(ai__cache_key)" || return 1
-  printf '%s\n%s\n' "$LDS_AI_CACHE_DIR/$key.availability" "$LDS_AI_CACHE_DIR/$key.tags.json"
+  printf '%s\n%s\n' "$LDS_AI_CACHE_DIR/$key.availability" "$LDS_AI_CACHE_DIR/$key.models.json"
 }
 
 ai__write_availability_cache() {
@@ -112,15 +112,15 @@ ai__cached_availability() {
   printf '%s\n' "$status"
 }
 
-ai__fetch_tags() {
-  local availability tags tmp code rc size
+ai__fetch_models() {
+  local availability models tmp code rc size
   mapfile -t _ai_paths < <(ai__cache_paths)
   availability="${_ai_paths[0]}"
-  tags="${_ai_paths[1]}"
+  models="${_ai_paths[1]}"
   : "$availability"
 
   mkdir -p -m 700 -- "$LDS_AI_CACHE_DIR" || return 1
-  tmp="$(mktemp "$LDS_AI_CACHE_DIR/.tags.XXXXXX")" || return 1
+  tmp="$(mktemp "$LDS_AI_CACHE_DIR/.models.XXXXXX")" || return 1
 
   if code="$(curl --silent --show-error \
     --connect-timeout "$LDS_AI_CONNECT_TIMEOUT" \
@@ -129,7 +129,7 @@ ai__fetch_tags() {
     --retry 1 --retry-delay 0 --retry-connrefused \
     --proto '=http,https' \
     --output "$tmp" --write-out '%{http_code}' \
-    "$LDS_AI_URL/api/tags")"; then
+    "$LDS_AI_URL/v1/models")"; then
     rc=0
   else
     rc=$?
@@ -144,21 +144,19 @@ ai__fetch_tags() {
   if ! ai_is_uint "$size" || ((10#$size > 10#$LDS_AI_MAX_RESPONSE_BYTES)); then
     rm -f -- "$tmp"
     ai__write_availability_cache 0 >/dev/null 2>&1 || true
-    ai_error 'provider tags response exceeded the configured response limit'
+    ai_error 'provider models response exceeded the configured response limit'
     return 1
   fi
-
-  if ! jq -e '.models | type == "array"' "$tmp" >/dev/null 2>&1; then
+  if ! jq -e '.data | type == "array"' "$tmp" >/dev/null 2>&1; then
     rm -f -- "$tmp"
     ai__write_availability_cache 0 >/dev/null 2>&1 || true
-    ai_error 'provider returned malformed /api/tags JSON'
+    ai_error 'provider returned malformed /v1/models JSON'
     return 1
   fi
 
   chmod 600 "$tmp"
-  mv -f -- "$tmp" "$tags"
+  mv -f -- "$tmp" "$models"
   ai__write_availability_cache 1 >/dev/null 2>&1 || true
-  return 0
 }
 
 ai_available() {
@@ -171,10 +169,10 @@ ai_available() {
     return
   fi
 
-  ai__fetch_tags
+  ai__fetch_models
 }
 
-ai_tags_json() {
+ai_models_json() {
   ai_available || return 1
   local tags
   mapfile -t _ai_paths < <(ai__cache_paths)
@@ -189,8 +187,8 @@ ai_model() {
     return 69
   fi
 
-  local tags selected count
-  if ! tags="$(ai_tags_json)"; then
+  local models selected count
+  if ! models="$(ai_models_json)"; then
     if [[ "$LDS_AI_ENABLED" == 1 ]]; then
       ai_error "required AI provider is unavailable at $LDS_AI_URL"
     else
@@ -200,7 +198,7 @@ ai_model() {
   fi
 
   if [[ -n "$LDS_AI_MODEL" ]]; then
-    if ! jq -e --arg model "$LDS_AI_MODEL" '[.models[]? | (.name // .model // "")] | index($model) != null' <<<"$tags" >/dev/null; then
+    if ! jq -e --arg model "$LDS_AI_MODEL" '[.data[]?.id // empty] | index($model) != null' <<<"$models" >/dev/null; then
       ai_error "configured model is not installed: $LDS_AI_MODEL"
       return 69
     fi
@@ -208,7 +206,7 @@ ai_model() {
     return 0
   fi
 
-  count="$(jq -r '[.models[]? | (.name // .model // "") | select(length > 0)] | unique | length' <<<"$tags")"
+  count="$(jq -r '[.data[]?.id // empty | select(length > 0)] | unique | length' <<<"$models")"
   if ! ai_is_uint "$count"; then
     ai_error 'unable to determine installed model count'
     return 69
@@ -219,7 +217,7 @@ ai_model() {
       return 69
       ;;
     1)
-      selected="$(jq -r '[.models[]? | (.name // .model // "") | select(length > 0)] | unique | .[0]' <<<"$tags")"
+      selected="$(jq -r '[.data[]?.id // empty | select(length > 0)] | unique | .[0]' <<<"$models")"
       printf '%s\n' "$selected"
       ;;
     *)
@@ -348,22 +346,22 @@ ai__prepare_request() {
   local redacted_prompt redacted_system
   redacted_prompt="$(printf '%s' "$prompt" | ai_redact)"
   redacted_system="$(printf '%s' "$system" | ai_redact)"
-
   if [[ "$json_mode" == 1 ]]; then
-    jq -n \
-      --arg model "$model" \
-      --arg prompt "$redacted_prompt" \
-      --arg system "$redacted_system" \
-      --argjson stream "$stream" \
-      '{model:$model,prompt:$prompt,system:$system,stream:$stream,format:"json"}' >"$request_file"
-  else
-    jq -n \
-      --arg model "$model" \
-      --arg prompt "$redacted_prompt" \
-      --arg system "$redacted_system" \
-      --argjson stream "$stream" \
-      '{model:$model,prompt:$prompt,system:$system,stream:$stream}' >"$request_file"
+    redacted_system+="${redacted_system:+$'\n\n'}Return exactly one valid JSON value and no markdown or commentary."
   fi
+
+  jq -n \
+    --arg model "$model" \
+    --arg prompt "$redacted_prompt" \
+    --arg system "$redacted_system" \
+    --argjson stream "$stream" \
+    '{
+      model:$model,
+      messages:
+        ((if ($system | length) > 0 then [{role:"system",content:$system}] else [] end)
+        + [{role:"user",content:$prompt}]),
+      stream:$stream
+    }' >"$request_file"
 
   local request_bytes
   request_bytes="$(wc -c <"$request_file" | tr -d '[:space:]')"
@@ -398,12 +396,13 @@ ai__generate_nonstream() {
     -H 'Content-Type: application/json' \
     --data-binary @"$request" \
     --output "$response" --write-out '%{http_code}' \
-    "$LDS_AI_URL/api/generate")"; then
+    "$LDS_AI_URL/v1/chat/completions")"; then
     rc=0
   else
     rc=$?
   fi
   rm -f -- "$request"
+
   if ((rc != 0)); then
     rm -f -- "$response"
     ai_error "generation request failed (curl exit $rc)"
@@ -422,24 +421,19 @@ ai__generate_nonstream() {
     ai_error "generation response exceeded LDS_AI_MAX_RESPONSE_BYTES=$LDS_AI_MAX_RESPONSE_BYTES"
     return 65
   fi
-  if ! jq -e 'type == "object" and (.response | type == "string")' "$response" >/dev/null 2>&1; then
+  if ! jq -e 'type == "object" and (.choices[0].message.content | type == "string")' "$response" >/dev/null 2>&1; then
     rm -f -- "$response"
-    ai_error 'provider returned malformed generation JSON'
+    ai_error 'provider returned malformed OpenAI chat-completions JSON'
     return 69
   fi
 
-  if [[ "$json_mode" == 1 ]]; then
-    result="$(jq -r '.response' "$response")"
-    rm -f -- "$response"
-    if ! jq -e . >/dev/null 2>&1 <<<"$result"; then
-      ai_error 'provider JSON-mode response was not valid JSON'
-      return 69
-    fi
-    printf '%s\n' "$result"
-  else
-    jq -r '.response' "$response"
-    rm -f -- "$response"
+  result="$(jq -r '.choices[0].message.content' "$response")"
+  rm -f -- "$response"
+  if [[ "$json_mode" == 1 ]] && ! jq -e . >/dev/null 2>&1 <<<"$result"; then
+    ai_error 'provider JSON-mode response was not valid JSON'
+    return 69
   fi
+  printf '%s\n' "$result"
 }
 
 ai_generate() {
@@ -451,7 +445,7 @@ ai_generate_json() {
 }
 
 ai_stream() {
-  local prompt="${1:-}" system="${2:-}" json_mode="${3:-0}" request fifo pid total=0 limited=0 line line_bytes chunk rc
+  local prompt="${1:-}" system="${2:-}" json_mode="${3:-0}" request fifo pid total=0 limited=0 line line_bytes data chunk rc done=0
   ai_config_init || return $?
   [[ "$LDS_AI_ENABLED" != 0 ]] || { ai_error 'AI is disabled by LDS_AI_ENABLED=0'; return 69; }
 
@@ -474,8 +468,9 @@ ai_stream() {
     --max-time "$LDS_AI_TIMEOUT" \
     --proto '=http,https' \
     -H 'Content-Type: application/json' \
+    -H 'Accept: text/event-stream' \
     --data-binary @"$request" \
-    "$LDS_AI_URL/api/generate" >"$fifo" &
+    "$LDS_AI_URL/v1/chat/completions" >"$fifo" &
   pid=$!
 
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -493,28 +488,37 @@ ai_stream() {
       kill "$pid" >/dev/null 2>&1 || true
       break
     fi
-    if ! chunk="$(jq -er 'if .error then error(.error) else (.response // "") end' <<<"$line" 2>/dev/null)"; then
+
+    [[ -n "$line" ]] || continue
+    [[ "$line" == "data: "* ]] || continue
+    data="${line#data: }"
+    if [[ "$data" == '[DONE]' ]]; then
+      done=1
+      break
+    fi
+    if ! chunk="$(jq -er 'if .error then error(.error.message // .error) else (.choices[0].delta.content // "") end' <<<"$data" 2>/dev/null)"; then
       kill "$pid" >/dev/null 2>&1 || true
       wait "$pid" >/dev/null 2>&1 || true
       rm -f -- "$request" "$fifo"
-      ai_error 'provider returned malformed streaming JSON after partial output; generation was not retried'
+      ai_error 'provider returned malformed OpenAI SSE after partial output; generation was not retried'
       return 69
     fi
     printf '%s' "$chunk"
   done <"$fifo"
 
-  if wait "$pid"; then
-    rc=0
-  else
-    rc=$?
-  fi
+  if wait "$pid"; then rc=0; else rc=$?; fi
   rm -f -- "$request" "$fifo"
+
   if ((limited)); then
     ai_error "stream exceeded LDS_AI_MAX_RESPONSE_BYTES=$LDS_AI_MAX_RESPONSE_BYTES; generation was not retried"
     return 65
   fi
   if ((rc != 0)); then
     ai_error "stream interrupted (curl exit $rc); generation was not retried"
+    return 69
+  fi
+  if ((done == 0)); then
+    ai_error 'stream ended without OpenAI [DONE] marker; generation was not retried'
     return 69
   fi
   printf '\n'

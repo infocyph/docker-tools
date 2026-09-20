@@ -193,8 +193,8 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     SOPS_GLOBAL_DIR=/etc/share/sops/global \
     SOPS_REPO_DIR=/etc/share/vhosts/sops \
     LDS_AI_ENABLED=auto \
-    LDS_AI_PROVIDER=ollama \
-    LDS_AI_URL=http://llm-ollama:11434 \
+    LDS_AI_PROVIDER=llm \
+    LDS_AI_URL=http://llm:11434 \
     LDS_AI_MODEL= \
     LDS_AI_CONNECT_TIMEOUT=2 \
     LDS_AI_PREFLIGHT_TIMEOUT=5 \
@@ -400,7 +400,7 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
   && aiops --help >/dev/null \
   && bash -n /usr/local/bin/entrypoint \
   && bash -n /usr/local/bin/tools-healthcheck \
-  && php -l /etc/share/scripts/tests/fake-ollama-router.php >/dev/null \
+  && php -l /etc/share/scripts/tests/fake-llm-router.php >/dev/null \
   && php -l /etc/share/admin-panel/index.php >/dev/null \
   && php -l /etc/share/admin-panel/app/bootstrap.php >/dev/null \
   && find /etc/share/admin-panel/src -type f -name '*.php' -exec php -l {} \; >/dev/null

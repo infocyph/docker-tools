@@ -96,6 +96,13 @@ grep -Fq '[[ "$banner_sha256" == "$CANDIDATE_BANNER_SHA256" ]]' "$workflow" || {
   exit 1
 }
 
+for cache_scope in publish-candidate-amd64 publish-candidate-arm64 publish-multiarch; do
+  grep -Fq "scope=${cache_scope},mode=max,ignore-error=true" "$workflow" || {
+    echo "publish cache export must be fail-open: $cache_scope" >&2
+    exit 1
+  }
+done
+
 grep -Fq 'echo "- Toolset release: \`$TOOLSET_RELEASE\`"' "$workflow" || {
   echo 'candidate summary is not using resolved Toolset release pin' >&2
   exit 1

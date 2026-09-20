@@ -14,7 +14,9 @@ final class HostManagerEndpoint
         'db.localhost',
         'ri.localhost',
         'me.localhost',
+        'llm.localhost',
         'llm-ollama.localhost',
+        'llm-fastflow.localhost',
     ];
 
     private HostManagerService $service;

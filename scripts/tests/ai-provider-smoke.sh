@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="${AI_TEST_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
 PROVIDER="${AI_PROVIDER_LIB:-$ROOT/scripts/lib/ai-provider.sh}"
-ROUTER="${AI_FAKE_ROUTER:-$ROOT/scripts/tests/fake-ollama-router.php}"
+ROUTER="${AI_FAKE_ROUTER:-$ROOT/scripts/tests/fake-llm-router.php}"
 
 fail() {
   printf 'ai-provider-smoke: %s\n' "$*" >&2
@@ -30,13 +30,13 @@ printf 'single\n' >"$mode_file"
 : >"$capture_file"
 
 port=$((20000 + RANDOM % 20000))
-FAKE_OLLAMA_MODE_FILE="$mode_file" \
-FAKE_OLLAMA_CAPTURE_FILE="$capture_file" \
+FAKE_LLM_MODE_FILE="$mode_file" \
+FAKE_LLM_CAPTURE_FILE="$capture_file" \
 php -S "127.0.0.1:$port" "$ROUTER" >"$tmp/server.log" 2>&1 &
 pid=$!
 
 export LDS_AI_ENABLED=1
-export LDS_AI_PROVIDER=ollama
+export LDS_AI_PROVIDER=llm
 export LDS_AI_URL="http://127.0.0.1:$port"
 export LDS_AI_MODEL=''
 export LDS_AI_CONNECT_TIMEOUT=1
@@ -49,13 +49,13 @@ export LDS_AI_MAX_RESPONSE_BYTES=2097152
 export LDS_AI_CACHE_DIR="$tmp/cache"
 
 for _ in $(seq 1 30); do
-  if curl -fsS --connect-timeout 1 --max-time 1 "$LDS_AI_URL/api/tags" >/dev/null 2>&1; then
+  if curl -fsS --connect-timeout 1 --max-time 1 "$LDS_AI_URL/v1/models" >/dev/null 2>&1; then
     break
   fi
   kill -0 "$pid" >/dev/null 2>&1 || { cat "$tmp/server.log" >&2; fail 'fake provider exited early'; }
   sleep 0.1
 done
-curl -fsS --connect-timeout 1 --max-time 1 "$LDS_AI_URL/api/tags" >/dev/null || fail 'fake provider did not start'
+curl -fsS --connect-timeout 1 --max-time 1 "$LDS_AI_URL/v1/models" >/dev/null || fail 'fake provider did not start'
 
 printf '1/10 availability + deterministic model\n'
 rm -rf -- "$LDS_AI_CACHE_DIR"

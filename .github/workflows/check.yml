@@ -51,7 +51,7 @@ jobs:
           done < <(find scripts/admin-panel -type f -name '*.php' -print0)
           php -l scripts/tests/process-runner-smoke.php >/dev/null
           php -l scripts/tests/admin-monitoring-smoke.php >/dev/null
-          php -l scripts/tests/fake-ollama-router.php >/dev/null
+          php -l scripts/tests/fake-llm-router.php >/dev/null
 
       - name: Dependency and architecture contracts
         run: bash scripts/tests/dependency-contract.sh
@@ -173,8 +173,8 @@ jobs:
             command -v php >/dev/null &&
             test -x /usr/local/libexec/gitx-toolset &&
             test -r "$LDS_AI_PROVIDER_LIB" &&
-            test "$LDS_AI_PROVIDER" = "ollama" &&
-            test "$LDS_AI_URL" = "http://llm-ollama:11434" &&
+            test "$LDS_AI_PROVIDER" = "llm" &&
+            test "$LDS_AI_URL" = "http://llm:11434" &&
             mkcert -version >/dev/null &&
             lazydocker --version >/dev/null &&
             gitx --version >/dev/null &&
@@ -191,17 +191,17 @@ jobs:
         run: |
           docker run --rm --entrypoint bash infocyph/tools:ci -lc '
             AI_PROVIDER_LIB=/usr/local/lib/docker-tools/ai-provider.sh \
-            AI_FAKE_ROUTER=/etc/share/scripts/tests/fake-ollama-router.php \
+            AI_FAKE_ROUTER=/etc/share/scripts/tests/fake-llm-router.php \
             bash /etc/share/scripts/tests/ai-provider-smoke.sh &&
             AI_ASKAI_BIN=/usr/local/bin/askai \
             AI_GITX_WRAPPER=/usr/local/bin/gitx \
             AI_PROVIDER_LIB=/usr/local/lib/docker-tools/ai-provider.sh \
-            AI_FAKE_ROUTER=/etc/share/scripts/tests/fake-ollama-router.php \
+            AI_FAKE_ROUTER=/etc/share/scripts/tests/fake-llm-router.php \
             bash /etc/share/scripts/tests/ai-client-smoke.sh &&
             AI_AIOPS_BIN=/usr/local/bin/aiops \
             AI_ASKAI_BIN=/usr/local/bin/askai \
             AI_PROVIDER_LIB=/usr/local/lib/docker-tools/ai-provider.sh \
-            AI_FAKE_ROUTER=/etc/share/scripts/tests/fake-ollama-router.php \
+            AI_FAKE_ROUTER=/etc/share/scripts/tests/fake-llm-router.php \
             AI_ADMIN_BOOTSTRAP=/etc/share/admin-panel/app/bootstrap.php \
             bash /etc/share/scripts/tests/ai-intelligence-smoke.sh
           '
@@ -226,7 +226,7 @@ jobs:
           done
 
           docker exec "$name" tools-healthcheck
-          docker exec "$name" bash -c 'test "$LDS_AI_ENABLED" = auto && test "$LDS_AI_URL" = http://llm-ollama:11434'
+          docker exec "$name" bash -c 'test "$LDS_AI_ENABLED" = auto && test "$LDS_AI_URL" = http://llm:11434'
           docker exec "$name" sh -lc 'tr "\0" "\n" </proc/1/environ | grep -qx "NOTIFY_TOKEN="'
           docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
 
@@ -313,7 +313,7 @@ jobs:
             command -v flock >/dev/null &&
             test -x /usr/local/libexec/gitx-toolset &&
             test -r "$LDS_AI_PROVIDER_LIB" &&
-            test "$LDS_AI_URL" = "http://llm-ollama:11434" &&
+            test "$LDS_AI_URL" = "http://llm:11434" &&
             mkcert -version >/dev/null &&
             lazydocker --version >/dev/null &&
             gitx --version >/dev/null &&

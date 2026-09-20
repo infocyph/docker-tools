@@ -40,6 +40,7 @@ export LDS_AI_ENABLED=1
 export LDS_AI_PROVIDER=llm
 export LDS_AI_URL="http://127.0.0.1:$port"
 export LDS_AI_MODEL=''
+export LDS_AI_THINK=''
 export LDS_AI_CONNECT_TIMEOUT=1
 export LDS_AI_PREFLIGHT_TIMEOUT=2
 export LDS_AI_TIMEOUT=3
@@ -58,14 +59,15 @@ for _ in $(seq 1 30); do
 done
 curl -fsS --connect-timeout 1 --max-time 1 "$LDS_AI_URL/v1/models" >/dev/null || fail 'fake provider did not start'
 
-printf '1/6 askai prompt + common status\n'
+printf '1/7 askai prompt + common status\n'
 [[ "$(bash "$ASKAI" 'hello')" == ok ]] || fail 'askai prompt failed'
 status="$(bash "$ASKAI" --status)"
 grep -q '^provider=llm$' <<<"$status" || fail 'askai status did not expose common llm provider'
 grep -q '^available=1$' <<<"$status" || fail 'askai status did not report provider available'
 grep -q '^model=qwen2.5:3b$' <<<"$status" || fail 'askai status did not resolve deterministic model'
+grep -q '^think=auto$' <<<"$status" || fail 'askai status did not expose thinking default'
 
-printf '2/6 askai file/stdin + OpenAI request shape\n'
+printf '2/7 askai file/stdin + OpenAI request shape\n'
 printf 'file context\n' >"$tmp/context.txt"
 [[ "$(bash "$ASKAI" --file "$tmp/context.txt" 'explain file')" == ok ]] || fail 'askai file context failed'
 [[ "$(printf 'stdin context\n' | bash "$ASKAI" 'explain stdin')" == ok ]] || fail 'askai stdin context failed'
@@ -74,8 +76,24 @@ jq -e '.model == "qwen2.5:3b" and .messages[-1].role == "user"' <<<"$request_jso
   fail 'common OpenAI request shape drifted'
 [[ "$request_json" == *'### Stdin'* ]] || fail 'stdin context label missing from provider request'
 
-printf '3/6 JSON + sensitive input refusal\n'
-[[ "$(bash "$ASKAI" --json 'return json')" == '{"ok":true}' ]] || fail 'askai JSON mode failed'
+printf '3/7 askai per-request thinking + JSON hard-off\n'
+[[ "$(bash "$ASKAI" --think 'think request')" == ok ]] || fail 'askai --think failed'
+request_json="$(tail -n 1 "$capture_file" | base64 -d)"
+jq -e '.think == true and .reasoning_effort == "high"' <<<"$request_json" >/dev/null || fail 'askai --think request fields missing'
+
+[[ "$(bash "$ASKAI" --no-think 'direct request')" == ok ]] || fail 'askai --no-think failed'
+request_json="$(tail -n 1 "$capture_file" | base64 -d)"
+jq -e '.think == false and .reasoning_effort == "none"' <<<"$request_json" >/dev/null || fail 'askai --no-think request fields missing'
+
+LDS_AI_THINK=true bash "$ASKAI" --think-auto 'provider default' >/dev/null || fail 'askai --think-auto failed'
+request_json="$(tail -n 1 "$capture_file" | base64 -d)"
+jq -e '(.think? == null) and (.reasoning_effort? == null)' <<<"$request_json" >/dev/null || fail 'askai --think-auto did not omit thinking fields'
+
+[[ "$(LDS_AI_THINK=true bash "$ASKAI" --json 'return json')" == '{"ok":true}' ]] || fail 'askai JSON mode failed'
+request_json="$(tail -n 1 "$capture_file" | base64 -d)"
+jq -e '.think == false and .reasoning_effort == "none"' <<<"$request_json" >/dev/null || fail 'askai JSON mode did not force thinking off'
+
+printf '4/7 sensitive input refusal\n'
 printf 'SECRET=value\n' >"$tmp/.env"
 set +e
 bash "$ASKAI" --file "$tmp/.env" explain >"$tmp/out" 2>"$tmp/err"
@@ -83,7 +101,7 @@ rc=$?
 set -e
 [[ "$rc" -eq 77 ]] || fail "askai sensitive file returned $rc instead of 77"
 
-printf '4/6 gitx ai-commit delegates to Toolset local-only\n'
+printf '5/7 gitx ai-commit delegates to Toolset local-only\n'
 cat >"$tmp/gitx-real" <<'STUB'
 #!/usr/bin/env bash
 printf 'provider=%s\n' "${GITX_AI_PROVIDER:-}"
@@ -104,7 +122,7 @@ grep -q '^model=qwen2.5:3b$' <<<"$wrapper_out" || fail 'gitx wrapper did not pin
 grep -q '^gemini_key=$' <<<"$wrapper_out" || fail 'gitx wrapper leaked Gemini credentials to Toolset'
 grep -q '^args=ai-commit --dry-run$' <<<"$wrapper_out" || fail 'gitx wrapper changed Toolset ai-commit arguments'
 
-printf '5/6 gitx model ambiguity fails before Toolset\n'
+printf '6/7 gitx model ambiguity fails before Toolset\n'
 printf 'ambiguous\n' >"$mode_file"
 rm -rf -- "$LDS_AI_CACHE_DIR"
 set +e
@@ -115,7 +133,7 @@ set -e
 grep -q 'multiple installed models' "$tmp/err" || fail 'gitx ambiguity error missing'
 printf 'single\n' >"$mode_file"
 
-printf '6/6 non-AI gitx commands remain transparent\n'
+printf '7/7 non-AI gitx commands remain transparent\n'
 non_ai="$(bash "$GITX_WRAPPER" --version)"
 grep -q '^args=--version$' <<<"$non_ai" || fail 'non-AI gitx command was not delegated unchanged'
 

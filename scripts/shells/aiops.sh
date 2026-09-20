@@ -27,6 +27,9 @@ Usage:
 Options:
   --request <text>    Override the default analysis request.
   --system <text>     Add a bounded user instruction to the system prompt.
+  --think             Force thinking on for this request.
+  --no-think          Force thinking off for this request.
+  --think-auto        Use provider/model default for this request, bypassing LDS_AI_THINK.
   --json              Return source, redacted context, and answer as JSON.
   --stream            Stream the answer (not compatible with --json).
   --context-only      Print only the redacted context and do not call the model.
@@ -183,7 +186,7 @@ aiops_guard_context() {
 }
 
 aiops_render() {
-  local kind="$1" context="$2" request="$3" extra_system="$4" json="$5" stream="$6" context_only="$7"
+  local kind="$1" context="$2" request="$3" extra_system="$4" json="$5" stream="$6" context_only="$7" think_override="${8:-inherit}"
   local redacted answer system
 
   redacted="$(printf '%s' "$context" | ai_redact)"
@@ -197,11 +200,11 @@ aiops_render() {
   system="$(aiops_system_instruction "$kind" "$extra_system")"
 
   if [[ "$stream" == 1 ]]; then
-    ai_stream_context "$request" "$redacted" "$system"
+    ai_stream_context "$request" "$redacted" "$system" 0 "$think_override"
     return $?
   fi
 
-  answer="$(ai_generate_context "$request" "$redacted" "$system")" || return $?
+  answer="$(ai_generate_context "$request" "$redacted" "$system" "$think_override")" || return $?
 
   if [[ "$json" == 1 ]]; then
     jq -nc \
@@ -232,7 +235,7 @@ main() {
       ;;
   esac
 
-  local source='' file='' request='' extra_system='' json=0 stream=0 context_only=0
+  local source='' file='' request='' extra_system='' json=0 stream=0 context_only=0 think_override=inherit
   case "$command" in
     explain)
       source="${1:-}"
@@ -270,6 +273,18 @@ main() {
       --system)
         extra_system="${2:-}"
         shift 2
+        ;;
+      --think)
+        think_override=true
+        shift
+        ;;
+      --no-think)
+        think_override=false
+        shift
+        ;;
+      --think-auto)
+        think_override=auto
+        shift
         ;;
       --json)
         json=1
@@ -321,7 +336,7 @@ main() {
       ;;
   esac
 
-  aiops_render "$source" "$context" "$request" "$extra_system" "$json" "$stream" "$context_only"
+  aiops_render "$source" "$context" "$request" "$extra_system" "$json" "$stream" "$context_only" "$think_override"
 }
 
 main "$@"

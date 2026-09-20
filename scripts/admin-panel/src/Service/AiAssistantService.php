@@ -52,6 +52,7 @@ final class AiAssistantService
             'provider' => (string)($fields['provider'] ?? 'ollama'),
             'url' => (string)($fields['url'] ?? ''),
             'model' => (string)($fields['model'] ?? ''),
+            'think' => (string)($fields['think'] ?? 'auto'),
             'status_exit_code' => (int)$res['exit_code'],
             'analysis_timeout_seconds' => self::analysisTimeoutSeconds(),
             'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
@@ -74,6 +75,11 @@ final class AiAssistantService
             return $this->error('validation_request', 'AI request must be 2000 bytes or less.');
         }
 
+        $think = $this->normalizeThinkRequest($input['think'] ?? 'inherit');
+        if ($think === null) {
+            return $this->error('validation_think', 'AI thinking must be inherit, on, off, or auto.');
+        }
+
         $binary = trim((string)getenv('ADMIN_PANEL_AIOPS_BIN'));
         if ($binary === '') {
             $binary = 'aiops';
@@ -86,6 +92,14 @@ final class AiAssistantService
         if ($request !== '') {
             $cmd[] = '--request';
             $cmd[] = $request;
+        }
+
+        if ($think === 'on') {
+            $cmd[] = '--think';
+        } elseif ($think === 'off') {
+            $cmd[] = '--no-think';
+        } elseif ($think === 'auto') {
+            $cmd[] = '--think-auto';
         }
 
         $analysisTimeout = self::analysisTimeoutSeconds();
@@ -131,6 +145,22 @@ final class AiAssistantService
     public function sources(): array
     {
         return self::SOURCES;
+    }
+
+    private function normalizeThinkRequest(mixed $value): ?string
+    {
+        if (is_bool($value)) {
+            return $value ? 'on' : 'off';
+        }
+
+        $normalized = strtolower(trim((string)$value));
+        return match ($normalized) {
+            '', 'inherit' => 'inherit',
+            '1', 'true', 'yes', 'on' => 'on',
+            '0', 'false', 'no', 'off' => 'off',
+            'auto', 'default' => 'auto',
+            default => null,
+        };
     }
 
     private static function analysisTimeoutSeconds(): int

@@ -29,7 +29,20 @@ Defaults:
 ```text
 LDS_AI_PROVIDER=llm
 LDS_AI_URL=http://llm:11434
+LDS_AI_THINK=
 ```
+
+Thinking is provider-neutral and request-aware:
+
+- empty `LDS_AI_THINK` leaves thinking at the provider/model default;
+- `LDS_AI_THINK=true|false` provides the stack/container default;
+- request-level `--think` / `--no-think` override that default;
+- request-level `--think-auto` deliberately omits thinking controls and returns to the provider/model default;
+- strict JSON generation always forces thinking off.
+
+The common OpenAI-compatible request emits both compatible controls when thinking is explicit:
+`think=true|false` and `reasoning_effort=high|none`. FastFlow and Ollama each consume
+the control they support without docker-tools branching on the active backend.
 
 ## Behavior retained
 
@@ -84,10 +97,12 @@ Tests must use a provider-neutral OpenAI fake endpoint and verify:
 
 1. `/v1/models` availability/model selection;
 2. non-stream chat completion;
-3. JSON prompting + local validation;
-4. OpenAI SSE streaming and no-replay failure semantics;
-5. redaction and input limits;
-6. `askai` through the common provider;
-7. Toolset-owned `gitx ai-commit` delegation with cloud fallback disabled;
-8. all three reserved LLM hostnames;
-9. no Ollama-native API dependency in the shared `askai`/`aiops` client.
+3. JSON prompting + local validation + forced no-thinking;
+4. global and per-request thinking precedence;
+5. OpenAI SSE streaming and no-replay failure semantics;
+6. redaction and input limits;
+7. `askai`/`aiops` request-level thinking controls;
+8. Admin AI Assistant request-level thinking control;
+9. Toolset-owned `gitx ai-commit` delegation with cloud fallback disabled;
+10. all three reserved LLM hostnames;
+11. no Ollama-native API dependency in the shared `askai`/`aiops` client.

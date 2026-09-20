@@ -105,9 +105,12 @@ Published GitHub releases are the immutable source for versioned images.
 - `docker-tools` never embeds, starts, pulls, or stores Ollama models
 - The active provider/runtime is either `docker-llm-ollama` or `docker-llm-fastflow`
 - Container-to-container common endpoint: `http://llm:11434`
-- User-facing endpoint remains Nginx-owned at `https://llm-ollama.localhost`
-- `askai` provides direct prompt/file/stdin access
-- `aiops` explains bounded deterministic diagnostics, reviews explicitly supplied safe files, summarizes repository metadata, and can analyze Graphify output files
+- User-facing endpoint remains Nginx-owned at `https://llm.localhost`
+- `askai` provides direct prompt/file/stdin access with per-request `--think`, `--no-think`, and `--think-auto`
+- `aiops` exposes the same per-request thinking switches for diagnostic/review analysis
+- `LDS_AI_THINK` is the stack/container default; request-level switches override it, while `--think-auto` bypasses it and uses the provider/model default
+- strict `askai --json` generation always disables thinking so reasoning cannot displace the required JSON payload
+- the Admin AI Assistant exposes the same request-level thinking choice
 - `gitx ai-commit` remains implemented by Toolset; docker-tools only forces its local Ollama mode and disables Gemini/cloud fallback
 - when the active `llm` backend is FastFlow, current Toolset `gitx ai-commit` is not backend-compatible until Toolset gains a generic OpenAI provider
 - AI output is advisory only and is never auto-executed
@@ -830,6 +833,7 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `LDS_AI_PROVIDER`       | `llm`                             | provider-neutral local LLM identity |
 | `LDS_AI_URL`            | `http://llm:11434`                | common OpenAI-compatible internal endpoint |
 | `LDS_AI_MODEL`          | (empty)                            | explicit model override; required when installed-model choice is ambiguous |
+| `LDS_AI_THINK`          | (empty)                            | default thinking override: empty/provider default, `true`, or `false`; request-level controls can override it |
 | `LDS_AI_CONNECT_TIMEOUT` | `2`                              | provider connect timeout seconds |
 | `LDS_AI_PREFLIGHT_TIMEOUT` | `5`                            | provider availability/model preflight timeout seconds |
 | `LDS_AI_TIMEOUT`        | `1800`                            | generation timeout seconds shared by CLI and Admin AI analysis |

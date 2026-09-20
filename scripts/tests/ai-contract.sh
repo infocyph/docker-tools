@@ -32,9 +32,17 @@ if grep -R -n 'https://llm\.localhost' "$PROVIDER" "$ASKAI" "$GITX" "$ENTRYPOINT
 fi
 
 grep -q 'LDS_AI_PROVIDER:=llm' "$PROVIDER" || fail 'common llm provider default missing'
+grep -q 'LDS_AI_THINK:=' "$PROVIDER" || fail 'common thinking default missing'
+grep -q 'LDS_AI_THINK=' Dockerfile || fail 'Docker image common thinking env missing'
+grep -q 'export LDS_AI_ENABLED LDS_AI_PROVIDER LDS_AI_URL LDS_AI_MODEL LDS_AI_THINK' "$ENTRYPOINT" || fail 'entrypoint does not export common thinking setting'
 grep -q 'unsupported LDS_AI_PROVIDER' "$PROVIDER" || fail 'unsupported provider guard missing'
 grep -q '/v1/models' "$PROVIDER" || fail 'OpenAI models preflight missing'
 grep -q '/v1/chat/completions' "$PROVIDER" || fail 'OpenAI chat-completions transport missing'
+grep -q 'reasoning_effort:"high"' "$PROVIDER" || fail 'thinking-on OpenAI request mapping missing'
+grep -q 'reasoning_effort:"none"' "$PROVIDER" || fail 'thinking-off OpenAI request mapping missing'
+grep -q 'think:true' "$PROVIDER" || fail 'FastFlow thinking-on request mapping missing'
+grep -q 'think:false' "$PROVIDER" || fail 'FastFlow thinking-off request mapping missing'
+grep -q 'if \[\[ "$json_mode" == 1 \]\]' "$PROVIDER" || fail 'structured JSON thinking override missing'
 if grep -Eq '/api/(tags|generate|chat)' "$PROVIDER"; then
   fail 'Tools common AI client depends on provider-specific Ollama routes'
 fi
@@ -69,6 +77,14 @@ grep -q 'generation was not retried' "$PROVIDER" || fail 'stream no-replay contr
 grep -q '<untrusted-data>' "$PROVIDER" || fail 'untrusted-data prompt boundary missing'
 grep -q 'ai_redact' "$PROVIDER" || fail 'AI redaction layer missing'
 grep -q 'ai_assert_safe_file' "$ASKAI" || fail 'askai sensitive-file guard missing'
+grep -q -- '--think)' "$ASKAI" || fail 'askai per-request thinking-on switch missing'
+grep -q -- '--no-think)' "$ASKAI" || fail 'askai per-request thinking-off switch missing'
+grep -q -- '--think-auto)' "$ASKAI" || fail 'askai provider-default thinking switch missing'
+grep -q -- '--think)' scripts/shells/aiops.sh || fail 'aiops per-request thinking-on switch missing'
+grep -q -- '--no-think)' scripts/shells/aiops.sh || fail 'aiops per-request thinking-off switch missing'
+grep -q -- '--think-auto)' scripts/shells/aiops.sh || fail 'aiops provider-default thinking switch missing'
+grep -q 'validation_think' scripts/admin-panel/src/Service/AiAssistantService.php || fail 'admin thinking validation missing'
+grep -q 'id="aiThink"' scripts/admin-panel/app/pages/ai_assistant.php || fail 'admin thinking selector missing'
 
 grep -q 'init_ai_env' "$ENTRYPOINT" || fail 'entrypoint AI config initialization missing'
 if grep -Eq 'ai_available|/v1/models|/v1/chat/completions|/api/tags|/api/generate' "$ENTRYPOINT"; then

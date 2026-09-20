@@ -490,7 +490,7 @@ ai_stream() {
     fi
 
     [[ -n "$line" ]] || continue
-    [[ "$line" == data: * ]] || continue
+    [[ "$line" == "data: "* ]] || continue
     data="${line#data: }"
     if [[ "$data" == '[DONE]' ]]; then
       done=1

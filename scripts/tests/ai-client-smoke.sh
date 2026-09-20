@@ -4,17 +4,15 @@ set -euo pipefail
 ROOT="${AI_TEST_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
 ASKAI="${AI_ASKAI_BIN:-$ROOT/scripts/shells/askai.sh}"
 GITX_WRAPPER="${AI_GITX_WRAPPER:-$ROOT/scripts/shells/gitx-wrapper.sh}"
-GITX_AI_COMMIT="${AI_GITX_AI_COMMIT_BIN:-$ROOT/scripts/shells/gitx-ai-commit.sh}"
 PROVIDER="${AI_PROVIDER_LIB:-$ROOT/scripts/lib/ai-provider.sh}"
 ROUTER="${AI_FAKE_ROUTER:-$ROOT/scripts/tests/fake-llm-router.php}"
-PROMPT="${AI_COMMIT_PROMPT:-$ROOT/scripts/prompts/ai-commit.txt}"
 
 fail() {
   printf 'ai-client-smoke: %s\n' "$*" >&2
   exit 1
 }
 
-for required in "$ASKAI" "$GITX_WRAPPER" "$GITX_AI_COMMIT" "$PROVIDER" "$ROUTER" "$PROMPT"; do
+for required in "$ASKAI" "$GITX_WRAPPER" "$PROVIDER" "$ROUTER"; do
   [[ -r "$required" ]] || fail "required test input missing: $required"
 done
 
@@ -85,31 +83,32 @@ rc=$?
 set -e
 [[ "$rc" -eq 77 ]] || fail "askai sensitive file returned $rc instead of 77"
 
-printf '4/6 provider-neutral gitx ai-commit\n'
-repo="$tmp/repo"
-mkdir -p "$repo"
-git -C "$repo" init -q
-git -C "$repo" config user.email smoke@example.invalid
-git -C "$repo" config user.name smoke
-printf 'base\n' >"$repo/file.txt"
-git -C "$repo" add file.txt
-git -C "$repo" commit -qm init
-printf 'change\n' >>"$repo/file.txt"
-git -C "$repo" add file.txt
-
-export GITX_AI_COMMIT_BIN="$GITX_AI_COMMIT"
-export GITX_AI_COMMIT_PROMPT_FILE="$PROMPT"
+printf '4/6 gitx ai-commit delegates to Toolset local-only\n'
+cat >"$tmp/gitx-real" <<'STUB'
+#!/usr/bin/env bash
+printf 'provider=%s\n' "${GITX_AI_PROVIDER:-}"
+printf 'ollama_url=%s\n' "${GITX_OLLAMA_URL:-}"
+printf 'model=%s\n' "${GITX_OLLAMA_MODEL:-}"
+printf 'gemini_key=%s\n' "${GEMINI_API_KEY+x}"
+printf 'args=%s\n' "$*"
+STUB
+chmod 700 "$tmp/gitx-real"
+export GITX_TOOLSET_BIN="$tmp/gitx-real"
+export GEMINI_API_KEY='must-not-reach-toolset'
 rm -rf -- "$LDS_AI_CACHE_DIR"
-gitx_out="$(cd "$repo" && printf 'n\n' | bash "$GITX_WRAPPER" ai-commit)"
-grep -q 'Generated Commit Message' <<<"$gitx_out" || fail 'gitx common llm commit generation failed'
-grep -q 'Commit cancelled' <<<"$gitx_out" || fail 'gitx common llm interactive flow drifted'
-[[ "$(git -C "$repo" status --short)" == 'M  file.txt' ]] || fail 'gitx cancellation changed staged state'
 
-printf '5/6 common gitx fails closed on ambiguous model\n'
+wrapper_out="$(bash "$GITX_WRAPPER" ai-commit --dry-run)"
+grep -q '^provider=ollama$' <<<"$wrapper_out" || fail 'gitx wrapper did not force Toolset local Ollama mode'
+grep -q "^ollama_url=$LDS_AI_URL$" <<<"$wrapper_out" || fail 'gitx wrapper did not map the LocalDevStack llm URL'
+grep -q '^model=qwen2.5:3b$' <<<"$wrapper_out" || fail 'gitx wrapper did not pin deterministic model'
+grep -q '^gemini_key=$' <<<"$wrapper_out" || fail 'gitx wrapper leaked Gemini credentials to Toolset'
+grep -q '^args=ai-commit --dry-run$' <<<"$wrapper_out" || fail 'gitx wrapper changed Toolset ai-commit arguments'
+
+printf '5/6 gitx model ambiguity fails before Toolset\n'
 printf 'ambiguous\n' >"$mode_file"
 rm -rf -- "$LDS_AI_CACHE_DIR"
 set +e
-(cd "$repo" && printf 'n\n' | bash "$GITX_WRAPPER" ai-commit) >"$tmp/out" 2>"$tmp/err"
+bash "$GITX_WRAPPER" ai-commit --dry-run >"$tmp/out" 2>"$tmp/err"
 rc=$?
 set -e
 [[ "$rc" -eq 78 ]] || fail "ambiguous gitx model returned $rc instead of 78"
@@ -117,12 +116,6 @@ grep -q 'multiple installed models' "$tmp/err" || fail 'gitx ambiguity error mis
 printf 'single\n' >"$mode_file"
 
 printf '6/6 non-AI gitx commands remain transparent\n'
-cat >"$tmp/gitx-real" <<'STUB'
-#!/usr/bin/env bash
-printf 'args=%s\n' "$*"
-STUB
-chmod 700 "$tmp/gitx-real"
-export GITX_TOOLSET_BIN="$tmp/gitx-real"
 non_ai="$(bash "$GITX_WRAPPER" --version)"
 grep -q '^args=--version$' <<<"$non_ai" || fail 'non-AI gitx command was not delegated unchanged'
 

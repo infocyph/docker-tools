@@ -196,6 +196,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     LDS_AI_PROVIDER=llm \
     LDS_AI_URL=http://llm:11434 \
     LDS_AI_MODEL= \
+    LDS_AI_THINK= \
     LDS_AI_CONNECT_TIMEOUT=2 \
     LDS_AI_PREFLIGHT_TIMEOUT=5 \
     LDS_AI_TIMEOUT=1800 \

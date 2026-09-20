@@ -11,11 +11,24 @@ ai_is_uint() {
   [[ "${1:-}" =~ ^[0-9]+$ ]]
 }
 
+ai_normalize_think_mode() {
+  case "${1:-}" in
+    ""|auto|default) printf '%s' "" ;;
+    1|true|TRUE|yes|YES|on|ON) printf '%s' true ;;
+    0|false|FALSE|no|NO|off|OFF) printf '%s' false ;;
+    *)
+      ai_error "invalid thinking mode=${1:-} (expected auto/on/off or true/false)"
+      return 64
+      ;;
+  esac
+}
+
 ai_config_init() {
   : "${LDS_AI_ENABLED:=auto}"
   : "${LDS_AI_PROVIDER:=llm}"
   : "${LDS_AI_URL:=http://llm:11434}"
   : "${LDS_AI_MODEL:=}"
+  : "${LDS_AI_THINK:=}"
   : "${LDS_AI_CONNECT_TIMEOUT:=2}"
   : "${LDS_AI_PREFLIGHT_TIMEOUT:=5}"
   : "${LDS_AI_TIMEOUT:=1800}"
@@ -44,6 +57,10 @@ ai_config_init() {
     return 64
   fi
   LDS_AI_URL="${LDS_AI_URL%/}"
+
+  local normalized_think
+  normalized_think="$(ai_normalize_think_mode "$LDS_AI_THINK")" || return $?
+  LDS_AI_THINK="$normalized_think"
 
   local value name
   for name in LDS_AI_CONNECT_TIMEOUT LDS_AI_PREFLIGHT_TIMEOUT LDS_AI_TIMEOUT LDS_AI_AVAILABILITY_TTL LDS_AI_MAX_CONTEXT_BYTES LDS_AI_MAX_REQUEST_BYTES LDS_AI_MAX_RESPONSE_BYTES; do
@@ -313,22 +330,35 @@ ai_context_prompt() {
 }
 
 ai_generate_context() {
-  local request="${1:-Analyze the supplied data.}" context="${2:-}" extra_system="${3:-}"
-  ai_generate "$(ai_context_prompt "$request" "$context")" "$(ai_guarded_system "$extra_system")"
+  local request="${1:-Analyze the supplied data.}" context="${2:-}" extra_system="${3:-}" think_override="${4:-inherit}"
+  ai_generate "$(ai_context_prompt "$request" "$context")" "$(ai_guarded_system "$extra_system")" "$think_override"
 }
 
 ai_generate_context_json() {
-  local request="${1:-Analyze the supplied data.}" context="${2:-}" extra_system="${3:-}"
-  ai_generate_json "$(ai_context_prompt "$request" "$context")" "$(ai_guarded_system "$extra_system")"
+  local request="${1:-Analyze the supplied data.}" context="${2:-}" extra_system="${3:-}" think_override="${4:-inherit}"
+  ai_generate_json "$(ai_context_prompt "$request" "$context")" "$(ai_guarded_system "$extra_system")" "$think_override"
 }
 
 ai_stream_context() {
-  local request="${1:-Analyze the supplied data.}" context="${2:-}" extra_system="${3:-}" json_mode="${4:-0}"
-  ai_stream "$(ai_context_prompt "$request" "$context")" "$(ai_guarded_system "$extra_system")" "$json_mode"
+  local request="${1:-Analyze the supplied data.}" context="${2:-}" extra_system="${3:-}" json_mode="${4:-0}" think_override="${5:-inherit}"
+  ai_stream "$(ai_context_prompt "$request" "$context")" "$(ai_guarded_system "$extra_system")" "$json_mode" "$think_override"
+}
+
+ai__resolve_think_mode() {
+  local json_mode="$1" override="${2:-inherit}"
+  if [[ "$json_mode" == 1 ]]; then
+    printf '%s' false
+    return 0
+  fi
+  if [[ "$override" == inherit ]]; then
+    printf '%s' "$LDS_AI_THINK"
+    return 0
+  fi
+  ai_normalize_think_mode "$override"
 }
 
 ai__prepare_request() {
-  local request_file="$1" prompt="$2" system="$3" json_mode="$4" stream="$5" model
+  local request_file="$1" prompt="$2" system="$3" json_mode="$4" stream="$5" think_override="${6:-inherit}" model think_mode
   model="$(ai_model)" || return $?
 
   local prompt_bytes system_bytes
@@ -347,21 +377,190 @@ ai__prepare_request() {
   redacted_prompt="$(printf '%s' "$prompt" | ai_redact)"
   redacted_system="$(printf '%s' "$system" | ai_redact)"
   if [[ "$json_mode" == 1 ]]; then
-    redacted_system+="${redacted_system:+$'\n\n'}Return exactly one valid JSON value and no markdown or commentary."
+    redacted_system+="${redacted_system:+
+
+  local request_bytes
+  request_bytes="$(wc -c <"$request_file" | tr -d '[:space:]')"
+  if ! ai_is_uint "$request_bytes" || ((10#$request_bytes > 10#$LDS_AI_MAX_REQUEST_BYTES)); then
+    ai_error "request body exceeds LDS_AI_MAX_REQUEST_BYTES=$LDS_AI_MAX_REQUEST_BYTES"
+    return 65
   fi
+}
+
+ai__generate_nonstream() {
+  local json_mode="$1" prompt="$2" system="${3:-}" think_override="${4:-inherit}" request response code rc size result
+  ai_config_init || return $?
+  [[ "$LDS_AI_ENABLED" != 0 ]] || { ai_error 'AI is disabled by LDS_AI_ENABLED=0'; return 69; }
+
+  request="$(mktemp "${TMPDIR:-/tmp}/lds-ai-request.XXXXXX")" || return 1
+  response="$(mktemp "${TMPDIR:-/tmp}/lds-ai-response.XXXXXX")" || { rm -f -- "$request"; return 1; }
+  chmod 600 "$request" "$response"
+
+  if ai__prepare_request "$request" "$prompt" "$system" "$json_mode" false "$think_override"; then
+    :
+  else
+    rc=$?
+    rm -f -- "$request" "$response"
+    return "$rc"
+  fi
+
+  if code="$(curl --silent --show-error \
+    --connect-timeout "$LDS_AI_CONNECT_TIMEOUT" \
+    --max-time "$LDS_AI_TIMEOUT" \
+    --max-filesize "$LDS_AI_MAX_RESPONSE_BYTES" \
+    --proto '=http,https' \
+    -H 'Content-Type: application/json' \
+    --data-binary @"$request" \
+    --output "$response" --write-out '%{http_code}' \
+    "$LDS_AI_URL/v1/chat/completions")"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  rm -f -- "$request"
+
+  if ((rc != 0)); then
+    rm -f -- "$response"
+    ai_error "generation request failed (curl exit $rc)"
+    return 69
+  fi
+  if [[ "$code" != 200 ]]; then
+    result="$(head -c 512 "$response" | tr '\r\n' ' ')"
+    rm -f -- "$response"
+    ai_error "generation request returned HTTP $code${result:+: $result}"
+    return 69
+  fi
+
+  size="$(wc -c <"$response" | tr -d '[:space:]')"
+  if ! ai_is_uint "$size" || ((10#$size > 10#$LDS_AI_MAX_RESPONSE_BYTES)); then
+    rm -f -- "$response"
+    ai_error "generation response exceeded LDS_AI_MAX_RESPONSE_BYTES=$LDS_AI_MAX_RESPONSE_BYTES"
+    return 65
+  fi
+  if ! jq -e 'type == "object" and (.choices[0].message.content | type == "string")' "$response" >/dev/null 2>&1; then
+    rm -f -- "$response"
+    ai_error 'provider returned malformed OpenAI chat-completions JSON'
+    return 69
+  fi
+
+  result="$(jq -r '.choices[0].message.content' "$response")"
+  rm -f -- "$response"
+  if [[ "$json_mode" == 1 ]] && ! jq -e . >/dev/null 2>&1 <<<"$result"; then
+    ai_error 'provider JSON-mode response was not valid JSON'
+    return 69
+  fi
+  printf '%s\n' "$result"
+}
+
+ai_generate() {
+  ai__generate_nonstream 0 "${1:-}" "${2:-}" "${3:-inherit}"
+}
+
+ai_generate_json() {
+  ai__generate_nonstream 1 "${1:-}" "${2:-}" "${3:-inherit}"
+}
+
+ai_stream() {
+  local prompt="${1:-}" system="${2:-}" json_mode="${3:-0}" think_override="${4:-inherit}" request fifo pid total=0 limited=0 line line_bytes data chunk rc done=0
+  ai_config_init || return $?
+  [[ "$LDS_AI_ENABLED" != 0 ]] || { ai_error 'AI is disabled by LDS_AI_ENABLED=0'; return 69; }
+
+  request="$(mktemp "${TMPDIR:-/tmp}/lds-ai-request.XXXXXX")" || return 1
+  fifo="$(mktemp "${TMPDIR:-/tmp}/lds-ai-stream.XXXXXX")" || { rm -f -- "$request"; return 1; }
+  rm -f -- "$fifo"
+  mkfifo -m 600 "$fifo" || { rm -f -- "$request"; return 1; }
+  chmod 600 "$request"
+
+  if ai__prepare_request "$request" "$prompt" "$system" "$json_mode" true "$think_override"; then
+    :
+  else
+    rc=$?
+    rm -f -- "$request" "$fifo"
+    return "$rc"
+  fi
+
+  curl --silent --show-error --no-buffer \
+    --connect-timeout "$LDS_AI_CONNECT_TIMEOUT" \
+    --max-time "$LDS_AI_TIMEOUT" \
+    --proto '=http,https' \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: text/event-stream' \
+    --data-binary @"$request" \
+    "$LDS_AI_URL/v1/chat/completions" >"$fifo" &
+  pid=$!
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_bytes="$(printf '%s\n' "$line" | wc -c | tr -d '[:space:]')"
+    if ! ai_is_uint "$line_bytes"; then
+      kill "$pid" >/dev/null 2>&1 || true
+      wait "$pid" >/dev/null 2>&1 || true
+      rm -f -- "$request" "$fifo"
+      ai_error 'unable to determine streaming response size; generation was not retried'
+      return 65
+    fi
+    total=$((total + 10#$line_bytes))
+    if ((total > 10#$LDS_AI_MAX_RESPONSE_BYTES)); then
+      limited=1
+      kill "$pid" >/dev/null 2>&1 || true
+      break
+    fi
+
+    [[ -n "$line" ]] || continue
+    [[ "$line" == "data: "* ]] || continue
+    data="${line#data: }"
+    if [[ "$data" == '[DONE]' ]]; then
+      done=1
+      break
+    fi
+    if ! chunk="$(jq -er 'if .error then error(.error.message // .error) else (.choices[0].delta.content // "") end' <<<"$data" 2>/dev/null)"; then
+      kill "$pid" >/dev/null 2>&1 || true
+      wait "$pid" >/dev/null 2>&1 || true
+      rm -f -- "$request" "$fifo"
+      ai_error 'provider returned malformed OpenAI SSE after partial output; generation was not retried'
+      return 69
+    fi
+    printf '%s' "$chunk"
+  done <"$fifo"
+
+  if wait "$pid"; then rc=0; else rc=$?; fi
+  rm -f -- "$request" "$fifo"
+
+  if ((limited)); then
+    ai_error "stream exceeded LDS_AI_MAX_RESPONSE_BYTES=$LDS_AI_MAX_RESPONSE_BYTES; generation was not retried"
+    return 65
+  fi
+  if ((rc != 0)); then
+    ai_error "stream interrupted (curl exit $rc); generation was not retried"
+    return 69
+  fi
+  if ((done == 0)); then
+    ai_error 'stream ended without OpenAI [DONE] marker; generation was not retried'
+    return 69
+  fi
+  printf '\n'
+}
+\n\n'}Return exactly one valid JSON value and no markdown or commentary."
+  fi
+
+  think_mode="$(ai__resolve_think_mode "$json_mode" "$think_override")" || return $?
 
   jq -n \
     --arg model "$model" \
     --arg prompt "$redacted_prompt" \
     --arg system "$redacted_system" \
     --argjson stream "$stream" \
+    --arg think "$think_mode" \
     '{
       model:$model,
       messages:
         ((if ($system | length) > 0 then [{role:"system",content:$system}] else [] end)
         + [{role:"user",content:$prompt}]),
       stream:$stream
-    }' >"$request_file"
+    }
+    | if $think == "" then .
+      elif $think == "true" then . + {think:true, reasoning_effort:"high"}
+      else . + {think:false, reasoning_effort:"none"}
+      end' >"$request_file"
 
   local request_bytes
   request_bytes="$(wc -c <"$request_file" | tr -d '[:space:]')"

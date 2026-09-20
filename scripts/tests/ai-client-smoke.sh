@@ -87,7 +87,7 @@ jq -e '.think == false and .reasoning_effort == "none"' <<<"$request_json" >/dev
 
 LDS_AI_THINK=true bash "$ASKAI" --think-auto 'provider default' >/dev/null || fail 'askai --think-auto failed'
 request_json="$(tail -n 1 "$capture_file" | base64 -d)"
-jq -e '(. as $o | (($o | has("think")) == false and ($o | has("reasoning_effort")) == false))' <<<"$request_json" >/dev/null || fail 'askai --think-auto did not omit thinking fields'
+jq -e '(.think? == null) and (.reasoning_effort? == null)' <<<"$request_json" >/dev/null || fail 'askai --think-auto did not omit thinking fields'
 
 [[ "$(LDS_AI_THINK=true bash "$ASKAI" --json 'return json')" == '{"ok":true}' ]] || fail 'askai JSON mode failed'
 request_json="$(tail -n 1 "$capture_file" | base64 -d)"

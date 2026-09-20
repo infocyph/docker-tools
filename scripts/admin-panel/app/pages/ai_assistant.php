@@ -50,6 +50,17 @@ declare(strict_types=1);
           <div class="form-text">The fixed safety prompt remains authoritative. Model output is advisory and never auto-executed.</div>
         </div>
 
+        <div class="mb-3">
+          <label class="form-label fw-semibold" for="aiThink">Thinking mode</label>
+          <select id="aiThink" class="form-select">
+            <option value="inherit">Stack default</option>
+            <option value="on">Force thinking on</option>
+            <option value="off">Force thinking off</option>
+            <option value="auto">Provider / model default</option>
+          </select>
+          <div class="form-text">This applies only to the current analysis request.</div>
+        </div>
+
         <div class="d-flex gap-2 flex-wrap">
           <button id="aiRun" class="btn ap-primary-btn" type="button">
             <i class="bi bi-stars me-1"></i> Run Analysis
@@ -100,6 +111,7 @@ declare(strict_types=1);
   const badge = document.getElementById('aiProviderBadge');
   const source = document.getElementById('aiSource');
   const request = document.getElementById('aiRequest');
+  const think = document.getElementById('aiThink');
   const run = document.getElementById('aiRun');
   const cancel = document.getElementById('aiCancel');
   const message = document.getElementById('aiMessage');
@@ -112,6 +124,7 @@ declare(strict_types=1);
     cancel.disabled = !busy;
     source.disabled = busy;
     request.disabled = busy;
+    think.disabled = busy;
   };
 
   fetch(api, {headers: {'Accept': 'application/json'}})
@@ -119,7 +132,7 @@ declare(strict_types=1);
     .then((data) => {
       if (data.available) {
         badge.className = 'badge text-bg-success';
-        badge.textContent = 'Local AI available' + (data.model ? ' · ' + data.model : '');
+        badge.textContent = 'Local AI available' + (data.model ? ' · ' + data.model : '') + (data.think ? ' · think ' + data.think : '');
       } else {
         badge.className = 'badge text-bg-secondary';
         badge.textContent = 'Local AI unavailable';
@@ -150,7 +163,8 @@ declare(strict_types=1);
         headers: {'Accept': 'application/json', 'Content-Type': 'application/json'},
         body: JSON.stringify({
           source: source.value,
-          request: request.value.trim()
+          request: request.value.trim(),
+          think: think.value
         }),
         signal: controller.signal
       });

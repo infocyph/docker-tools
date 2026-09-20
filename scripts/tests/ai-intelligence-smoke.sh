@@ -41,6 +41,7 @@ export LDS_AI_ENABLED=1
 export LDS_AI_PROVIDER=llm
 export LDS_AI_URL="http://127.0.0.1:$port"
 export LDS_AI_MODEL=''
+export LDS_AI_THINK=''
 export LDS_AI_CONNECT_TIMEOUT=1
 export LDS_AI_PREFLIGHT_TIMEOUT=2
 export LDS_AI_TIMEOUT=3
@@ -118,28 +119,38 @@ for name in status monitor-alerts monitor-slo monitor-db monitor-queue monitor-t
 done
 export PATH="$tmp/bin:$PATH"
 
-printf '1/6 operational explanation + deterministic redaction\n'
-out="$(bash "$AIOPS" explain db --json)"
+printf '1/7 operational explanation + deterministic redaction\n'
+out="$(bash "$AIOPS" explain db --json --think)"
 jq -e '.ok == true and .source == "db" and .answer == "ok"' <<<"$out" >/dev/null || fail 'db explanation failed'
 context="$(jq -r '.context' <<<"$out")"
 grep -q '\[REDACTED\]' <<<"$context" || fail 'operational context was not redacted'
 if grep -q 'secret-token-value' <<<"$context"; then
   fail 'secret leaked into returned AI context'
 fi
+request_json="$(tail -n 1 "$capture_file" | base64 -d)"
+jq -e '.think == true and .reasoning_effort == "high"' <<<"$request_json" >/dev/null || fail 'aiops --think request fields missing'
 
-printf '2/6 context-only never generates\n'
+[[ "$(bash "$AIOPS" explain queue --no-think)" == ok ]] || fail 'aiops --no-think failed'
+request_json="$(tail -n 1 "$capture_file" | base64 -d)"
+jq -e '.think == false and .reasoning_effort == "none"' <<<"$request_json" >/dev/null || fail 'aiops --no-think request fields missing'
+
+LDS_AI_THINK=true bash "$AIOPS" explain tls --think-auto >/dev/null || fail 'aiops --think-auto failed'
+request_json="$(tail -n 1 "$capture_file" | base64 -d)"
+jq -e '((has("think") | not) and (has("reasoning_effort") | not))' <<<"$request_json" >/dev/null || fail 'aiops --think-auto did not omit thinking fields'
+
+printf '2/7 context-only never generates\n'
 before="$(wc -l <"$capture_file" | tr -d '[:space:]')"
 logs_context="$(bash "$AIOPS" explain logs --context-only)"
 after="$(wc -l <"$capture_file" | tr -d '[:space:]')"
 [[ "$before" == "$after" ]] || fail 'context-only unexpectedly called generation endpoint'
 grep -q '"errors":4' <<<"$logs_context" || fail 'log context missing deterministic heatmap data'
 
-printf '3/6 troubleshoot summary\n'
+printf '3/7 troubleshoot summary\n'
 troubleshoot="$(bash "$AIOPS" troubleshoot --json)"
 jq -e '.ok == true and .source == "troubleshoot" and .answer == "ok"' <<<"$troubleshoot" >/dev/null || fail 'troubleshoot analysis failed'
 jq -er '.context' <<<"$troubleshoot" | grep -q '"kind":"troubleshoot"' || fail 'troubleshoot context missing combined snapshot'
 
-printf '4/6 review + Graphify input safety\n'
+printf '4/7 review + Graphify input safety\n'
 printf 'server_name app.localhost;\n' >"$tmp/nginx.conf"
 [[ "$(bash "$AIOPS" review --file "$tmp/nginx.conf")" == ok ]] || fail 'safe config review failed'
 printf '{"nodes":3,"edges":2}\n' >"$tmp/graphify.json"
@@ -158,7 +169,7 @@ rc=$?
 set -e
 [[ "$rc" -eq 65 ]] || fail "oversized review input returned $rc instead of 65"
 
-printf '5/6 repository review is metadata-only\n'
+printf '5/7 repository review is metadata-only\n'
 repo_dir="$tmp/repo"
 mkdir -p "$repo_dir"
 git -C "$repo_dir" init -q
@@ -176,7 +187,7 @@ if grep -q '^diff --git ' <<<"$repo_context"; then
   fail 'repo review unexpectedly included diff content'
 fi
 
-printf '6/6 bounded admin service delegates to aiops\n'
+printf '6/7 bounded admin service delegates to aiops\n'
 if [[ -r "$ADMIN_BOOTSTRAP" ]]; then
   AI_ADMIN_BOOTSTRAP="$ADMIN_BOOTSTRAP" php <<'PHP'
 <?php
@@ -186,23 +197,41 @@ require getenv('AI_ADMIN_BOOTSTRAP');
 $service = new AdminPanel\Service\AiAssistantService();
 
 $status = $service->status();
-if (($status['available'] ?? false) !== true) {
-    fwrite(STDERR, "admin AI status did not report available\n");
+if (($status['available'] ?? false) !== true || ($status['think'] ?? '') !== 'auto') {
+    fwrite(STDERR, "admin AI status did not report available/default thinking mode\n");
     exit(1);
 }
 
-$result = $service->analyze(['source' => 'db', 'request' => 'Explain the failure.']);
+$result = $service->analyze(['source' => 'db', 'request' => 'Explain the failure.', 'think' => 'on']);
 if (($result['ok'] ?? false) !== true || ($result['answer'] ?? '') !== 'ok' || !str_contains((string)($result['context'] ?? ''), '[REDACTED]')) {
     fwrite(STDERR, "admin AI analysis contract failed\n");
     exit(1);
 }
 
+$off = $service->analyze(['source' => 'queue', 'think' => false]);
+if (($off['ok'] ?? false) !== true) {
+    fwrite(STDERR, "admin AI boolean no-thinking contract failed\n");
+    exit(1);
+}
+
 $invalid = $service->analyze(['source' => 'not-a-source']);
 if (($invalid['error'] ?? '') !== 'validation_source') {
-    fwrite(STDERR, "admin AI validation contract failed\n");
+    fwrite(STDERR, "admin AI source validation contract failed\n");
+    exit(1);
+}
+
+$invalidThink = $service->analyze(['source' => 'db', 'think' => 'sometimes']);
+if (($invalidThink['error'] ?? '') !== 'validation_think') {
+    fwrite(STDERR, "admin AI thinking validation contract failed\n");
     exit(1);
 }
 PHP
 fi
+
+printf '7/7 admin request-level thinking reaches provider\n'
+request_json="$(tail -n 2 "$capture_file" | head -n 1 | base64 -d)"
+jq -e '.think == true and .reasoning_effort == "high"' <<<"$request_json" >/dev/null || fail 'admin think=on request fields missing'
+request_json="$(tail -n 1 "$capture_file" | base64 -d)"
+jq -e '.think == false and .reasoning_effort == "none"' <<<"$request_json" >/dev/null || fail 'admin think=false request fields missing'
 
 printf 'ai-intelligence-smoke: ok\n'

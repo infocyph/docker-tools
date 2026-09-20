@@ -108,7 +108,7 @@ jq -e '.think == false and .reasoning_effort == "none"' <<<"$request_json" >/dev
 
 [[ "$(ai_generate 'request provider default' '' auto)" == ok ]] || fail 'request auto-thinking override failed'
 request_json="$(tail -n 1 "$capture_file" | base64 -d)"
-jq -e 'has("think") | not and has("reasoning_effort") | not' <<<"$request_json" >/dev/null || fail 'request auto-thinking override did not omit controls'
+jq -e '(.think? == null) and (.reasoning_effort? == null)' <<<"$request_json" >/dev/null || fail 'request auto-thinking override did not omit controls'
 
 [[ "$(ai_generate_context_json 'Return JSON.' 'safe context')" == '{"ok":true}' ]] || fail 'JSON mode failed'
 request_json="$(tail -n 1 "$capture_file" | base64 -d)"

@@ -268,8 +268,6 @@ COPY scripts/lib/ai-provider.sh /usr/local/lib/docker-tools/ai-provider.sh
 COPY scripts/shells/askai.sh /usr/local/bin/askai
 COPY scripts/shells/aiops.sh /usr/local/bin/aiops
 COPY scripts/shells/gitx-wrapper.sh /tmp/gitx-wrapper
-COPY scripts/shells/gitx-ai-commit.sh /usr/local/bin/gitx-ai-commit
-COPY scripts/prompts/ai-commit.txt /usr/local/lib/docker-tools/ai-commit.txt
 COPY scripts/shells/certify.sh /usr/local/bin/certify
 COPY scripts/shells/mkhost.sh /usr/local/bin/mkhost
 COPY scripts/shells/rmhost.sh /usr/local/bin/rmhost
@@ -332,7 +330,6 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
   && rm -f /tmp/toolset-install.sh \
   && chmod +x \
       /usr/local/bin/gitx \
-      /usr/local/bin/gitx-ai-commit \
       /usr/local/bin/askai \
       /usr/local/bin/aiops \
       /usr/local/bin/git-default \
@@ -399,7 +396,6 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
   && bash -n /usr/local/bin/askai \
   && bash -n /usr/local/bin/aiops \
   && bash -n /usr/local/bin/gitx \
-  && bash -n /usr/local/bin/gitx-ai-commit \
   && askai --help >/dev/null \
   && aiops --help >/dev/null \
   && bash -n /usr/local/bin/entrypoint \

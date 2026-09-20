@@ -136,7 +136,7 @@ jq -e '.think == false and .reasoning_effort == "none"' <<<"$request_json" >/dev
 
 LDS_AI_THINK=true bash "$AIOPS" explain tls --think-auto >/dev/null || fail 'aiops --think-auto failed'
 request_json="$(tail -n 1 "$capture_file" | base64 -d)"
-jq -e '(. as $o | (($o | has("think")) == false and ($o | has("reasoning_effort")) == false))' <<<"$request_json" >/dev/null || fail 'aiops --think-auto did not omit thinking fields'
+jq -e '(.think? == null) and (.reasoning_effort? == null)' <<<"$request_json" >/dev/null || fail 'aiops --think-auto did not omit thinking fields'
 
 printf '2/7 context-only never generates\n'
 before="$(wc -l <"$capture_file" | tr -d '[:space:]')"

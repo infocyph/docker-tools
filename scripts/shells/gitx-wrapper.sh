@@ -6,7 +6,7 @@ REAL_GITX="${GITX_TOOLSET_BIN:-/usr/local/libexec/gitx-toolset}"
 
 if [[ "${1:-}" == 'ai-commit' ]]; then
   shift
-  exec /usr/local/bin/gitx-ai-commit "$@"
+  exec "${GITX_AI_COMMIT_BIN:-/usr/local/bin/gitx-ai-commit}" "$@"
 fi
 
 exec "$REAL_GITX" "$@"

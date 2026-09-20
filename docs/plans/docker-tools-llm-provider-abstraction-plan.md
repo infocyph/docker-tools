@@ -48,15 +48,23 @@ The provider abstraction must retain the existing safety contract:
 
 ## gitx ai-commit
 
-Toolset's internal `gitx ai-commit` supports Ollama/Gemini rather than a generic local
-OpenAI base URL. docker-tools therefore owns the AI-commit interception:
+`gitx ai-commit` remains owned by Toolset. docker-tools must **not** copy, fork, or
+reimplement its staged-diff, prompt, or commit-flow logic.
 
-- all non-AI `gitx` commands delegate to Toolset unchanged;
-- `gitx ai-commit` uses the local common provider library;
-- no Gemini/cloud fallback;
-- known credentials remain redacted;
-- staged-diff size remains bounded;
-- normal y/edit/no commit flow remains.
+Current Toolset supports `ollama|gemini|auto`, not a generic OpenAI provider. Therefore
+docker-tools only performs a narrow wrapper configuration when `gitx ai-commit` is
+invoked:
+
+- preserve the installed Toolset `gitx` binary and delegate the command unchanged;
+- force `GITX_AI_PROVIDER=ollama` so LocalDevStack can never fall back to Gemini/cloud;
+- point `GITX_OLLAMA_URL` at the selected LocalDevStack `llm` service URL;
+- reuse the deterministic model chosen by the Tools provider preflight;
+- unset Gemini credentials in the delegated child process.
+
+When `llm` points to FastFlow, Toolset's current Ollama-native `ai-commit` transport is
+not compatible and may fail locally. Fixing that belongs in Toolset by adding a generic
+OpenAI-compatible provider; docker-tools must not introduce a second `ai-commit`
+implementation to work around it.
 
 ## Reserved routes
 
@@ -80,6 +88,6 @@ Tests must use a provider-neutral OpenAI fake endpoint and verify:
 4. OpenAI SSE streaming and no-replay failure semantics;
 5. redaction and input limits;
 6. `askai` through the common provider;
-7. provider-neutral `gitx ai-commit`;
+7. Toolset-owned `gitx ai-commit` delegation with cloud fallback disabled;
 8. all three reserved LLM hostnames;
-9. no Ollama-native API dependency in the shared client.
+9. no Ollama-native API dependency in the shared `askai`/`aiops` client.

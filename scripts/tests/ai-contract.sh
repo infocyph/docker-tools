@@ -42,12 +42,18 @@ if grep -REn 'api\.openai\.com|generativelanguage\.googleapis\.com|anthropic\.co
   fail 'implicit external AI provider endpoint added'
 fi
 
-grep -q 'GITX_AI_COMMIT_BIN' "$GITX" || fail 'gitx wrapper does not route ai-commit through common local helper'
+grep -q 'GITX_AI_PROVIDER=ollama' "$GITX" || fail 'gitx wrapper does not force Toolset local Ollama mode'
+grep -q 'GITX_OLLAMA_URL="$LDS_AI_URL"' "$GITX" || fail 'gitx wrapper does not point Toolset at the LocalDevStack llm endpoint'
+grep -q 'selected_model="$(ai_model)"' "$GITX" || fail 'gitx wrapper does not pin deterministic local model selection'
+grep -q 'unset GEMINI_API_KEY' "$GITX" || fail 'gitx wrapper does not prevent Gemini/cloud fallback'
 grep -q '/usr/local/libexec/gitx-toolset' "$GITX" || fail 'gitx Toolset delegation path missing'
 grep -q 'mv /usr/local/bin/gitx /usr/local/libexec/gitx-toolset' Dockerfile || fail 'Toolset gitx binary is not preserved behind wrapper'
-grep -q 'gitx-ai-commit.sh' Dockerfile || fail 'provider-neutral gitx ai-commit helper is not packaged'
-if grep -Eq 'GITX_AI_PROVIDER=ollama|GITX_OLLAMA_URL|GEMINI_API_KEY' "$GITX" scripts/shells/gitx-ai-commit.sh; then
-  fail 'gitx common AI path depends on Ollama/Gemini provider internals'
+
+if [[ -e scripts/shells/gitx-ai-commit.sh || -e scripts/prompts/ai-commit.txt ]]; then
+  fail 'docker-tools must not duplicate Toolset gitx ai-commit implementation or prompt'
+fi
+if grep -Eq 'gitx-ai-commit|ai-commit\.txt' Dockerfile; then
+  fail 'Docker image packages a duplicate gitx ai-commit implementation'
 fi
 
 grep -q 'LDS_AI_CONNECT_TIMEOUT' "$PROVIDER" || fail 'separate AI connect timeout missing'

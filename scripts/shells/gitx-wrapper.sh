@@ -3,7 +3,11 @@ set -euo pipefail
 
 if [[ "${1:-}" == 'ai-commit' ]]; then
   shift
-  exec "${GITX_AI_COMMIT_BIN:-/usr/local/bin/gitx-ai-commit}" "$@"
+  helper="${GITX_AI_COMMIT_BIN:-/usr/local/bin/gitx-ai-commit}"
+  if [[ -x "$helper" ]]; then
+    exec "$helper" "$@"
+  fi
+  exec bash "$helper" "$@"
 fi
 
 REAL_GITX="${GITX_TOOLSET_BIN:-/usr/local/libexec/gitx-toolset}"

@@ -40,17 +40,18 @@ RUN apk add --no-cache curl bash ca-certificates jq file php php-phar php-common
   && /out/mkcert -version \
   && tmp="$(mktemp -d)" \
   && if [ "$LAZYDOCKER_RELEASE" = latest ]; then \
-       lazy_release_api="https://api.github.com/repos/jesseduffield/lazydocker/releases/latest"; \
+       lazy_release_url="$(curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 -o /dev/null -w '%{url_effective}' https://github.com/jesseduffield/lazydocker/releases/latest)"; \
+       lazy_tag="${lazy_release_url##*/}"; \
      else \
-       lazy_release_api="https://api.github.com/repos/jesseduffield/lazydocker/releases/tags/${LAZYDOCKER_RELEASE}"; \
+       lazy_tag="$LAZYDOCKER_RELEASE"; \
      fi \
-  && release_json="$(curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 "$lazy_release_api")" \
-  && lazy_tag="$(printf '%s' "$release_json" | jq -er '.tag_name')" \
+  && case "$lazy_tag" in v*) ;; *) lazy_tag="v$lazy_tag" ;; esac \
   && lazy_version="${lazy_tag#v}" \
   && case "$TARGETARCH" in amd64) lazy_arch=x86_64 ;; arm64) lazy_arch=arm64 ;; esac \
   && lazy_asset="lazydocker_${lazy_version}_Linux_${lazy_arch}.tar.gz" \
-  && lazy_url="$(printf '%s' "$release_json" | jq -er --arg name "$lazy_asset" '.assets[] | select(.name == $name) | .browser_download_url')" \
-  && checksum_url="$(printf '%s' "$release_json" | jq -er '.assets[] | select(.name == "checksums.txt") | .browser_download_url')" \
+  && lazy_base_url="https://github.com/jesseduffield/lazydocker/releases/download/${lazy_tag}" \
+  && lazy_url="${lazy_base_url}/${lazy_asset}" \
+  && checksum_url="${lazy_base_url}/checksums.txt" \
   && curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 -o "$tmp/$lazy_asset" "$lazy_url" \
   && curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10 -o "$tmp/checksums.txt" "$checksum_url" \
   && expected="$(awk -v asset="$lazy_asset" '$2 == asset {print $1}' "$tmp/checksums.txt")" \

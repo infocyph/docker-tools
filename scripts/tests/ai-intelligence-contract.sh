@@ -33,6 +33,9 @@ grep -q 'ai_generate_context' "$AIOPS" || fail 'aiops does not reuse provider co
 grep -q -- '--context-only' "$AIOPS" || fail 'aiops context preview mode missing'
 grep -q 'repository-metadata' "$AIOPS" || fail 'repository metadata review helper missing'
 grep -q 'graphify' "$AIOPS" || fail 'Graphify analysis helper missing'
+grep -q -- '--think)' "$AIOPS" || fail 'aiops thinking-on override missing'
+grep -q -- '--no-think)' "$AIOPS" || fail 'aiops thinking-off override missing'
+grep -q -- '--think-auto)' "$AIOPS" || fail 'aiops provider-default thinking override missing'
 if grep -Eq '(^|[[:space:]])eval([[:space:]]|$)|bash[[:space:]]+-c|sh[[:space:]]+-c' "$AIOPS"; then
   fail 'aiops introduced command-string execution'
 fi
@@ -50,6 +53,10 @@ if grep -Eq 'ANALYSIS_TIMEOUT_SECONDS = 45|45000|45-second UI bound' "$SERVICE" 
   fail 'legacy 45-second admin AI timeout reappeared'
 fi
 grep -q "source === 'troubleshoot'" "$SERVICE" || fail 'admin troubleshooting action missing'
+grep -q 'normalizeThinkRequest' "$SERVICE" || fail 'admin request-level thinking normalization missing'
+grep -q -- "--think'" "$SERVICE" || fail 'admin thinking-on CLI mapping missing'
+grep -q -- "--no-think'" "$SERVICE" || fail 'admin thinking-off CLI mapping missing'
+grep -q -- "--think-auto'" "$SERVICE" || fail 'admin provider-default thinking CLI mapping missing'
 grep -q "REQUEST_METHOD" "$ENDPOINT" || fail 'admin AI endpoint method gate missing'
 grep -q "method === 'POST'" "$ENDPOINT" || fail 'admin AI generation is not POST-only'
 grep -q "'/api/ai-assistant'" "$KERNEL" || fail 'admin AI API route missing'
@@ -57,6 +64,8 @@ grep -q "'ai-assistant'" "$ROUTER" || fail 'admin AI page route missing'
 grep -q 'AbortController' "$PAGE" || fail 'admin AI cancellation UX missing'
 grep -q 'Run Analysis' "$PAGE" || fail 'admin AI action is not explicit'
 grep -q 'Context Sent' "$PAGE" || fail 'admin AI context disclosure missing'
+grep -q 'id="aiThink"' "$PAGE" || fail 'admin request-level thinking selector missing'
+grep -q 'think: think.value' "$PAGE" || fail 'admin UI does not send thinking mode per request'
 
 grep -q 'COPY scripts/shells/aiops.sh /usr/local/bin/aiops' Dockerfile || fail 'aiops is not installed in image'
 grep -q '/usr/local/bin/aiops' Dockerfile || fail 'aiops executable contract missing'

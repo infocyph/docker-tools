@@ -193,8 +193,8 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     SOPS_GLOBAL_DIR=/etc/share/sops/global \
     SOPS_REPO_DIR=/etc/share/vhosts/sops \
     LDS_AI_ENABLED=auto \
-    LDS_AI_PROVIDER=ollama \
-    LDS_AI_URL=http://llm-ollama:11434 \
+    LDS_AI_PROVIDER=llm \
+    LDS_AI_URL=http://llm:11434 \
     LDS_AI_MODEL= \
     LDS_AI_CONNECT_TIMEOUT=2 \
     LDS_AI_PREFLIGHT_TIMEOUT=5 \
@@ -268,6 +268,8 @@ COPY scripts/lib/ai-provider.sh /usr/local/lib/docker-tools/ai-provider.sh
 COPY scripts/shells/askai.sh /usr/local/bin/askai
 COPY scripts/shells/aiops.sh /usr/local/bin/aiops
 COPY scripts/shells/gitx-wrapper.sh /tmp/gitx-wrapper
+COPY scripts/shells/gitx-ai-commit.sh /usr/local/bin/gitx-ai-commit
+COPY scripts/prompts/ai-commit.txt /usr/local/lib/docker-tools/ai-commit.txt
 COPY scripts/shells/certify.sh /usr/local/bin/certify
 COPY scripts/shells/mkhost.sh /usr/local/bin/mkhost
 COPY scripts/shells/rmhost.sh /usr/local/bin/rmhost

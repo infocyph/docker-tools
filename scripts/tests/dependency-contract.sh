@@ -42,7 +42,8 @@ assert_present 'SCRIPTOMATIC_REF=main' Dockerfile
 assert_present 'Scriptomatic/\$\{SCRIPTOMATIC_REF\}/bash/banner\.sh' Dockerfile
 assert_present 'ARG LAZYDOCKER_RELEASE=latest' Dockerfile
 assert_present 'lazydocker/releases/latest' Dockerfile
-assert_present 'lazydocker/releases/tags/\$\{LAZYDOCKER_RELEASE\}' Dockerfile
+assert_absent 'api\.github\.com/repos/jesseduffield/lazydocker/releases/'
+assert_present 'lazydocker/releases/download/\$\{lazy_tag\}' Dockerfile
 assert_present 'checksums\.txt' Dockerfile
 assert_present 'def version_parts: split\("\."\) \| map\(tonumber\);' Dockerfile
 assert_present 'netcat-openbsd gzip flock' Dockerfile

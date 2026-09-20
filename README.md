@@ -108,7 +108,8 @@ Published GitHub releases are the immutable source for versioned images.
 - User-facing endpoint remains Nginx-owned at `https://llm-ollama.localhost`
 - `askai` provides direct prompt/file/stdin access
 - `aiops` explains bounded deterministic diagnostics, reviews explicitly supplied safe files, summarizes repository metadata, and can analyze Graphify output files
-- `gitx ai-commit` is forced to the local Ollama path when enabled; there is no implicit Gemini/external-provider fallback
+- `gitx ai-commit` remains implemented by Toolset; docker-tools only forces its local Ollama mode and disables Gemini/cloud fallback
+- when the active `llm` backend is FastFlow, current Toolset `gitx ai-commit` is not backend-compatible until Toolset gains a generic OpenAI provider
 - AI output is advisory only and is never auto-executed
 
 ---

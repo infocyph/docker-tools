@@ -17,7 +17,7 @@ LocalDevStack control-plane and developer toolbox image for:
 - ✅ Network diagnostics (`netx`, `dig`, `mtr`, `traceroute`, `nmap`, etc.)
 - ✅ Daily dev/ops utilities (`git`, `jq`, `yq`, `rg`, `fd`, `sqlite`, `shellcheck`, `nano`, etc.)
 - ✅ Privileged LocalDevStack admin panel routed through `https://admin.localhost`
-- ✅ Optional local AI consumer commands (`askai`, `aiops`) backed by the separate `llm-ollama` service
+- ✅ Optional local AI consumer commands (`askai`, `aiops`) backed by the selected local `llm` service (`llm-ollama` or `llm-fastflow`)
 
 ---
 
@@ -103,8 +103,8 @@ Published GitHub releases are the immutable source for versioned images.
 
 ### 9) Optional local AI consumer
 - `docker-tools` never embeds, starts, pulls, or stores Ollama models
-- The provider/runtime is the separate `docker-llm-ollama` service
-- Container-to-container endpoint: `http://llm-ollama:11434`
+- The active provider/runtime is either `docker-llm-ollama` or `docker-llm-fastflow`
+- Container-to-container common endpoint: `http://llm:11434`
 - User-facing endpoint remains Nginx-owned at `https://llm-ollama.localhost`
 - `askai` provides direct prompt/file/stdin access
 - `aiops` explains bounded deterministic diagnostics, reviews explicitly supplied safe files, summarizes repository metadata, and can analyze Graphify output files
@@ -148,8 +148,8 @@ Default provider contract:
 
 ```text
 LDS_AI_ENABLED=auto
-LDS_AI_PROVIDER=ollama
-LDS_AI_URL=http://llm-ollama:11434
+LDS_AI_PROVIDER=llm
+LDS_AI_URL=http://llm:11434
 LDS_AI_MODEL=
 ```
 
@@ -826,8 +826,8 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `ADMIN_PANEL_TOKEN`     | (empty)                            | stack-scoped control token for mutations/sensitive downloads |
 | `ADMIN_PANEL_LOG_ROOTS` | `/global/log`                     | colon-separated admin log roots; legacy `LOGVIEW_ROOTS` is accepted as a compatibility fallback |
 | `LDS_AI_ENABLED`        | `auto`                            | `auto`, `0`, or `1`; AI remains optional |
-| `LDS_AI_PROVIDER`       | `ollama`                          | local provider type |
-| `LDS_AI_URL`            | `http://llm-ollama:11434`            | internal provider endpoint |
+| `LDS_AI_PROVIDER`       | `llm`                             | provider-neutral local LLM identity |
+| `LDS_AI_URL`            | `http://llm:11434`                | common OpenAI-compatible internal endpoint |
 | `LDS_AI_MODEL`          | (empty)                            | explicit model override; required when installed-model choice is ambiguous |
 | `LDS_AI_CONNECT_TIMEOUT` | `2`                              | provider connect timeout seconds |
 | `LDS_AI_PREFLIGHT_TIMEOUT` | `5`                            | provider availability/model preflight timeout seconds |

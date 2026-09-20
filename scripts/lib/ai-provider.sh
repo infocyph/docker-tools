@@ -377,18 +377,8 @@ ai__prepare_request() {
   redacted_prompt="$(printf '%s' "$prompt" | ai_redact)"
   redacted_system="$(printf '%s' "$system" | ai_redact)"
   if [[ "$json_mode" == 1 ]]; then
-    redacted_system+="${redacted_system:+
-
-  local request_bytes
-  request_bytes="$(wc -c <"$request_file" | tr -d '[:space:]')"
-  if ! ai_is_uint "$request_bytes" || ((10#$request_bytes > 10#$LDS_AI_MAX_REQUEST_BYTES)); then
-    ai_error "request body exceeds LDS_AI_MAX_REQUEST_BYTES=$LDS_AI_MAX_REQUEST_BYTES"
-    return 65
-  fi
-}
-
-ai__generate_nonstream() {
-  local json_mode="$1" prompt="$2" system="${3:-}" think_override="${4:-inherit}" request response code rc size result
+    redacted_system+="${redacted_system:+ {
+  local json_mode="$1" prompt="$2" system="${3:-}" request response code rc size result
   ai_config_init || return $?
   [[ "$LDS_AI_ENABLED" != 0 ]] || { ai_error 'AI is disabled by LDS_AI_ENABLED=0'; return 69; }
 
@@ -539,7 +529,7 @@ ai_stream() {
   fi
   printf '\n'
 }
-\n\n'}Return exactly one valid JSON value and no markdown or commentary."
+\\n\\n'}Return exactly one valid JSON value and no markdown or commentary."
   fi
 
   think_mode="$(ai__resolve_think_mode "$json_mode" "$think_override")" || return $?
@@ -571,7 +561,7 @@ ai_stream() {
 }
 
 ai__generate_nonstream() {
-  local json_mode="$1" prompt="$2" system="${3:-}" request response code rc size result
+  local json_mode="$1" prompt="$2" system="${3:-}" think_override="${4:-inherit}" request response code rc size result
   ai_config_init || return $?
   [[ "$LDS_AI_ENABLED" != 0 ]] || { ai_error 'AI is disabled by LDS_AI_ENABLED=0'; return 69; }
 

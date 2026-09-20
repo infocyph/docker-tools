@@ -37,9 +37,12 @@ Options:
       --stdin           Read stdin as untrusted context even when attached to a TTY.
   -s, --system TEXT     Add user-provided system guidance after the fixed safety guard.
   -m, --model MODEL     Override LDS_AI_MODEL for this request.
-      --json            Request a valid JSON response.
+      --think           Force thinking on for this request.
+      --no-think        Force thinking off for this request.
+      --think-auto      Use provider/model default for this request, bypassing LDS_AI_THINK.
+      --json            Request a valid JSON response; thinking is always forced off.
       --stream          Stream response chunks; generation is never replayed after output.
-      --status          Show provider availability/model status without generating.
+      --status          Show provider availability/model/thinking status without generating.
   -h, --help            Show this help.
 
 Input rules:
@@ -57,6 +60,7 @@ model_override=''
 json_mode=0
 stream=0
 status_only=0
+think_override=inherit
 prompt_parts=()
 
 while (($# > 0)); do
@@ -79,6 +83,18 @@ while (($# > 0)); do
       (($# >= 2)) || { echo "askai: missing value for $1" >&2; exit 64; }
       model_override="$2"
       shift 2
+      ;;
+    --think)
+      think_override=true
+      shift
+      ;;
+    --no-think)
+      think_override=false
+      shift
+      ;;
+    --think-auto)
+      think_override=auto
+      shift
       ;;
     --json)
       json_mode=1
@@ -120,7 +136,10 @@ fi
 ai_config_init || exit $?
 
 if ((status_only)); then
-  printf 'enabled=%s\nprovider=%s\nurl=%s\n' "$LDS_AI_ENABLED" "$LDS_AI_PROVIDER" "$LDS_AI_URL"
+  think_status=auto
+  [[ "$LDS_AI_THINK" == true ]] && think_status=on
+  [[ "$LDS_AI_THINK" == false ]] && think_status=off
+  printf 'enabled=%s\nprovider=%s\nurl=%s\nthink=%s\n' "$LDS_AI_ENABLED" "$LDS_AI_PROVIDER" "$LDS_AI_URL" "$think_status"
   if [[ "$LDS_AI_ENABLED" == 0 ]]; then
     printf 'available=0\nmodel=\n'
     exit 0
@@ -202,9 +221,9 @@ if [[ -z "$prompt" ]]; then
 fi
 
 if ((stream)); then
-  ai_stream_context "$prompt" "$context" "$system_text" "$json_mode"
+  ai_stream_context "$prompt" "$context" "$system_text" "$json_mode" "$think_override"
 elif ((json_mode)); then
-  ai_generate_context_json "$prompt" "$context" "$system_text"
+  ai_generate_context_json "$prompt" "$context" "$system_text" "$think_override"
 else
-  ai_generate_context "$prompt" "$context" "$system_text"
+  ai_generate_context "$prompt" "$context" "$system_text" "$think_override"
 fi

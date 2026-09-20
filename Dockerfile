@@ -332,6 +332,7 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
   && rm -f /tmp/toolset-install.sh \
   && chmod +x \
       /usr/local/bin/gitx \
+      /usr/local/bin/gitx-ai-commit \
       /usr/local/bin/askai \
       /usr/local/bin/aiops \
       /usr/local/bin/git-default \
@@ -398,11 +399,12 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
   && bash -n /usr/local/bin/askai \
   && bash -n /usr/local/bin/aiops \
   && bash -n /usr/local/bin/gitx \
+  && bash -n /usr/local/bin/gitx-ai-commit \
   && askai --help >/dev/null \
   && aiops --help >/dev/null \
   && bash -n /usr/local/bin/entrypoint \
   && bash -n /usr/local/bin/tools-healthcheck \
-  && php -l /etc/share/scripts/tests/fake-ollama-router.php >/dev/null \
+  && php -l /etc/share/scripts/tests/fake-llm-router.php >/dev/null \
   && php -l /etc/share/admin-panel/index.php >/dev/null \
   && php -l /etc/share/admin-panel/app/bootstrap.php >/dev/null \
   && find /etc/share/admin-panel/src -type f -name '*.php' -exec php -l {} \; >/dev/null

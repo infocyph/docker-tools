@@ -293,16 +293,22 @@ aiops_document_review() {
     | ($patch.add_nodes | map(.id)) as $added
     | ($existing + $added) as $all
     | (($added | length) == ($added | unique | length))
-      and all($added[]; ($existing | index(.) | not))
-      and all($patch.add_nodes[]; ($files | index(.source_file)) != null)
+      and all($added[]; . as $id | ($existing | index($id) | not))
+      and all($patch.add_nodes[];
+        . as $node
+        | ($files | index($node.source_file)) != null)
       and all($patch.add_edges[];
-        (($all | index(.source)) != null)
-        and (($all | index(.target)) != null)
-        and (($files | index(.source_file)) != null))
+        . as $edge
+        | (($all | index($edge.source)) != null)
+        and (($all | index($edge.target)) != null)
+        and (($files | index($edge.source_file)) != null))
       and all($patch.corrections[];
-        (($existing | index(.target_id)) != null)
-        and (($files | index(.source_file)) != null))
-      and all($patch.unresolved[]; ($files | index(.source_file)) != null)
+        . as $correction
+        | (($existing | index($correction.target_id)) != null)
+        and (($files | index($correction.source_file)) != null))
+      and all($patch.unresolved[];
+        . as $item
+        | ($files | index($item.source_file)) != null)
   ' >/dev/null; then
     aiops_error 'document-review patch references unknown nodes or source files'
     return 69

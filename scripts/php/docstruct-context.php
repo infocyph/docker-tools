@@ -57,7 +57,7 @@ function contextUnderRoot(string $root, string $relative): ?string
         $relative === ''
         || str_contains(str_replace('\\', '/', $relative), "../")
         || str_starts_with(str_replace('\\', '/', $relative), '/')
-        || preg_match('/^[A-Za-z]:[\\\/]/', $relative) === 1
+        || preg_match('~^[A-Za-z]:[\\\\/]~', $relative) === 1
     ) {
         return null;
     }

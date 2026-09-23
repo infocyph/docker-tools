@@ -174,12 +174,16 @@ docstruct docs/ --output /tmp/docstruct.json
 aiops document-review --file /tmp/docstruct.json > /tmp/docstruct-review.json
 docstruct graphify /tmp/docstruct.json \
   --review /tmp/docstruct-review.json \
+  --source-root /home/user/project \
   --output /tmp/docstruct.graphify.json
 ```
 
 The last command exports a Graphify-compatible semantic fragment containing only
-mechanically safe non-code facts plus validated additive review nodes/edges. It does not
-modify `graphify-out/graph.json`, Graphify caches, or manifests. CI validates the emitted
+mechanically safe non-code facts plus validated additive review nodes/edges. When
+docstruct ran inside `SERVER_TOOLS` against `/app`, `--source-root` can remap
+provenance to the host project root used by host Graphify without requiring that host
+path to exist inside the container. It does not modify `graphify-out/graph.json`,
+Graphify caches, or manifests. CI validates the emitted
 fragment with the real minimum supported Graphify (`graphifyy==0.9.65`) via
 `graphify merge-chunks`.
 

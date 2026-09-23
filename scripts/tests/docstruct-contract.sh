@@ -5,6 +5,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIXTURES="$ROOT/scripts/tests/fixtures/docstruct"
 DOCSTRUCT="${DOCSTRUCT_BIN:-$ROOT/scripts/shells/docstruct.sh}"
 IMPL="${DOCSTRUCT_IMPL:-$ROOT/scripts/php/docstruct.php}"
+GRAPHIFY_IMPL="${DOCSTRUCT_GRAPHIFY_IMPL:-$ROOT/scripts/php/docstruct-graphify.php}"
 PHP_BIN="${DOCSTRUCT_PHP_BIN:-$(command -v php || true)}"
 
 fail() {
@@ -57,6 +58,90 @@ jq -e '
   | map(select(.source_file == "sample.rst"))
   | all(.evidence.source_file == "sample.rst")
 ' "$tmp/one.json" >/dev/null || fail "RST structural facts lost source evidence"
+
+printf 'docstruct-contract: Graphify fragment export\n'
+
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" graphify "$tmp/one.json" --output "$tmp/graphify.json"
+
+jq -e '
+  (.nodes | length > 0)
+  and (.nodes | all(
+    (.id | test("^[a-z0-9_]+$"))
+    and (.file_type == "document")
+    and (.source_file | startswith("/"))))
+  and (.edges | all(
+    (.source | test("^[a-z0-9_]+$"))
+    and (.target | test("^[a-z0-9_]+$"))
+    and (.confidence == "EXTRACTED")
+    and (.confidence_score == 1)))
+  and (.hyperedges == [])
+  and (.input_tokens == 0)
+  and (.output_tokens == 0)
+  and (.nodes | any(.id == "sample_document"))
+  and (.nodes | any(.id == "sample_runtime_adapter"))
+  and (.edges | any(.source == "sample_document" and .target == "sample_runtime_adapter" and .relation == "references"))
+  and ([.nodes[].id] | all(test("config_[a-f0-9]{16}$") | not))
+' "$tmp/graphify.json" >/dev/null || fail "Graphify mechanical fragment contract failed"
+
+base="$(cat "$tmp/one.json")"
+base_hash="$(printf '%s' "$base" | sha256sum | awk '{print $1}')"
+jq -n \
+  --arg base_sha256 "$base_hash" \
+  '{
+    schema:"docker-tools.docstruct-review/v1",
+    base_schema:"docker-tools.docstruct/v1",
+    base_sha256:$base_sha256,
+    patch:{
+      add_nodes:[{
+        id:"sample.md#semantic-runtime",
+        type:"concept",
+        label:"Runtime architecture",
+        source_file:"sample.md",
+        reason:"Explicit semantic concept for export contract.",
+        confidence:0.92
+      }],
+      add_edges:[{
+        source:"sample.md#document",
+        target:"sample.md#semantic-runtime",
+        relation:"conceptually_related_to",
+        source_file:"sample.md",
+        reason:"The README describes the runtime architecture.",
+        confidence:0.9
+      }],
+      corrections:[],
+      unresolved:[]
+    }
+  }' >"$tmp/review.json"
+
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" graphify "$tmp/one.json" --review "$tmp/review.json" --output "$tmp/graphify-reviewed.json"
+
+jq -e '
+  (.nodes | any(.id == "sample_runtime_architecture" and .file_type == "concept"))
+  and (.edges | any(
+    .source == "sample_document"
+    and .target == "sample_runtime_architecture"
+    and .relation == "conceptually_related_to"
+    and .confidence == "INFERRED"
+    and .confidence_score == 0.95))
+' "$tmp/graphify-reviewed.json" >/dev/null || fail "Graphify reviewed fragment contract failed"
+
+jq '.base_sha256 = "wrong"' "$tmp/review.json" >"$tmp/review-wrong.json"
+set +e
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" graphify "$tmp/one.json" --review "$tmp/review-wrong.json" >/dev/null 2>"$tmp/graphify-review.err"
+rc=$?
+set -e
+[[ "$rc" -eq 65 ]] || fail "mismatched Graphify review returned $rc instead of 65"
+grep -q 'does not belong to this docstruct artifact' "$tmp/graphify-review.err" ||
+  fail "mismatched Graphify review error missing"
 
 printf 'docstruct-contract: security bounds\n'
 

@@ -11,11 +11,12 @@ fail() {
 
 PROVIDER='scripts/lib/ai-provider.sh'
 ASKAI='scripts/shells/askai.sh'
+AIOPS='scripts/shells/aiops.sh'
 GITX='scripts/shells/gitx-wrapper.sh'
 ENTRYPOINT='scripts/shells/entrypoint.sh'
 HEALTH='scripts/shells/tools-healthcheck.sh'
 
-for file in "$PROVIDER" "$ASKAI" "$GITX" "$ENTRYPOINT" "$HEALTH"; do
+for file in "$PROVIDER" "$ASKAI" "$AIOPS" "$GITX" "$ENTRYPOINT" "$HEALTH"; do
   [[ -s "$file" ]] || fail "missing AI contract input: $file"
 done
 

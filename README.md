@@ -104,7 +104,9 @@ Published GitHub releases are the immutable source for versioned images.
 ### 9) Optional local AI consumer
 - `docker-tools` never embeds, starts, pulls, or stores Ollama models
 - The active provider/runtime is either `docker-llm-ollama` or `docker-llm-fastflow`
-- Container-to-container common endpoint: `http://llm:11434`
+- Container-to-container endpoint is resolved from `LDS_AI_RUNTIME`:
+  - `npu` -> `http://llm-fastflow:11434/v1`
+  - `cpu|nvidia|amd` -> `http://llm-ollama:11434/v1`
 - User-facing endpoint remains Nginx-owned at `https://llm.localhost`
 - `askai` provides direct prompt/file/stdin access with per-request `--think`, `--no-think`, and `--think-auto`
 - `aiops` exposes the same per-request thinking switches for diagnostic/review analysis
@@ -152,8 +154,7 @@ Default provider contract:
 
 ```text
 LDS_AI_ENABLED=auto
-LDS_AI_PROVIDER=llm
-LDS_AI_URL=http://llm:11434
+LDS_AI_RUNTIME=cpu
 LDS_AI_MODEL=
 ```
 
@@ -830,8 +831,8 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `ADMIN_PANEL_TOKEN`     | (empty)                            | stack-scoped control token for mutations/sensitive downloads |
 | `ADMIN_PANEL_LOG_ROOTS` | `/global/log`                     | colon-separated admin log roots; legacy `LOGVIEW_ROOTS` is accepted as a compatibility fallback |
 | `LDS_AI_ENABLED`        | `auto`                            | `auto`, `0`, or `1`; AI remains optional |
-| `LDS_AI_PROVIDER`       | `llm`                             | provider-neutral local LLM identity |
-| `LDS_AI_URL`            | `http://llm:11434`                | common OpenAI-compatible internal endpoint |
+| `LDS_AI_RUNTIME`        | `cpu`                             | selects `llm-fastflow` for `npu`, otherwise `llm-ollama` |
+| `LDS_AI_URL`            | derived                           | optional override; normally resolved from `LDS_AI_RUNTIME` |
 | `LDS_AI_MODEL`          | (empty)                            | explicit model override; required when installed-model choice is ambiguous |
 | `LDS_AI_THINK`          | (empty)                            | default thinking override: empty/provider default, `true`, or `false`; request-level controls can override it |
 | `LDS_AI_CONNECT_TIMEOUT` | `2`                              | provider connect timeout seconds |

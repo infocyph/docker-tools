@@ -1641,6 +1641,7 @@ Implemented handoff:
 - [x] config scalars, external URL targets, corrections and unresolved code-symbol refs
   are not silently turned into graph facts;
 - [x] source paths are absolute for Graphify provenance;
+- [x] `--source-root` remaps container-local `/app` provenance to the host project root without requiring host paths inside Tools;
 - [x] Graphify-compatible IDs and confidence fields are generated deterministically;
 - [x] review artifact hash must match the deterministic sidecar;
 - [x] CI validates the emitted fragment with `graphifyy==0.9.65` and

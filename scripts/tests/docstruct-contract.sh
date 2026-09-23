@@ -293,6 +293,8 @@ jq -e '
   and ([.edges[] | select(.source == "docstruct_old_document" or .target == "docstruct_old_document")] | length == 0)
   and (.input_tokens == 11)
 ' "$tmp/merged-graph.json" >/dev/null || fail "safe Graphify merge did not preserve code and replace docstruct nodes"
+mode="$(stat -c '%a' "$tmp/merged-graph.json")"
+[[ "$mode" == 644 ]] || fail "Graphify merge handoff mode is $mode instead of 644"
 
 DOCSTRUCT_IMPL="$IMPL" \
 DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \

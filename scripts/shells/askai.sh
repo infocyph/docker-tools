@@ -30,7 +30,7 @@ usage() {
   cat <<'USAGE'
 Usage: askai [options] [prompt...]
 
-Pure LocalDevStack AI client. The common provider endpoint defaults to http://llm:11434.
+Pure LocalDevStack AI client. The provider endpoint is resolved from LDS_AI_RUNTIME: npu -> llm-fastflow:11434, otherwise llm-ollama:11434.
 
 Options:
   -f, --file PATH       Add a non-sensitive text file as untrusted context.

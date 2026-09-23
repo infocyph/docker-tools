@@ -1459,25 +1459,42 @@ The final image gate should verify:
 
 ### Batch 0 — benchmark and dependency decision
 
-- capture current image-size baseline;
-- evaluate Pandoc Markdown/RST AST fidelity;
-- evaluate RST/Sphinx role/directive coverage;
-- evaluate static-helper alternative;
-- document selected parser stack and size delta.
+Status: **complete**
 
-Exit criteria:
+Measured on the amd64 CI image:
 
-- parser/toolchain choice is justified with measurements;
-- no implementation dependency is added before this gate.
+- baseline: 298,977,070 bytes;
+- Pandoc: 538,911,456 bytes (**+239,934,386**);
+- MyST-Parser 5.0.0: 435,175,039 bytes (**+136,197,969**);
+- m2r2 0.3.4: 362,361,946 bytes (**+63,384,876**).
+
+Pandoc 3.10 preserved the representative Markdown headings/links/code blocks and RST
+headings/code blocks/Sphinx symbol text/toctree target, but did not resolve the
+representative `.. include::` content.
+
+Decision: use **Pandoc as the primary Markdown/RST AST parser**, because it gives one
+mature parser for both formats, and add only a narrow deterministic RST/Sphinx supplement
+for semantics Pandoc does not preserve. Do not add MyST/m2r2/Python to the production
+image.
+
+- [x] capture current image-size baseline;
+- [x] evaluate Pandoc Markdown/RST AST fidelity;
+- [x] evaluate RST/Sphinx role/directive coverage;
+- [x] compare Python/Sphinx alternatives and footprint;
+- [x] document selected parser stack and size delta.
+
+Exit criteria met.
 
 ### Batch 1 — normalized schema and CLI shell
 
-- define `docker-tools.docstruct/v1`;
-- add `docstruct --help`;
-- path/root validation;
-- JSON output;
-- canonical ordering;
-- deterministic error/warning model.
+Status: **implemented; CI validation in progress**
+
+- [x] define `docker-tools.docstruct/v1`;
+- [x] add `docstruct --help`;
+- [x] path/root validation;
+- [x] JSON output;
+- [x] canonical ordering;
+- [x] deterministic error/warning model.
 
 Exit criteria:
 
@@ -1486,12 +1503,14 @@ Exit criteria:
 
 ### Batch 2 — Markdown extraction
 
-- document/title/section hierarchy;
-- links;
-- anchors;
-- code blocks;
-- source evidence;
-- tests.
+Status: **implemented; CI validation in progress**
+
+- [x] document/title/section hierarchy;
+- [x] links;
+- [x] anchors;
+- [x] code blocks;
+- [x] source evidence;
+- [x] tests.
 
 Exit criteria:
 
@@ -1499,14 +1518,16 @@ Exit criteria:
 
 ### Batch 3 — RST/Sphinx extraction
 
-- headings;
-- directives;
-- roles;
-- includes;
-- toctree;
-- explicit targets/references;
-- source evidence;
-- tests.
+Status: **implemented; CI validation in progress**
+
+- [x] headings;
+- [x] directives;
+- [x] roles;
+- [x] includes;
+- [x] toctree;
+- [x] explicit targets/references;
+- [x] source evidence;
+- [x] tests.
 
 Exit criteria:
 
@@ -1514,12 +1535,14 @@ Exit criteria:
 
 ### Batch 4 — structured config extraction
 
-- YAML;
-- JSON;
-- TOML;
-- conservative INI/config handling;
-- key hierarchy;
-- explicit references.
+Status: **partially implemented**
+
+- [x] YAML;
+- [x] JSON;
+- [x] TOML;
+- [ ] conservative INI/config handling;
+- [x] key hierarchy;
+- [ ] explicit safe path/URL reference extraction.
 
 Exit criteria:
 
@@ -1528,12 +1551,15 @@ Exit criteria:
 
 ### Batch 5 — deterministic resolver
 
-- document links;
-- RST refs/docs;
-- includes;
-- toctree;
-- unresolved reference inventory;
-- canonical target IDs.
+Status: **partially implemented**
+
+- [x] document links;
+- [x] RST refs/docs where the deterministic document target exists;
+- [x] includes;
+- [x] toctree;
+- [x] unresolved reference inventory;
+- [x] canonical document/anchor target IDs;
+- [ ] code-symbol resolution against an external code index.
 
 Exit criteria:
 
@@ -1542,13 +1568,15 @@ Exit criteria:
 
 ### Batch 6 — security/resource hardening
 
-- traversal;
-- symlinks;
-- include recursion;
-- corpus/file caps;
-- timeouts;
-- no-network guarantee;
-- malformed input behavior.
+Status: **in progress**
+
+- [x] outside-root reference refusal;
+- [x] symlinked corpus entries skipped;
+- [x] no include recursion (includes are references only);
+- [x] corpus/file/file-count/node caps;
+- [x] parser timeouts;
+- [x] no network fetch path in deterministic extraction;
+- [ ] malformed-input fixture matrix and final hardening review.
 
 Exit criteria:
 

@@ -483,11 +483,109 @@ function resolveReferences(array &$nodes, array &$edges, array &$unresolved): vo
     $unresolved = $remaining;
 }
 
+function structuredData(string $file, string $format): array {
+    if ($format === 'json') {
+        $raw = file_get_contents($file);
+        if ($raw === false) {
+            throw new RuntimeException('unable to read JSON file');
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('JSON root must be an object or array');
+        }
+        return $decoded;
+    }
+
+    if (!command_exists('yq')) {
+        throw new RuntimeException('yq is required for YAML/TOML extraction');
+    }
+
+    $inputFormat = $format === 'toml' ? 'toml' : 'yaml';
+    $cmd = ['yq', '-p=' . $inputFormat, '-o=json', '.', $file];
+    $pipes = [];
+    $proc = proc_open($cmd, [
+        0 => ['file', '/dev/null', 'r'],
+        1 => ['pipe', 'w'],
+        2 => ['pipe', 'w'],
+    ], $pipes);
+
+    if (!is_resource($proc)) {
+        throw new RuntimeException('unable to start yq');
+    }
+
+    $stdout = stream_get_contents($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $code = proc_close($proc);
+
+    if ($code !== 0) {
+        throw new RuntimeException(trim($stderr) !== '' ? trim($stderr) : "yq exited with {$code}");
+    }
+
+    $decoded = json_decode($stdout, true);
+    if (!is_array($decoded)) {
+        throw new RuntimeException('yq returned invalid structured JSON');
+    }
+    return $decoded;
+}
+
+function configNodeId(string $relative, string $path): string {
+    return $relative . '#config-' . substr(hash('sha256', $path), 0, 16);
+}
+
+function extractConfigKeys(
+    mixed $value,
+    string $relative,
+    string $documentId,
+    array &$nodes,
+    array &$edges,
+    string $path = '',
+    ?string $parentId = null
+): void {
+    if (!is_array($value)) {
+        return;
+    }
+
+    foreach ($value as $key => $child) {
+        $segment = is_int($key) ? '[' . $key . ']' : (string)$key;
+        $childPath = $path === ''
+            ? $segment
+            : (is_int($key) ? $path . $segment : $path . '.' . $segment);
+
+        if (!is_int($key)) {
+            $id = configNodeId($relative, $childPath);
+            addNode($nodes, [
+                'id' => $id,
+                'type' => 'config_key',
+                'label' => (string)$key,
+                'key_path' => $childPath,
+                'source_file' => $relative,
+                'evidence' => evidence($relative, null, 'document'),
+            ]);
+            addEdge($edges, [
+                'source' => $parentId ?? $documentId,
+                'target' => $id,
+                'relation' => $parentId === null ? 'declares' : 'parent_of',
+                'source_file' => $relative,
+                'evidence' => evidence($relative, null, 'document'),
+            ]);
+            extractConfigKeys($child, $relative, $documentId, $nodes, $edges, $childPath, $id);
+            continue;
+        }
+
+        extractConfigKeys($child, $relative, $documentId, $nodes, $edges, $childPath, $parentId);
+    }
+}
+
 function supportedFormat(string $path): ?string {
     $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
     return match ($ext) {
         'md', 'markdown' => 'markdown',
         'rst' => 'rst',
+        'yaml', 'yml' => 'yaml',
+        'json' => 'json',
+        'toml' => 'toml',
         default => null,
     };
 }
@@ -603,16 +701,26 @@ foreach ($files as $file) {
         'format' => $format,
         'sha256' => hash('sha256', $source),
         'bytes' => strlen($source),
-        'parser' => $format === 'rst' ? 'pandoc+rst-supplement' : 'pandoc',
+        'parser' => match ($format) {
+            'rst' => 'pandoc+rst-supplement',
+            'markdown' => 'pandoc',
+            'json' => 'php-json',
+            default => 'yq',
+        },
         'status' => 'ok',
         'warnings' => [],
     ];
 
     try {
-        $ast = pandocAst($file, $format);
-        extractPandoc($ast, $relative, $source, $format, $nodes, $edges, $unresolved);
-        if ($format === 'rst') {
-            extractRstSupplement($relative, $source, $nodes, $edges, $unresolved);
+        if (in_array($format, ['markdown', 'rst'], true)) {
+            $ast = pandocAst($file, $format);
+            extractPandoc($ast, $relative, $source, $format, $nodes, $edges, $unresolved);
+            if ($format === 'rst') {
+                extractRstSupplement($relative, $source, $nodes, $edges, $unresolved);
+            }
+        } else {
+            $structured = structuredData($file, $format);
+            extractConfigKeys($structured, $relative, $documentId, $nodes, $edges);
         }
     } catch (Throwable $e) {
         $record['status'] = 'error';

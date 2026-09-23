@@ -108,7 +108,7 @@ Install only the commands actually used.
 
 Verify installer syntax and each installed command's `--version` contract.
 
-The image should naturally inherit Toolset's existing Ollama-aware `gitx` support by pointing `GITX_OLLAMA_URL` at the LocalDevStack LLM service.
+The image should inherit Toolset's existing Ollama-aware `gitx` support only when `LDS_AI_RUNTIME` resolves to Ollama. In that case docker-tools points `GITX_OLLAMA_URL` directly at `http://llm-ollama:11434`. FastFlow must fail explicitly until Toolset gains a generic OpenAI-compatible provider.
 
 ---
 
@@ -250,10 +250,12 @@ Unlike the reverted branch, `askai` must use `LDS_AI_URL` / provider library rat
 Configure Toolset `gitx` to use:
 
 ```text
-GITX_OLLAMA_URL=http://llm:11434
+GITX_OLLAMA_URL=http://llm-ollama:11434
 ```
 
-when LocalDevStack AI is enabled.
+only when `LDS_AI_RUNTIME` resolves to an Ollama-backed runtime (`cpu|nvidia|amd`).
+For `npu`/FastFlow, fail before invoking Toolset until Toolset supports a generic
+OpenAI-compatible provider.
 
 Do not duplicate `gitx ai-commit` logic in Tools.
 

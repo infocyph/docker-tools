@@ -62,7 +62,8 @@ curl -fsS --connect-timeout 1 --max-time 1 "$LDS_AI_URL/v1/models" >/dev/null ||
 printf '1/8 askai prompt + runtime status\n'
 [[ "$(bash "$ASKAI" 'hello')" == ok ]] || fail 'askai prompt failed'
 status="$(bash "$ASKAI" --status)"
-grep -q '^runtime=cpu
+grep -q '^runtime=cpu$' <<<"$status" || fail 'askai status did not expose cpu runtime'
+grep -q '^provider=ollama$' <<<"$status" || fail 'askai status did not expose derived Ollama provider'
 grep -q '^available=1$' <<<"$status" || fail 'askai status did not report provider available'
 grep -q '^model=qwen2.5:3b$' <<<"$status" || fail 'askai status did not resolve deterministic model'
 grep -q '^think=auto$' <<<"$status" || fail 'askai status did not expose thinking default'

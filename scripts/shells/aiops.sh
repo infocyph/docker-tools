@@ -232,7 +232,7 @@ aiops_document_review() {
     and (.nodes | type == "array")
     and (.edges | type == "array")
     and (.unresolved_references | type == "array")
-  ' >/dev/null 2>&1 <<<"$redacted"; then
+  ' >/dev/null 2>&1 <<<"$context"; then
     aiops_error 'document-review requires a valid docker-tools.docstruct/v1 JSON artifact'
     return 65
   fi
@@ -287,7 +287,7 @@ aiops_document_review() {
     return 69
   fi
 
-  if ! jq -en --argjson base "$redacted" --argjson patch "$patch" '
+  if ! jq -en --argjson base "$context" --argjson patch "$patch" '
     ($base.nodes | map(.id)) as $existing
     | ($base.files | map(.path)) as $files
     | ($patch.add_nodes | map(.id)) as $added
@@ -314,7 +314,7 @@ aiops_document_review() {
     return 69
   fi
 
-  base_hash="$(printf '%s' "$redacted" | sha256sum | awk '{print $1}')"
+  base_hash="$(printf '%s' "$context" | sha256sum | awk '{print $1}')"
   jq -nc \
     --arg schema 'docker-tools.docstruct-review/v1' \
     --arg base_schema 'docker-tools.docstruct/v1' \

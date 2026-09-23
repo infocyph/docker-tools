@@ -242,7 +242,7 @@ aiops_docstruct_bin() {
 
 aiops_document_review() {
   local file="$1" context="$2" request="$3" extra_system="$4" context_only="$5" think_override="${6:-inherit}"
-  local redacted patch system base_hash review_context docstruct_bin
+  local redacted patch system base_hash review_context docstruct_bin structure_json passages_text review_payload
 
   if ! jq -e '
     .schema == "docker-tools.docstruct/v1"
@@ -270,7 +270,17 @@ aiops_document_review() {
     return 65
   fi
 
-  redacted="$(printf '%s' "$review_context" | ai_redact)"
+  structure_json="$(jq -c '.structure' <<<"$review_context")" || return $?
+  passages_text="$(jq -r '
+    .passages[]
+    | "\n--- SOURCE: \(.source_file) [\(.format)] truncated=\(.truncated) ---\n\(.content)"
+  ' <<<"$review_context")" || return $?
+  review_payload="$(printf 'DOCSTRUCT STRUCTURE (authoritative JSON)\n%s\n\nBOUNDED SOURCE PASSAGES%s\n' "$structure_json" "$passages_text")"
+
+  # Redact after decoding passage strings back to real lines. This keeps the
+  # existing line-oriented secret filters effective for KEY=value material that
+  # would otherwise be hidden behind JSON \\n escapes.
+  redacted="$(printf '%s' "$review_payload" | ai_redact)"
   aiops_guard_context "$redacted" || return $?
 
   if [[ "$context_only" == 1 ]]; then
@@ -278,7 +288,7 @@ aiops_document_review() {
     return 0
   fi
 
-  system='Review a bounded docker-tools.docstruct-context/v1 artifact. The structure member contains authoritative mechanical facts; passages contain bounded Markdown/RST source text for semantic interpretation. Mechanical nodes and edges must not be regenerated or removed. Config scalar values are intentionally absent. Return exactly one additive patch object with arrays add_nodes, add_edges, corrections, and unresolved. Every proposed item must include source_file, reason, and confidence from 0 to 1. Added nodes require id, type, label, source_file, reason, confidence. Added edges require source, target, relation, source_file, reason, confidence. Corrections require target_id, proposed_changes object, source_file, reason, confidence. Unresolved items require target, source_file, reason, confidence. Do not invent source files. Edges may reference only existing deterministic node IDs or node IDs added in the same patch.'
+  system='Review this bounded document-analysis payload. DOCSTRUCT STRUCTURE is authoritative mechanical JSON; BOUNDED SOURCE PASSAGES contains Markdown/RST prose for semantic interpretation. Mechanical nodes and edges must not be regenerated or removed. Config scalar values are intentionally absent. Return exactly one additive patch object with arrays add_nodes, add_edges, corrections, and unresolved. Every proposed item must include source_file, reason, and confidence from 0 to 1. Added nodes require id, type, label, source_file, reason, confidence. Added edges require source, target, relation, source_file, reason, confidence. Corrections require target_id, proposed_changes object, source_file, reason, confidence. Unresolved items require target, source_file, reason, confidence. Do not invent source files. Edges may reference only existing deterministic node IDs or node IDs added in the same patch.'
   if [[ -n "$extra_system" ]]; then
     system+=$'\nAdditional user instruction: '
     system+="$extra_system"

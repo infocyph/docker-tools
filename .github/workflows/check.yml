@@ -86,13 +86,13 @@ jobs:
       - name: AI intelligence and admin smoke
         run: bash scripts/tests/ai-intelligence-smoke.sh
 
-      - name: Document parser feasibility on Alpine
+      - name: Document structure contract on Alpine
         run: |
           docker run --rm \
             -v "$PWD:/work:ro" \
             -w /work \
             alpine:latest \
-            sh -lc 'apk add --no-cache bash jq yq pandoc php php-mbstring >/dev/null && bash scripts/tests/docstruct-pandoc-feasibility.sh && bash scripts/tests/docstruct-contract.sh'
+            sh -lc 'apk add --no-cache bash jq yq pandoc php php-mbstring >/dev/null && bash scripts/tests/docstruct-contract.sh'
 
       - name: Graphify minimum fragment compatibility
         run: |
@@ -168,70 +168,6 @@ jobs:
           tags: infocyph/tools:ci
           cache-from: type=gha,scope=check-amd64
           cache-to: type=gha,scope=check-amd64,mode=max
-
-      - name: Benchmark Pandoc image footprint
-        run: |
-          set -euo pipefail
-          docker build -t infocyph/tools:ci-pandoc -f - . <<'DOCKERFILE'
-          FROM infocyph/tools:ci
-          RUN apk add --no-cache pandoc
-          DOCKERFILE
-
-          base_bytes="$(docker image inspect infocyph/tools:ci --format '{{.Size}}')"
-          pandoc_bytes="$(docker image inspect infocyph/tools:ci-pandoc --format '{{.Size}}')"
-          delta_bytes="$((pandoc_bytes - base_bytes))"
-          printf 'Pandoc footprint: baseline=%s bytes, with_pandoc=%s bytes, delta=%s bytes\n' "$base_bytes" "$pandoc_bytes" "$delta_bytes"
-
-          {
-            echo '### docstruct Batch 0 — Pandoc footprint'
-            echo
-            echo "| Image | Bytes |"
-            echo "| --- | ---: |"
-            echo "| baseline | $base_bytes |"
-            echo "| + pandoc | $pandoc_bytes |"
-            echo "| delta | $delta_bytes |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          docker run --rm --entrypoint pandoc infocyph/tools:ci-pandoc --version | head -n 2
-
-      - name: Benchmark Python document parser footprints
-        run: |
-          set -euo pipefail
-
-          docker build -t infocyph/tools:ci-myst -f - . <<'DOCKERFILE'
-          FROM infocyph/tools:ci
-          RUN apk add --no-cache python3 py3-pip \
-            && python3 -m venv /opt/myst \
-            && /opt/myst/bin/pip install --no-cache-dir 'myst-parser==5.0.0'
-          DOCKERFILE
-
-          docker build -t infocyph/tools:ci-m2r2 -f - . <<'DOCKERFILE'
-          FROM infocyph/tools:ci
-          RUN apk add --no-cache python3 py3-pip \
-            && python3 -m venv /opt/m2r2 \
-            && /opt/m2r2/bin/pip install --no-cache-dir 'm2r2==0.3.4'
-          DOCKERFILE
-
-          base_bytes="$(docker image inspect infocyph/tools:ci --format '{{.Size}}')"
-          myst_bytes="$(docker image inspect infocyph/tools:ci-myst --format '{{.Size}}')"
-          m2r2_bytes="$(docker image inspect infocyph/tools:ci-m2r2 --format '{{.Size}}')"
-
-          printf 'Python parser footprint: baseline=%s, myst=%s (+%s), m2r2=%s (+%s) bytes\n' \
-            "$base_bytes" "$myst_bytes" "$((myst_bytes - base_bytes))" \
-            "$m2r2_bytes" "$((m2r2_bytes - base_bytes))"
-
-          {
-            echo '### docstruct Batch 0 — Python parser footprint'
-            echo
-            echo "| Candidate | Bytes | Delta |"
-            echo "| --- | ---: | ---: |"
-            echo "| baseline | $base_bytes | 0 |"
-            echo "| MyST-Parser 5.0.0 | $myst_bytes | $((myst_bytes - base_bytes)) |"
-            echo "| m2r2 0.3.4 | $m2r2_bytes | $((m2r2_bytes - base_bytes)) |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          docker run --rm --entrypoint /opt/myst/bin/python infocyph/tools:ci-myst -c 'import myst_parser; print(myst_parser.__version__)'
-          docker run --rm --entrypoint /opt/m2r2/bin/m2r2 infocyph/tools:ci-m2r2 --help >/dev/null
 
       - name: Verify image commands and generated metadata
         run: |

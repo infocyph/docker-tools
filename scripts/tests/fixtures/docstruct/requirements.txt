@@ -1,0 +1,7 @@
+# Main documentation dependencies
+sphinx>=8.0,<9
+requests[socks]>=2.31
+private-wheel @ https://user:private-secret@example.invalid/private-wheel.whl
+-r requirements/base.txt
+-c constraints-dev.txt
+--extra-index-url https://user:secret-token@example.invalid/simple

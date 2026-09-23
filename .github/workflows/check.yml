@@ -83,6 +83,14 @@ jobs:
       - name: AI intelligence and admin smoke
         run: bash scripts/tests/ai-intelligence-smoke.sh
 
+      - name: Document parser feasibility on Alpine
+        run: |
+          docker run --rm \
+            -v "$PWD:/work:ro" \
+            -w /work \
+            alpine:latest \
+            sh -lc 'apk add --no-cache bash jq pandoc >/dev/null && bash scripts/tests/docstruct-pandoc-feasibility.sh'
+
       - name: Env-store concurrency and corruption recovery
         run: bash scripts/tests/env-store-concurrency.sh
 
@@ -130,6 +138,30 @@ jobs:
           tags: infocyph/tools:ci
           cache-from: type=gha,scope=check-amd64
           cache-to: type=gha,scope=check-amd64,mode=max
+
+      - name: Benchmark Pandoc image footprint
+        run: |
+          set -euo pipefail
+          docker build -t infocyph/tools:ci-pandoc -f - . <<'DOCKERFILE'
+          FROM infocyph/tools:ci
+          RUN apk add --no-cache pandoc
+          DOCKERFILE
+
+          base_bytes="$(docker image inspect infocyph/tools:ci --format '{{.Size}}')"
+          pandoc_bytes="$(docker image inspect infocyph/tools:ci-pandoc --format '{{.Size}}')"
+          delta_bytes="$((pandoc_bytes - base_bytes))"
+
+          {
+            echo '### docstruct Batch 0 — Pandoc footprint'
+            echo
+            echo "| Image | Bytes |"
+            echo "| --- | ---: |"
+            echo "| baseline | $base_bytes |"
+            echo "| + pandoc | $pandoc_bytes |"
+            echo "| delta | $delta_bytes |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          docker run --rm --entrypoint pandoc infocyph/tools:ci-pandoc --version | head -n 2
 
       - name: Verify image commands and generated metadata
         run: |

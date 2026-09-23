@@ -11,8 +11,8 @@ fail() {
 
 assert_absent() {
   local pattern="$1"
-  if grep -RInE --exclude-dir=.git --exclude='docker-tools-hardening-ai-plan.md' "$pattern" Dockerfile scripts .github README.md >/dev/null 2>&1; then
-    grep -RInE --exclude-dir=.git --exclude='docker-tools-hardening-ai-plan.md' "$pattern" Dockerfile scripts .github README.md >&2 || true
+  if grep -RInE --exclude-dir=.git "$pattern" Dockerfile scripts .github README.md >/dev/null 2>&1; then
+    grep -RInE --exclude-dir=.git "$pattern" Dockerfile scripts .github README.md >&2 || true
     fail "forbidden pattern present: $pattern"
   fi
 }

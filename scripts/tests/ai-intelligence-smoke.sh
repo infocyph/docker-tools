@@ -177,21 +177,36 @@ cat >"$tmp/docroot/README.md" <<'MD'
 The runtime delegates provider selection through a deterministic internal contract.
 PASSWORD=secret-token-value
 MD
+cat >"$tmp/docroot/GUIDE.md" <<'MD'
+# Review guide
+
+This second document forces a separate bounded semantic review chunk.
+MD
 doc_sha="$(sha256sum "$tmp/docroot/README.md" | awk '{print $1}')"
 doc_bytes="$(wc -c <"$tmp/docroot/README.md" | tr -d '[:space:]')"
+guide_sha="$(sha256sum "$tmp/docroot/GUIDE.md" | awk '{print $1}')"
+guide_bytes="$(wc -c <"$tmp/docroot/GUIDE.md" | tr -d '[:space:]')"
 jq -n \
   --arg root "$tmp/docroot" \
   --arg sha "$doc_sha" \
+  --arg guide_sha "$guide_sha" \
   --argjson bytes "$doc_bytes" \
+  --argjson guide_bytes "$guide_bytes" \
   '{
     schema:"docker-tools.docstruct/v1",
     root:$root,
-    files:[{path:"README.md",format:"markdown",sha256:$sha,bytes:$bytes,parser:"pandoc",status:"ok",warnings:[]}],
-    nodes:[{id:"README.md#document",type:"document",label:"README.md",source_file:"README.md",evidence:{source_file:"README.md",precision:"document"}}],
+    files:[
+      {path:"README.md",format:"markdown",sha256:$sha,bytes:$bytes,parser:"pandoc",status:"ok",warnings:[]},
+      {path:"GUIDE.md",format:"markdown",sha256:$guide_sha,bytes:$guide_bytes,parser:"pandoc",status:"ok",warnings:[]}
+    ],
+    nodes:[
+      {id:"README.md#document",type:"document",label:"README.md",source_file:"README.md",evidence:{source_file:"README.md",precision:"document"}},
+      {id:"GUIDE.md#document",type:"document",label:"GUIDE.md",source_file:"GUIDE.md",evidence:{source_file:"GUIDE.md",precision:"document"}}
+    ],
     edges:[],
     unresolved_references:[],
     warnings:[],
-    stats:{files:1,nodes:1,edges:0,unresolved_references:0}
+    stats:{files:2,nodes:2,edges:0,unresolved_references:0}
   }' >"$tmp/docstruct.json"
 
 export DOCSTRUCT_REVIEW_ROOT="$tmp/docroot"
@@ -212,10 +227,14 @@ grep -q 'PASSWORD=\[REDACTED\]' <<<"$doc_context" ||
   fail 'document-review passage was not redacted'
 
 printf 'docstruct-review\n' >"$mode_file"
-review_patch="$(bash "$AIOPS" document-review --file "$tmp/docstruct.json")"
+before="$(wc -l <"$capture_file" | tr -d '[:space:]')"
+review_patch="$(DOCSTRUCT_REVIEW_CHUNK_FILES=1 bash "$AIOPS" document-review --file "$tmp/docstruct.json")"
+after="$(wc -l <"$capture_file" | tr -d '[:space:]')"
+[[ "$((after - before))" -eq 2 ]] || fail 'document-review did not issue one bounded request per chunk'
 jq -e '
   .schema == "docker-tools.docstruct-review/v1"
   and .base_schema == "docker-tools.docstruct/v1"
+  and .review_chunks == 2
   and (.base_sha256 | type == "string" and length == 64)
   and (.patch.add_nodes | length == 1)
   and .patch.add_nodes[0].id == "README.md#semantic-runtime"

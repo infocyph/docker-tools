@@ -30,7 +30,7 @@ cmp -s "$tmp/one.json" "$tmp/two.json" || fail "same corpus did not produce dete
 
 jq -e '
   .schema == "docker-tools.docstruct/v1"
-  and .stats.files == 8
+  and .stats.files == 11
   and (.nodes | any(.id == "sample.md#document" and .type == "document"))
   and (.nodes | any(.source_file == "sample.md" and .type == "section" and .label == "Runtime Guide"))
   and (.nodes | any(.source_file == "sample.md" and .type == "code_block" and .language == "bash"))
@@ -46,6 +46,15 @@ jq -e '
   and (.files | any(.path == "config.json" and .format == "json" and .parser == "php-json"))
   and (.files | any(.path == "project.toml" and .format == "toml" and .parser == "yq"))
   and (.files | any(.path == "settings.ini" and .format == "ini" and .parser == "php-ini"))
+  and (.files | any(.path == "requirements.txt" and .format == "requirements" and .parser == "php-requirements"))
+  and (.files | any(.path == "requirements/base.txt" and .format == "requirements" and .parser == "php-requirements"))
+  and (.files | any(.path == "constraints-dev.txt" and .format == "requirements" and .parser == "php-requirements"))
+  and (.nodes | any(.source_file == "requirements.txt" and .type == "dependency" and .label == "sphinx" and .ecosystem == "python"))
+  and (.nodes | any(.source_file == "requirements.txt" and .type == "dependency" and .label == "requests"))
+  and (.nodes | any(.source_file == "requirements.txt" and .type == "dependency" and .label == "private-wheel"))
+  and (.nodes | any(.source_file == "requirements/base.txt" and .type == "dependency" and .label == "myst-parser"))
+  and (.edges | any(.source == "requirements.txt#document" and .target == "requirements/base.txt#document" and .relation == "includes" and .reference_type == "requirement_include"))
+  and (.edges | any(.source == "requirements.txt#document" and .target == "constraints-dev.txt#document" and .relation == "references" and .reference_type == "constraint_include"))
   and (.nodes | any(.source_file == "bug_report.yml" and .type == "config_key" and .key_path == "body"))
   and (.nodes | any(.source_file == "config.json" and .type == "config_key" and .key_path == "runtime.provider"))
   and (.nodes | any(.source_file == "project.toml" and .type == "config_key" and .key_path == "tool.docstruct.enabled"))
@@ -54,6 +63,10 @@ jq -e '
   and (.edges | any(.source_file == "settings.ini" and .target == "https://example.invalid/docs" and .reference_type == "url"))
   and (([.edges[].target, .unresolved_references[].target] | index("secret.rst")) == null)
 ' "$tmp/one.json" >/dev/null || fail "normalized document structure contract failed"
+
+if grep -Eq 'secret-token|private-secret' "$tmp/one.json"; then
+  fail "Python requirements options/direct URLs leaked credential-bearing values"
+fi
 
 jq -e '
   [.nodes[], .edges[], .unresolved_references[]]
@@ -155,6 +168,9 @@ jq -e '
   and (.output_tokens == 0)
   and (.nodes | any(.id == "docstruct_sample_document"))
   and (.nodes | any(.id == "docstruct_sample_runtime_adapter"))
+  and (.nodes | any(.id == "docstruct_requirements_dependency_sphinx" and .label == "sphinx"))
+  and (.nodes | any(.id == "docstruct_requirements_base_dependency_myst_parser" and .label == "myst-parser"))
+  and (.edges | any(.source == "docstruct_requirements_document" and .target == "docstruct_requirements_dependency_sphinx" and .relation == "references"))
   and (.edges | any(.source == "docstruct_sample_document" and .target == "docstruct_sample_runtime_adapter" and .relation == "references"))
   and ([.nodes[].id] | all(test("config_[a-f0-9]{16}$") | not))
 ' "$tmp/graphify.json" >/dev/null || fail "Graphify mechanical fragment contract failed"

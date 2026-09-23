@@ -118,9 +118,10 @@ Published GitHub releases are the immutable source for versioned images.
 - AI output is advisory only and is never auto-executed
 
 ### 10) Deterministic document structure
-- `docstruct` extracts Markdown/RST structure through Pandoc without requiring an LLM
+- `docstruct` extracts Markdown/RST plus supported config/dependency-manifest structure without requiring an LLM
 - RST gets a narrow deterministic Sphinx supplement for explicit targets, directives, `include`, `toctree`, and typed roles
-- YAML/JSON/TOML extraction records key hierarchy only; scalar values are not copied into the sidecar by default
+- YAML/JSON/TOML/INI extraction records key hierarchy only; scalar values are not copied into the sidecar by default
+- recognized Python pip manifests (`requirements*.txt`, `constraints*.txt`, and `requirements/*.txt`) are parsed deterministically; package names and include/constraint links are retained while credential-bearing option/direct-URL values are not copied
 - local document links/includes/toctree targets are resolved mechanically when possible
 - typed code-symbol references remain explicit and unresolved; Graphify already owns code AST extraction and any later reconciliation
 - parser work is bounded by file/corpus/file-count/node-count/time limits
@@ -145,7 +146,7 @@ Published GitHub releases are the immutable source for versioned images.
 | `domain-which` | Resolve app/container/profile/docroot for a domain (supports `--json`) |
 | `es-policy` | Bootstrap/update Elasticsearch ILM + templates + Kibana data views |
 | `gitx` | Git helper CLI; AI commit mode is pinned to local Ollama when enabled |
-| `docstruct` | Deterministic Markdown/RST/YAML/JSON/TOML structural extractor |
+| `docstruct` | Deterministic Markdown/RST/config/Python-requirements structural extractor |
 | `askai` | Direct optional local-LLM client with file/stdin/JSON/stream support |
 | `aiops` | Bounded AI explanations for stack diagnostics, troubleshooting, review, and Graphify output |
 | `chromacat` | Colorized output |
@@ -195,7 +196,8 @@ Current deterministic coverage:
 
 - Markdown headings, links, anchors, and code blocks through Pandoc;
 - RST headings/code blocks through Pandoc plus explicit Sphinx/RST targets, directives, `include`, `toctree`, and `:doc:`/`:ref:`/`:class:`/`:func:`/`:meth:`/`:mod:` references;
-- YAML/JSON/TOML key hierarchy without scalar-value export;
+- YAML/JSON/TOML/INI key hierarchy without scalar-value export;
+- Python requirements/constraints manifests with deterministic package and include/constraint relationships;
 - resolution of provable local document links/includes/toctree references;
 - source evidence and explicit unresolved references;
 - bounded review context is split into small file/byte-limited chunks before any LLM call;

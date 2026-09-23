@@ -2,7 +2,7 @@
 
 ## Setup
 
-See the [runtime adapter](runtime.rst#runtime-adapter) before starting the service.
+See the [runtime adapter](sample.rst#runtime-adapter) before starting the service.
 
 ```bash
 lds up

@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIXTURES="$ROOT/scripts/tests/fixtures/docstruct"
 DOCSTRUCT="${DOCSTRUCT_BIN:-$ROOT/scripts/shells/docstruct.sh}"
+IMPL="${DOCSTRUCT_IMPL:-$ROOT/scripts/php/docstruct.php}"
+PHP_BIN="${DOCSTRUCT_PHP_BIN:-$(command -v php || true)}"
 
 fail() {
   printf 'docstruct-contract: %s\n' "$*" >&2
@@ -56,8 +58,8 @@ printf 'docstruct-contract: security bounds\n'
 mkdir -p "$tmp/security/root"
 printf '# Outside\n' >"$tmp/security/outside.md"
 ln -s ../outside.md "$tmp/security/root/linked.md"
-DOCSTRUCT_IMPL="$ROOT/scripts/php/docstruct.php" \
-DOCSTRUCT_PHP_BIN="$(command -v php)" \
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
   bash "$DOCSTRUCT" "$tmp/security/root" --output "$tmp/security.json"
 jq -e '.stats.files == 0 and .stats.nodes == 0' "$tmp/security.json" >/dev/null ||
   fail "symlinked file escaped the explicit corpus"
@@ -65,8 +67,8 @@ jq -e '.stats.files == 0 and .stats.nodes == 0' "$tmp/security.json" >/dev/null 
 printf '# Too large for test limit\n' >"$tmp/security/root/large.md"
 set +e
 DOCSTRUCT_MAX_FILE_BYTES=4 \
-DOCSTRUCT_IMPL="$ROOT/scripts/php/docstruct.php" \
-DOCSTRUCT_PHP_BIN="$(command -v php)" \
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
   bash "$DOCSTRUCT" "$tmp/security/root" >/dev/null 2>"$tmp/security.err"
 rc=$?
 set -e
@@ -79,8 +81,8 @@ cat >"$tmp/security/root/escape.md" <<'MD'
 
 [Outside](../../outside.md)
 MD
-DOCSTRUCT_IMPL="$ROOT/scripts/php/docstruct.php" \
-DOCSTRUCT_PHP_BIN="$(command -v php)" \
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
   bash "$DOCSTRUCT" "$tmp/security/root" --output "$tmp/escape.json"
 jq -e '
   .unresolved_references

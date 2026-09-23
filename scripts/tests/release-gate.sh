@@ -76,6 +76,7 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   DOCSTRUCT_IMPL=/usr/local/lib/docker-tools/docstruct.php \
   DOCSTRUCT_CONTEXT_IMPL=/usr/local/lib/docker-tools/docstruct-context.php \
   DOCSTRUCT_GRAPHIFY_IMPL=/usr/local/lib/docker-tools/docstruct-graphify.php \
+  DOCSTRUCT_GRAPHIFY_MERGE_IMPL=/usr/local/lib/docker-tools/docstruct-graphify-merge.php \
   bash /etc/share/scripts/tests/docstruct-contract.sh >/dev/null
   askai --help >/dev/null
   aiops --help >/dev/null

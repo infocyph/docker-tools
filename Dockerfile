@@ -269,6 +269,7 @@ COPY scripts/lib/ai-provider.sh /usr/local/lib/docker-tools/ai-provider.sh
 COPY scripts/php/docstruct.php /usr/local/lib/docker-tools/docstruct.php
 COPY scripts/php/docstruct-context.php /usr/local/lib/docker-tools/docstruct-context.php
 COPY scripts/php/docstruct-graphify.php /usr/local/lib/docker-tools/docstruct-graphify.php
+COPY scripts/php/docstruct-graphify-merge.php /usr/local/lib/docker-tools/docstruct-graphify-merge.php
 COPY scripts/shells/docstruct.sh /usr/local/bin/docstruct
 COPY scripts/shells/askai.sh /usr/local/bin/askai
 COPY scripts/shells/aiops.sh /usr/local/bin/aiops
@@ -402,6 +403,7 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
   && php -l /usr/local/lib/docker-tools/docstruct.php >/dev/null \
   && php -l /usr/local/lib/docker-tools/docstruct-context.php >/dev/null \
   && php -l /usr/local/lib/docker-tools/docstruct-graphify.php >/dev/null \
+  && php -l /usr/local/lib/docker-tools/docstruct-graphify-merge.php >/dev/null \
   && bash -n /usr/local/bin/docstruct \
   && docstruct --help >/dev/null \
   && bash -n /usr/local/bin/askai \

@@ -114,6 +114,26 @@ DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \
 DOCSTRUCT_PHP_BIN="$PHP_BIN" \
   bash "$DOCSTRUCT" graphify "$tmp/one.json" --output "$tmp/graphify.json"
 
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" graphify "$tmp/one.json" --source-root /host/TalkingBytes --output "$tmp/graphify-host.json"
+jq -e '
+  (.nodes | all(.source_file | startswith("/host/TalkingBytes/")))
+  and (.edges | all(.source_file | startswith("/host/TalkingBytes/")))
+' "$tmp/graphify-host.json" >/dev/null || fail "Graphify source-root remap failed"
+
+set +e
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" graphify "$tmp/one.json" --source-root relative/path >/dev/null 2>"$tmp/graphify-root.err"
+rc=$?
+set -e
+[[ "$rc" -eq 65 ]] || fail "relative Graphify source root returned $rc instead of 65"
+grep -q 'source root must be absolute' "$tmp/graphify-root.err" ||
+  fail "relative Graphify source-root error missing"
+
 jq -e '
   (.nodes | length > 0)
   and (.nodes | all(

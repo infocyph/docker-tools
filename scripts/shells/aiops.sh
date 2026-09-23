@@ -219,12 +219,30 @@ aiops_render() {
   fi
 }
 
-aiops_document_review() {
-  local context="$1" request="$2" extra_system="$3" context_only="$4" think_override="${5:-inherit}"
-  local redacted patch system base_hash
+aiops_docstruct_bin() {
+  if [[ -n "${DOCSTRUCT_BIN:-}" && -r "${DOCSTRUCT_BIN}" ]]; then
+    printf '%s' "$DOCSTRUCT_BIN"
+    return 0
+  fi
+  if command -v docstruct >/dev/null 2>&1; then
+    command -v docstruct
+    return 0
+  fi
 
-  redacted="$(printf '%s' "$context" | ai_redact)"
-  aiops_guard_context "$redacted" || return $?
+  local candidate
+  candidate="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/docstruct.sh"
+  if [[ -r "$candidate" ]]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+
+  aiops_error 'docstruct is required for document-review source context'
+  return 69
+}
+
+aiops_document_review() {
+  local file="$1" context="$2" request="$3" extra_system="$4" context_only="$5" think_override="${6:-inherit}"
+  local redacted patch system base_hash review_context docstruct_bin
 
   if ! jq -e '
     .schema == "docker-tools.docstruct/v1"
@@ -237,12 +255,30 @@ aiops_document_review() {
     return 65
   fi
 
+  base_hash="$(printf '%s' "$context" | sha256sum | awk '{print $1}')"
+  docstruct_bin="$(aiops_docstruct_bin)" || return $?
+  review_context="$(bash "$docstruct_bin" context "$file")" || return $?
+
+  if ! jq -e --arg base_sha256 "$base_hash" '
+    .schema == "docker-tools.docstruct-context/v1"
+    and .base_schema == "docker-tools.docstruct/v1"
+    and .base_sha256 == $base_sha256
+    and (.structure | type == "object")
+    and (.passages | type == "array")
+  ' >/dev/null 2>&1 <<<"$review_context"; then
+    aiops_error 'docstruct returned an invalid or mismatched review context'
+    return 65
+  fi
+
+  redacted="$(printf '%s' "$review_context" | ai_redact)"
+  aiops_guard_context "$redacted" || return $?
+
   if [[ "$context_only" == 1 ]]; then
     printf '%s\n' "$redacted"
     return 0
   fi
 
-  system='Review a deterministic docker-tools.docstruct/v1 artifact. Mechanical nodes and edges are authoritative and must not be regenerated or removed. Return exactly one additive patch object with arrays add_nodes, add_edges, corrections, and unresolved. Every proposed item must include source_file, reason, and confidence from 0 to 1. Added nodes require id, type, label, source_file, reason, confidence. Added edges require source, target, relation, source_file, reason, confidence. Corrections require target_id, proposed_changes object, source_file, reason, confidence. Unresolved items require target, source_file, reason, confidence. Do not invent source files. Edges may reference only existing deterministic node IDs or node IDs added in the same patch.'
+  system='Review a bounded docker-tools.docstruct-context/v1 artifact. The structure member contains authoritative mechanical facts; passages contain bounded Markdown/RST source text for semantic interpretation. Mechanical nodes and edges must not be regenerated or removed. Config scalar values are intentionally absent. Return exactly one additive patch object with arrays add_nodes, add_edges, corrections, and unresolved. Every proposed item must include source_file, reason, and confidence from 0 to 1. Added nodes require id, type, label, source_file, reason, confidence. Added edges require source, target, relation, source_file, reason, confidence. Corrections require target_id, proposed_changes object, source_file, reason, confidence. Unresolved items require target, source_file, reason, confidence. Do not invent source files. Edges may reference only existing deterministic node IDs or node IDs added in the same patch.'
   if [[ -n "$extra_system" ]]; then
     system+=$'\nAdditional user instruction: '
     system+="$extra_system"
@@ -314,7 +350,6 @@ aiops_document_review() {
     return 69
   fi
 
-  base_hash="$(printf '%s' "$context" | sha256sum | awk '{print $1}')"
   jq -nc \
     --arg schema 'docker-tools.docstruct-review/v1' \
     --arg base_schema 'docker-tools.docstruct/v1' \
@@ -449,7 +484,7 @@ main() {
   esac
 
   if [[ "$command" == document-review ]]; then
-    aiops_document_review "$context" "$request" "$extra_system" "$context_only" "$think_override"
+    aiops_document_review "$file" "$context" "$request" "$extra_system" "$context_only" "$think_override"
     return $?
   fi
 

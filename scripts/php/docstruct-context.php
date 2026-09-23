@@ -109,7 +109,7 @@ function contextArgs(array $argv): array
         if ($arg === '-h' || $arg === '--help') {
             echo "Usage: docstruct context <docstruct.json> [--compact]\n";
             echo "Build bounded Markdown/RST review passages without exposing config scalar values.\n";
-            echo "Limits: DOCSTRUCT_REVIEW_FILE_BYTES, DOCSTRUCT_REVIEW_TOTAL_BYTES.\n";
+            echo "Limits: DOCSTRUCT_REVIEW_ROOT, DOCSTRUCT_REVIEW_FILE_BYTES, DOCSTRUCT_REVIEW_TOTAL_BYTES.\n";
             exit(0);
         }
         if ($arg === '--compact') {
@@ -138,6 +138,20 @@ $doc = $sidecar['data'];
 $root = realpath((string)($doc['root'] ?? ''));
 if ($root === false || !is_dir($root)) {
     contextFail('sidecar root is unavailable; regenerate docstruct from the mounted workspace', 65);
+}
+
+$allowedRootInput = getenv('DOCSTRUCT_REVIEW_ROOT');
+if ($allowedRootInput === false || trim($allowedRootInput) === '') {
+    $allowedRootInput = getcwd() ?: '';
+}
+$allowedRoot = realpath($allowedRootInput);
+if ($allowedRoot === false || !is_dir($allowedRoot)) {
+    contextFail('DOCSTRUCT_REVIEW_ROOT/current workspace is unavailable', 65);
+}
+$rootNormalized = rtrim(str_replace('\\', '/', $root), '/');
+$allowedNormalized = rtrim(str_replace('\\', '/', $allowedRoot), '/');
+if ($rootNormalized !== $allowedNormalized && !str_starts_with($rootNormalized, $allowedNormalized . '/')) {
+    contextFail('sidecar root is outside the allowed review workspace', 77);
 }
 
 $fileLimit = contextLimit('DOCSTRUCT_REVIEW_FILE_BYTES', DOCSTRUCT_CONTEXT_DEFAULT_FILE_BYTES);

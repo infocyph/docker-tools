@@ -162,8 +162,9 @@ Published GitHub releases are the immutable source for versioned images.
 ```bash
 docstruct README.md
 docstruct docs/
-docstruct docs/ --output /tmp/docstruct.json
-docstruct docs/ --compact
+docstruct docs/ --include '*.md' --include '*.rst'
+docstruct docs/ --exclude 'generated/*' --output /tmp/docstruct.json
+docstruct docs/ --no-gitignore --compact
 ```
 
 Optional semantic review remains separate and additive:
@@ -201,10 +202,11 @@ DOCSTRUCT_MAX_FILE_BYTES=2097152
 DOCSTRUCT_MAX_CORPUS_BYTES=33554432
 DOCSTRUCT_MAX_FILES=1000
 DOCSTRUCT_MAX_NODES=20000
+DOCSTRUCT_MAX_REFERENCES=50000
 DOCSTRUCT_PARSE_TIMEOUT=15
 ```
 
-Symlinked corpus entries are not followed, and references that would escape the supplied root remain unresolved.
+Directory scans respect `.gitignore` by default when Git metadata is available; `--no-gitignore` disables that behavior. Repeatable `--include` and `--exclude` globs provide explicit corpus shaping. Symlinked corpus entries are not followed, and references that would escape the supplied root remain unresolved.
 
 ## 🤖 Optional local AI
 

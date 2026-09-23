@@ -665,7 +665,138 @@ function extractConfigKeys(
     }
 }
 
+function isPythonRequirementsManifest(string $path): bool {
+    $normalized = str_replace('\\', '/', $path);
+    $base = strtolower(basename($normalized));
+    if (preg_match('/^(?:requirements|constraints)(?:[-_.][a-z0-9][a-z0-9._-]*)?\.txt$/i', $base) === 1) {
+        return true;
+    }
+
+    $parent = strtolower(basename(dirname($normalized)));
+    return $parent === 'requirements' && str_ends_with($base, '.txt');
+}
+
+function requirementLogicalLines(string $source): array {
+    $physical = preg_split('/\R/u', $source) ?: [];
+    $logical = [];
+    $buffer = '';
+    $startLine = 1;
+
+    foreach ($physical as $index => $line) {
+        $lineNo = $index + 1;
+        $trimmedRight = rtrim($line);
+        if ($buffer === '') {
+            $startLine = $lineNo;
+        }
+
+        $continued = str_ends_with($trimmedRight, '\\');
+        if ($continued) {
+            $trimmedRight = rtrim(substr($trimmedRight, 0, -1));
+        }
+
+        $buffer .= ($buffer === '' ? '' : ' ') . trim($trimmedRight);
+        if ($continued) {
+            continue;
+        }
+
+        $logical[] = ['line' => $startLine, 'text' => trim($buffer)];
+        $buffer = '';
+    }
+
+    if ($buffer !== '') {
+        $logical[] = ['line' => $startLine, 'text' => trim($buffer)];
+    }
+
+    return $logical;
+}
+
+function requirementDependencyId(string $relative, string $package): string {
+    return $relative . '#dependency-' . slug($package);
+}
+
+function extractPythonRequirements(
+    string $relative,
+    string $source,
+    string $documentId,
+    array &$nodes,
+    array &$edges,
+    array &$unresolved
+): void {
+    foreach (requirementLogicalLines($source) as $entry) {
+        $lineNo = (int)$entry['line'];
+        $line = trim((string)$entry['text']);
+        if ($line === '' || str_starts_with($line, '#')) {
+            continue;
+        }
+
+        $line = preg_replace('/\s+#.*$/u', '', $line) ?? $line;
+        $line = trim($line);
+        if ($line === '') {
+            continue;
+        }
+
+        $target = null;
+        $referenceType = null;
+        if (preg_match('/^(?:-r|--requirement)(?:=|\s+)(\S+)$/i', $line, $match) === 1) {
+            $target = trim($match[1], "'\"");
+            $referenceType = 'requirement_include';
+        } elseif (preg_match('/^(?:-c|--constraint)(?:=|\s+)(\S+)$/i', $line, $match) === 1) {
+            $target = trim($match[1], "'\"");
+            $referenceType = 'constraint_include';
+        }
+
+        if ($target !== null && $target !== '') {
+            $unresolved[] = [
+                'source' => $documentId,
+                'target' => $target,
+                'relation' => $referenceType === 'requirement_include' ? 'includes' : 'references',
+                'reference_type' => $referenceType,
+                'source_file' => $relative,
+                'evidence' => evidence($relative, $lineNo, 'line'),
+            ];
+            continue;
+        }
+
+        // Options, editable paths and bare URL/VCS requirements are deliberately
+        // not copied into the sidecar: they may contain credentials or tokens.
+        if (str_starts_with($line, '-')
+            || preg_match('~^(?:https?|file)://~i', $line) === 1
+            || preg_match('~^(?:git|hg|svn|bzr)\+~i', $line) === 1
+            || str_starts_with($line, '.')
+            || str_starts_with($line, '/')) {
+            continue;
+        }
+
+        if (preg_match('/^([A-Za-z0-9][A-Za-z0-9._-]*)/', $line, $match) !== 1) {
+            continue;
+        }
+
+        $package = $match[1];
+        $id = requirementDependencyId($relative, $package);
+        addNode($nodes, [
+            'id' => $id,
+            'type' => 'dependency',
+            'label' => $package,
+            'package' => $package,
+            'ecosystem' => 'python',
+            'source_file' => $relative,
+            'evidence' => evidence($relative, $lineNo, 'line'),
+        ]);
+        addEdge($edges, [
+            'source' => $documentId,
+            'target' => $id,
+            'relation' => 'declares',
+            'source_file' => $relative,
+            'evidence' => evidence($relative, $lineNo, 'line'),
+        ]);
+    }
+}
+
 function supportedFormat(string $path): ?string {
+    if (isPythonRequirementsManifest($path)) {
+        return 'requirements';
+    }
+
     $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
     return match ($ext) {
         'md', 'markdown' => 'markdown',
@@ -845,7 +976,7 @@ function parseArgs(array $argv): array {
         $arg = $argv[$i];
         if ($arg === '-h' || $arg === '--help') {
             echo "Usage: docstruct [path] [--include <glob>] [--exclude <glob>] [--no-gitignore] [--output <file>] [--compact]\n";
-            echo "Deterministically extract Markdown/RST/YAML/JSON/TOML/INI structure as docker-tools.docstruct/v1 JSON.\n";
+            echo "Deterministically extract Markdown/RST/YAML/JSON/TOML/INI/Python-requirements structure as docker-tools.docstruct/v1 JSON.\n";
             echo "Repeat --include/--exclude to shape directory scans. .gitignore is respected by default when Git metadata is available.\n";
             echo "Limits: DOCSTRUCT_MAX_FILE_BYTES, DOCSTRUCT_MAX_CORPUS_BYTES, DOCSTRUCT_MAX_FILES, DOCSTRUCT_MAX_NODES, DOCSTRUCT_MAX_REFERENCES, DOCSTRUCT_PARSE_TIMEOUT.\n";
             exit(0);
@@ -946,6 +1077,7 @@ foreach ($files as $file) {
             'markdown' => 'pandoc',
             'json' => 'php-json',
             'ini' => 'php-ini',
+            'requirements' => 'php-requirements',
             default => 'yq',
         },
         'status' => 'ok',
@@ -959,6 +1091,8 @@ foreach ($files as $file) {
             if ($format === 'rst') {
                 extractRstSupplement($relative, $source, $nodes, $edges, $unresolved);
             }
+        } elseif ($format === 'requirements') {
+            extractPythonRequirements($relative, $source, $documentId, $nodes, $edges, $unresolved);
         } else {
             $structured = structuredData($file, $format);
             extractConfigKeys($structured, $relative, $documentId, $nodes, $edges, $unresolved);

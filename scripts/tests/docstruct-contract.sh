@@ -6,6 +6,7 @@ FIXTURES="$ROOT/scripts/tests/fixtures/docstruct"
 DOCSTRUCT="${DOCSTRUCT_BIN:-$ROOT/scripts/shells/docstruct.sh}"
 IMPL="${DOCSTRUCT_IMPL:-$ROOT/scripts/php/docstruct.php}"
 GRAPHIFY_IMPL="${DOCSTRUCT_GRAPHIFY_IMPL:-$ROOT/scripts/php/docstruct-graphify.php}"
+GRAPHIFY_MERGE_IMPL="${DOCSTRUCT_GRAPHIFY_MERGE_IMPL:-$ROOT/scripts/php/docstruct-graphify-merge.php}"
 PHP_BIN="${DOCSTRUCT_PHP_BIN:-$(command -v php || true)}"
 
 fail() {
@@ -69,20 +70,22 @@ DOCSTRUCT_PHP_BIN="$PHP_BIN" \
 jq -e '
   (.nodes | length > 0)
   and (.nodes | all(
-    (.id | test("^[a-z0-9_]+$"))
+    (.id | test("^docstruct_[a-z0-9_]+$"))
+    and (.docstruct_origin == "docker-tools.docstruct/v1")
     and (.file_type == "document")
     and (.source_file | startswith("/"))))
   and (.edges | all(
     (.source | test("^[a-z0-9_]+$"))
     and (.target | test("^[a-z0-9_]+$"))
     and (.confidence == "EXTRACTED")
-    and (.confidence_score == 1)))
+    and (.confidence_score == 1)
+    and (.docstruct_origin == "docker-tools.docstruct/v1")))
   and (.hyperedges == [])
   and (.input_tokens == 0)
   and (.output_tokens == 0)
-  and (.nodes | any(.id == "sample_document"))
-  and (.nodes | any(.id == "sample_runtime_adapter"))
-  and (.edges | any(.source == "sample_document" and .target == "sample_runtime_adapter" and .relation == "references"))
+  and (.nodes | any(.id == "docstruct_sample_document"))
+  and (.nodes | any(.id == "docstruct_sample_runtime_adapter"))
+  and (.edges | any(.source == "docstruct_sample_document" and .target == "docstruct_sample_runtime_adapter" and .relation == "references"))
   and ([.nodes[].id] | all(test("config_[a-f0-9]{16}$") | not))
 ' "$tmp/graphify.json" >/dev/null || fail "Graphify mechanical fragment contract failed"
 
@@ -122,10 +125,10 @@ DOCSTRUCT_PHP_BIN="$PHP_BIN" \
   bash "$DOCSTRUCT" graphify "$tmp/one.json" --review "$tmp/review.json" --output "$tmp/graphify-reviewed.json"
 
 jq -e '
-  (.nodes | any(.id == "sample_runtime_architecture" and .file_type == "concept"))
+  (.nodes | any(.id == "docstruct_sample_runtime_architecture" and .file_type == "concept"))
   and (.edges | any(
-    .source == "sample_document"
-    and .target == "sample_runtime_architecture"
+    .source == "docstruct_sample_document"
+    and .target == "docstruct_sample_runtime_architecture"
     and .relation == "conceptually_related_to"
     and .confidence == "INFERRED"
     and .confidence_score == 0.95))
@@ -142,6 +145,85 @@ set -e
 [[ "$rc" -eq 65 ]] || fail "mismatched Graphify review returned $rc instead of 65"
 grep -q 'does not belong to this docstruct artifact' "$tmp/graphify-review.err" ||
   fail "mismatched Graphify review error missing"
+
+printf 'docstruct-contract: safe Graphify merge\n'
+
+cat >"$tmp/code-graph.json" <<'JSON'
+{
+  "nodes": [
+    {
+      "id": "src_runtime_php_runtime",
+      "label": "Runtime",
+      "file_type": "class",
+      "source_file": "src/Runtime.php"
+    },
+    {
+      "id": "docstruct_old_document",
+      "label": "Old document",
+      "file_type": "document",
+      "source_file": "/tmp/old.md",
+      "docstruct_origin": "docker-tools.docstruct/v1"
+    }
+  ],
+  "edges": [
+    {
+      "source": "src_runtime_php_runtime",
+      "target": "src_runtime_php_runtime",
+      "relation": "calls",
+      "source_file": "src/Runtime.php"
+    },
+    {
+      "source": "docstruct_old_document",
+      "target": "docstruct_old_document",
+      "relation": "contains",
+      "source_file": "/tmp/old.md",
+      "docstruct_origin": "docker-tools.docstruct/v1"
+    }
+  ],
+  "hyperedges": [],
+  "input_tokens": 11,
+  "output_tokens": 0
+}
+JSON
+
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \
+DOCSTRUCT_GRAPHIFY_MERGE_IMPL="$GRAPHIFY_MERGE_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" graphify-merge "$tmp/code-graph.json" "$tmp/graphify-reviewed.json" --output "$tmp/merged-graph.json"
+
+jq -e '
+  (.nodes | any(.id == "src_runtime_php_runtime" and .file_type == "class"))
+  and ([.nodes[].id] | index("docstruct_old_document") == null)
+  and (.nodes | any(.id == "docstruct_sample_document"))
+  and (.edges | any(.relation == "calls" and .source == "src_runtime_php_runtime"))
+  and ([.edges[] | select(.source == "docstruct_old_document" or .target == "docstruct_old_document")] | length == 0)
+  and (.input_tokens == 11)
+' "$tmp/merged-graph.json" >/dev/null || fail "safe Graphify merge did not preserve code and replace docstruct nodes"
+
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \
+DOCSTRUCT_GRAPHIFY_MERGE_IMPL="$GRAPHIFY_MERGE_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" graphify-merge "$tmp/merged-graph.json" "$tmp/graphify-reviewed.json" --output "$tmp/merged-graph-two.json"
+cmp -s "$tmp/merged-graph.json" "$tmp/merged-graph-two.json" || fail "Graphify merge is not idempotent"
+
+jq '.nodes += [{
+  "id":"docstruct_sample_document",
+  "label":"Collision",
+  "file_type":"class",
+  "source_file":"src/Collision.php"
+}]' "$tmp/code-graph.json" >"$tmp/collision-graph.json"
+set +e
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \
+DOCSTRUCT_GRAPHIFY_MERGE_IMPL="$GRAPHIFY_MERGE_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" graphify-merge "$tmp/collision-graph.json" "$tmp/graphify.json" >/dev/null 2>"$tmp/collision.err"
+rc=$?
+set -e
+[[ "$rc" -eq 65 ]] || fail "Graphify merge collision returned $rc instead of 65"
+grep -q 'collides with an existing code/graph node' "$tmp/collision.err" || fail "Graphify merge collision error missing"
 
 printf 'docstruct-contract: scan selection and gitignore\n'
 

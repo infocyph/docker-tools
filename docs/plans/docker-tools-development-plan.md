@@ -734,7 +734,7 @@ Extend the provider layer with the following operational rules:
 - make redaction deterministic and test it with credential/token/URL/header/.env fixtures before any content reaches the provider;
 - do not persist raw prompts/responses by default; optional debug telemetry should contain redacted metadata such as provider, model, duration, byte counts and a safe request/context hash rather than secret-bearing payloads;
 - admin-panel generations should support streaming/cancellation or another bounded UX rather than tying up a PHP request for the full maximum generation timeout;
-- keep fake-provider tests as the normal Tools CI path and add lightweight OpenAI-compatible protocol/schema coverage for the common `llm` API without requiring a real model download in every Tools check.
+- keep fake-provider tests as the normal Tools CI path and add lightweight OpenAI-compatible protocol/schema coverage for both runtime-selected provider targets without requiring a real model download in every Tools check.
 
 ## 14.9 Tools-owned service health and lifecycle
 
@@ -821,7 +821,7 @@ forking Graphify internals.
 LocalDevStack should remain orchestration/provider selection:
 
 - choose the active local LLM provider;
-- expose the common `llm` endpoint;
+- expose `LDS_AI_RUNTIME` so Tools can select `llm-fastflow` or `llm-ollama` directly;
 - make Tools available;
 - mount an explicitly selected workspace when needed;
 - avoid implementing document parsing itself.

@@ -32,6 +32,8 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   test -x /usr/local/bin/lazydocker
   test -x /usr/local/bin/composer
   test -x /usr/local/bin/gitx
+  test -x /usr/local/bin/docstruct
+  command -v pandoc >/dev/null
   test -x /usr/local/bin/askai
   test -x /usr/local/bin/aiops
   test -r "$LDS_AI_PROVIDER_LIB"
@@ -69,6 +71,7 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   lazydocker --version >/dev/null
   composer --version --no-ansi >/dev/null
   gitx --version >/dev/null
+  docstruct --help >/dev/null
   askai --help >/dev/null
   aiops --help >/dev/null
   status --help >/dev/null

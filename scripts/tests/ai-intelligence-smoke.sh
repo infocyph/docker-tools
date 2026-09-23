@@ -194,6 +194,7 @@ jq -n \
     stats:{files:1,nodes:1,edges:0,unresolved_references:0}
   }' >"$tmp/docstruct.json"
 
+export DOCSTRUCT_REVIEW_ROOT="$tmp/docroot"
 before="$(wc -l <"$capture_file" | tr -d '[:space:]')"
 doc_context="$(bash "$AIOPS" document-review --file "$tmp/docstruct.json" --context-only)"
 after="$(wc -l <"$capture_file" | tr -d '[:space:]')"
@@ -238,6 +239,8 @@ bash "$AIOPS" document-review --file "$tmp/not-docstruct.json" >"$tmp/out" 2>"$t
 rc=$?
 set -e
 [[ "$rc" -eq 65 ]] || fail "invalid document-review input returned $rc instead of 65"
+
+unset DOCSTRUCT_REVIEW_ROOT
 
 printf '6/8 repository review is metadata-only\n'
 repo_dir="$tmp/repo"

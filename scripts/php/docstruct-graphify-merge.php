@@ -288,6 +288,12 @@ function writeAtomic(string $path, string $content): void
         if (file_put_contents($tmp, $content) === false) {
             mergeFail("unable to write temporary output: {$tmp}", 73);
         }
+        // This artifact is a Docker-to-host handoff. tempnam() creates a
+        // restrictive file (typically 0600); preserve atomic publication but
+        // make the completed handoff readable by the invoking host user.
+        if (!chmod($tmp, 0644)) {
+            mergeFail("unable to set readable mode on merged graph: {$tmp}", 73);
+        }
         if (!rename($tmp, $path)) {
             mergeFail("unable to publish merged graph: {$path}", 73);
         }

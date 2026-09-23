@@ -242,6 +242,21 @@ jq -e '
   and .patch.add_edges[0].source == "README.md#document"
 ' <<<"$review_patch" >/dev/null || fail 'valid document-review additive patch was not accepted'
 
+dd if=/dev/zero bs=1000 count=600 2>/dev/null | tr '\000' x >"$tmp/sidecar-padding.txt"
+jq --rawfile padding "$tmp/sidecar-padding.txt" '. + {test_padding:$padding}'   "$tmp/docstruct.json" >"$tmp/large-docstruct.json"
+large_size="$(wc -c <"$tmp/large-docstruct.json" | tr -d '[:space:]')"
+((10#$large_size > 10#$LDS_AI_MAX_CONTEXT_BYTES)) ||
+  fail 'large docstruct regression fixture did not exceed the generic AI context cap'
+
+before="$(wc -l <"$capture_file" | tr -d '[:space:]')"
+printf 'docstruct-review\n' >"$mode_file"
+large_review_patch="$(DOCSTRUCT_REVIEW_CHUNK_FILES=1 bash "$AIOPS" document-review --file "$tmp/large-docstruct.json")"
+after="$(wc -l <"$capture_file" | tr -d '[:space:]')"
+[[ "$((after - before))" -eq 2 ]] ||
+  fail 'large docstruct sidecar did not preserve bounded per-chunk model requests'
+jq -e '.schema == "docker-tools.docstruct-review/v1" and .review_chunks == 2'   <<<"$large_review_patch" >/dev/null ||
+  fail 'large docstruct sidecar review did not produce a valid additive patch'
+
 printf 'docstruct-review-invalid-target\n' >"$mode_file"
 set +e
 bash "$AIOPS" document-review --file "$tmp/docstruct.json" >"$tmp/out" 2>"$tmp/err"

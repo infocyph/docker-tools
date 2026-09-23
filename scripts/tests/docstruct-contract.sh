@@ -51,4 +51,40 @@ jq -e '
   | all(.evidence.source_file == "sample.rst")
 ' "$tmp/one.json" >/dev/null || fail "RST structural facts lost source evidence"
 
+printf 'docstruct-contract: security bounds\n'
+
+mkdir -p "$tmp/security/root"
+printf '# Outside\n' >"$tmp/security/outside.md"
+ln -s ../outside.md "$tmp/security/root/linked.md"
+DOCSTRUCT_IMPL="$ROOT/scripts/php/docstruct.php" \
+DOCSTRUCT_PHP_BIN="$(command -v php)" \
+  bash "$DOCSTRUCT" "$tmp/security/root" --output "$tmp/security.json"
+jq -e '.stats.files == 0 and .stats.nodes == 0' "$tmp/security.json" >/dev/null ||
+  fail "symlinked file escaped the explicit corpus"
+
+printf '# Too large for test limit\n' >"$tmp/security/root/large.md"
+set +e
+DOCSTRUCT_MAX_FILE_BYTES=4 \
+DOCSTRUCT_IMPL="$ROOT/scripts/php/docstruct.php" \
+DOCSTRUCT_PHP_BIN="$(command -v php)" \
+  bash "$DOCSTRUCT" "$tmp/security/root" >/dev/null 2>"$tmp/security.err"
+rc=$?
+set -e
+[[ "$rc" -eq 65 ]] || fail "oversized file returned $rc instead of 65"
+grep -q 'DOCSTRUCT_MAX_FILE_BYTES' "$tmp/security.err" || fail "oversized file error missing"
+
+rm -f "$tmp/security/root/large.md"
+cat >"$tmp/security/root/escape.md" <<'MD'
+# Escape
+
+[Outside](../../outside.md)
+MD
+DOCSTRUCT_IMPL="$ROOT/scripts/php/docstruct.php" \
+DOCSTRUCT_PHP_BIN="$(command -v php)" \
+  bash "$DOCSTRUCT" "$tmp/security/root" --output "$tmp/escape.json"
+jq -e '
+  .unresolved_references
+  | any(.target == "../../outside.md" and .reason == "target_outside_root")
+' "$tmp/escape.json" >/dev/null || fail "outside-root reference was not retained as unresolved"
+
 printf 'docstruct-contract: ok\n'

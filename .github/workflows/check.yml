@@ -150,6 +150,7 @@ jobs:
           base_bytes="$(docker image inspect infocyph/tools:ci --format '{{.Size}}')"
           pandoc_bytes="$(docker image inspect infocyph/tools:ci-pandoc --format '{{.Size}}')"
           delta_bytes="$((pandoc_bytes - base_bytes))"
+          printf 'Pandoc footprint: baseline=%s bytes, with_pandoc=%s bytes, delta=%s bytes\n' "$base_bytes" "$pandoc_bytes" "$delta_bytes"
 
           {
             echo '### docstruct Batch 0 — Pandoc footprint'
@@ -261,7 +262,7 @@ jobs:
           done
 
           docker exec "$name" tools-healthcheck
-          docker exec "$name" bash -c 'test "$LDS_AI_ENABLED" = auto && test "$LDS_AI_RUNTIME" = cpu && test "$LDS_AI_PROVIDER" = ollama && test "$LDS_AI_URL" = http://llm-ollama:11434'
+          docker exec "$name" bash -c 'test "$LDS_AI_ENABLED" = auto && test "$LDS_AI_RUNTIME" = cpu && source "$LDS_AI_PROVIDER_LIB" && ai_config_init && test "$LDS_AI_PROVIDER" = ollama && test "$LDS_AI_URL" = http://llm-ollama:11434'
           docker exec "$name" sh -lc 'tr "\0" "\n" </proc/1/environ | grep -qx "NOTIFY_TOKEN="'
           docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
 

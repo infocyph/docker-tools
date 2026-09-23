@@ -1,0 +1,2 @@
+myst-parser>=5
+sphinx-copybutton>=0.5.2

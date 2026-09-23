@@ -98,7 +98,7 @@ function absoluteSource(string $root, string $relative): string
 function mechanicalNode(array $node, string $root): ?array
 {
     $type = (string)($node['type'] ?? '');
-    if (!in_array($type, ['document', 'section', 'link_target'], true)) {
+    if (!in_array($type, ['document', 'section', 'link_target', 'dependency'], true)) {
         return null;
     }
 

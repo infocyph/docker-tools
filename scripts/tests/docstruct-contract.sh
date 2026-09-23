@@ -32,9 +32,9 @@ jq -e '
   and (.nodes | any(.id == "sample.rst#runtime-adapter" and .type == "link_target"))
   and (.nodes | any(.source_file == "sample.rst" and .type == "directive" and .directive == "include" and .argument == "included.rst"))
   and (.nodes | any(.source_file == "sample.rst" and .type == "directive" and .directive == "toctree"))
-  and (.unresolved_references | any(.source_file == "sample.md" and .target == "runtime.rst#runtime-adapter" and .relation == "links_to"))
-  and (.unresolved_references | any(.source_file == "sample.rst" and .target == "included.rst" and .relation == "includes"))
-  and (.unresolved_references | any(.source_file == "sample.rst" and .target == "other" and .reference_type == "toctree"))
+  and (.edges | any(.source == "sample.md#document" and .target == "sample.rst#runtime-adapter" and .relation == "links_to"))
+  and (.edges | any(.source == "sample.rst#document" and .target == "included.rst#document" and .relation == "includes"))
+  and (.edges | any(.source == "sample.rst#document" and .target == "other.rst#document" and .reference_type == "toctree"))
   and (.unresolved_references | any(.source_file == "sample.rst" and .target == "RuntimeManager" and .reference_type == "class"))
   and (.unresolved_references | any(.source_file == "sample.rst" and .target == "RuntimeAdapter.start" and .reference_type == "meth"))
 ' "$tmp/one.json" >/dev/null || fail "normalized document structure contract failed"

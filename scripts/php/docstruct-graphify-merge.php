@@ -32,12 +32,28 @@ function mergeReadJson(string $path, string $label): array
     return $decoded;
 }
 
+function docstructRequirementsSource(string $sourceFile): bool
+{
+    $normalized = str_replace('\\', '/', $sourceFile);
+    $base = strtolower(basename($normalized));
+    if (preg_match('/^(?:requirements|constraints)(?:[-_.][a-z0-9][a-z0-9._-]*)?\.txt$/i', $base) === 1) {
+        return true;
+    }
+
+    return strtolower(basename(dirname($normalized))) === 'requirements'
+        && str_ends_with($base, '.txt');
+}
+
 function docstructSemanticSource(string $sourceFile): bool
 {
     $path = parse_url($sourceFile, PHP_URL_PATH);
     if (!is_string($path) || $path === '') {
         $path = $sourceFile;
     }
+    if (docstructRequirementsSource($path)) {
+        return true;
+    }
+
     $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
     return in_array($ext, ['md', 'markdown', 'rst', 'yaml', 'yml', 'json', 'toml', 'ini', 'cfg'], true);
 }

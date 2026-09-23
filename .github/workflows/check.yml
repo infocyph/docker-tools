@@ -52,6 +52,9 @@ jobs:
           php -l scripts/tests/process-runner-smoke.php >/dev/null
           php -l scripts/tests/admin-monitoring-smoke.php >/dev/null
           php -l scripts/tests/fake-llm-router.php >/dev/null
+          while IFS= read -r -d '' file; do
+            php -l "$file" >/dev/null
+          done < <(find scripts/php -type f -name '*.php' -print0)
 
       - name: Dependency and architecture contracts
         run: bash scripts/tests/dependency-contract.sh

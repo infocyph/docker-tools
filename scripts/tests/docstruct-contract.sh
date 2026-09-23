@@ -60,6 +60,38 @@ jq -e '
   | all(.evidence.source_file == "sample.rst")
 ' "$tmp/one.json" >/dev/null || fail "RST structural facts lost source evidence"
 
+printf 'docstruct-contract: bounded review context\n'
+
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_CONTEXT_IMPL="$CONTEXT_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" context "$tmp/one.json" >"$tmp/review-context.json"
+
+base="$(cat "$tmp/one.json")"
+base_hash="$(printf '%s' "$base" | sha256sum | awk '{print $1}')"
+jq -e --arg base_sha256 "$base_hash" '
+  .schema == "docker-tools.docstruct-context/v1"
+  and .base_schema == "docker-tools.docstruct/v1"
+  and .base_sha256 == $base_sha256
+  and (.passages | length == 4)
+  and (.passages | all(.format == "markdown" or .format == "rst"))
+  and ([.passages[].source_file] | index("settings.ini") == null)
+  and ([.passages[].source_file] | index("config.json") == null)
+' "$tmp/review-context.json" >/dev/null || fail "bounded review context contract failed"
+
+DOCSTRUCT_REVIEW_FILE_BYTES=32 \
+DOCSTRUCT_REVIEW_TOTAL_BYTES=80 \
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_CONTEXT_IMPL="$CONTEXT_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" context "$tmp/one.json" >"$tmp/review-context-small.json"
+jq -e '
+  .stats.passage_bytes <= 80
+  and .stats.file_limit_bytes == 32
+  and .stats.total_limit_bytes == 80
+  and (.passages | any(.truncated == true))
+' "$tmp/review-context-small.json" >/dev/null || fail "review context limits were not enforced"
+
 printf 'docstruct-contract: Graphify fragment export\n'
 
 DOCSTRUCT_IMPL="$IMPL" \

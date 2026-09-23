@@ -99,7 +99,31 @@ if (($request['stream'] ?? false) === true) {
     return;
 }
 
-$content = $jsonMode ? json_encode(['ok' => true], JSON_UNESCAPED_SLASHES) : 'ok';
+if ($mode === 'docstruct-review' || $mode === 'docstruct-review-invalid-target') {
+    $source = $mode === 'docstruct-review-invalid-target' ? 'missing#node' : 'README.md#document';
+    $content = json_encode([
+        'add_nodes' => [[
+            'id' => 'README.md#semantic-runtime',
+            'type' => 'concept',
+            'label' => 'Runtime architecture',
+            'source_file' => 'README.md',
+            'reason' => 'The document describes a runtime concept not represented mechanically.',
+            'confidence' => 0.92,
+        ]],
+        'add_edges' => [[
+            'source' => $source,
+            'target' => 'README.md#semantic-runtime',
+            'relation' => 'describes',
+            'source_file' => 'README.md',
+            'reason' => 'The document node describes the semantic runtime concept.',
+            'confidence' => 0.9,
+        ]],
+        'corrections' => [],
+        'unresolved' => [],
+    ], JSON_UNESCAPED_SLASHES);
+} else {
+    $content = $jsonMode ? json_encode(['ok' => true], JSON_UNESCAPED_SLASHES) : 'ok';
+}
 echo json_encode([
     'id' => 'chatcmpl-mock',
     'object' => 'chat.completion',

@@ -38,7 +38,7 @@ pid=$!
 
 export LDS_AI_PROVIDER_LIB="$PROVIDER"
 export LDS_AI_ENABLED=1
-export LDS_AI_PROVIDER=llm
+export LDS_AI_RUNTIME=cpu
 export LDS_AI_URL="http://127.0.0.1:$port"
 export LDS_AI_MODEL=''
 export LDS_AI_THINK=''

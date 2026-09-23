@@ -220,6 +220,8 @@ DOCSTRUCT_REVIEW_CHUNK_FILES=4
 DOCSTRUCT_REVIEW_ROOT=/workspace
 ```
 
+The sidecar limit is separate from `LDS_AI_MAX_CONTEXT_BYTES`: the full deterministic artifact is used only to select bounded review chunks. Every model-bound chunk is still redacted and checked against the normal AI context limit.
+
 Directory scans respect `.gitignore` by default when Git metadata is available; `--no-gitignore` disables that behavior. Repeatable `--include` and `--exclude` globs provide explicit corpus shaping. Symlinked corpus entries are not followed, and references that would escape the supplied root remain unresolved.
 
 ## 🤖 Optional local AI

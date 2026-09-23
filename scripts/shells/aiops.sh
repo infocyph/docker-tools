@@ -120,6 +120,24 @@ aiops_read_safe_file() {
   cat -- "$path"
 }
 
+aiops_read_docstruct_file() {
+  local path="${1:-}" size limit="${DOCSTRUCT_REVIEW_SIDECAR_BYTES:-8388608}"
+  ai_assert_safe_file "$path" || return $?
+  if ! aiops_is_uint "$limit" || ((10#$limit < 65536 || 10#$limit > 67108864)); then
+    limit=8388608
+  fi
+  size="$(wc -c <"$path" | tr -d '[:space:]')"
+  if ! aiops_is_uint "$size"; then
+    aiops_error "unable to determine docstruct sidecar size: $path"
+    return 65
+  fi
+  if ((10#$size > 10#$limit)); then
+    aiops_error "docstruct sidecar is ${size} bytes; sidecar limit is ${limit}"
+    return 65
+  fi
+  cat -- "$path"
+}
+
 aiops_repo_context() {
   command -v git >/dev/null 2>&1 || { aiops_error 'git command is required'; return 69; }
   local root
@@ -278,11 +296,9 @@ aiops_document_review() {
     .passages[]
     | "\n--- SOURCE: \(.source_file) [\(.format)] truncated=\(.truncated) ---\n\(.content)"
   ' <<<"$review_context")" || return $?
-  review_payload="$(printf 'DOCSTRUCT STRUCTURE (authoritative JSON)\n%s\n\nBOUNDED SOURCE PASSAGES%s\n' "$structure_json" "$passages_text")"
-  redacted="$(printf '%s' "$review_payload" | ai_redact)"
-  aiops_guard_context "$redacted" || return $?
-
   if [[ "$context_only" == 1 ]]; then
+    review_payload="$(printf 'DOCSTRUCT STRUCTURE (authoritative JSON)\n%s\n\nBOUNDED SOURCE PASSAGES%s\n' "$structure_json" "$passages_text")"
+    redacted="$(printf '%s' "$review_payload" | ai_redact)"
     printf '%s\n' "$redacted"
     return 0
   fi
@@ -365,8 +381,9 @@ aiops_document_review() {
       return 69
     fi
 
-    if ! jq -en --argjson base "$context" --argjson prior "$merged_patch" --argjson patch "$patch" '
-      ($base.nodes | map(.id)) as $existing
+    if ! jq -en --slurpfile base_file "$file" --argjson prior "$merged_patch" --argjson patch "$patch" '
+      ($base_file[0]) as $base
+      | ($base.nodes | map(.id)) as $existing
       | ($base.files | map(.path)) as $files
       | ($prior.add_nodes | map(.id)) as $prior_added
       | ($patch.add_nodes | map(.id)) as $new_added
@@ -544,7 +561,11 @@ main() {
     repo-review)
       context="$(aiops_repo_context)"
       ;;
-    review|document-review|graphify)
+    document-review)
+      [[ -n "$file" ]] || { aiops_error "$command requires --file"; return 64; }
+      context="$(aiops_read_docstruct_file "$file")" || return $?
+      ;;
+    review|graphify)
       [[ -n "$file" ]] || { aiops_error "$command requires --file"; return 64; }
       context="$(aiops_read_safe_file "$file")" || return $?
       ;;

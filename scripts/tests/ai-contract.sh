@@ -11,11 +11,12 @@ fail() {
 
 PROVIDER='scripts/lib/ai-provider.sh'
 ASKAI='scripts/shells/askai.sh'
+AIOPS='scripts/shells/aiops.sh'
 GITX='scripts/shells/gitx-wrapper.sh'
 ENTRYPOINT='scripts/shells/entrypoint.sh'
 HEALTH='scripts/shells/tools-healthcheck.sh'
 
-for file in "$PROVIDER" "$ASKAI" "$GITX" "$ENTRYPOINT" "$HEALTH"; do
+for file in "$PROVIDER" "$ASKAI" "$AIOPS" "$GITX" "$ENTRYPOINT" "$HEALTH"; do
   [[ -s "$file" ]] || fail "missing AI contract input: $file"
 done
 
@@ -72,6 +73,8 @@ grep -q 'LDS_AI_TIMEOUT' "$PROVIDER" || fail 'AI generation timeout missing'
 grep -Fq 'LDS_AI_TIMEOUT:=1800' "$PROVIDER" || fail 'AI generation timeout default is not 1800 seconds'
 grep -q 'LDS_AI_AVAILABILITY_TTL' "$PROVIDER" || fail 'AI availability cache TTL missing'
 grep -q 'LDS_AI_MAX_CONTEXT_BYTES' "$PROVIDER" || fail 'AI context bound missing'
+grep -q 'DOCSTRUCT_REVIEW_SIDECAR_BYTES:-8388608' "$AIOPS" || fail 'document review sidecar limit missing'
+grep -q 'aiops_read_docstruct_file "$file"' "$AIOPS" || fail 'document review does not use sidecar-specific reader'
 grep -q 'LDS_AI_MAX_REQUEST_BYTES' "$PROVIDER" || fail 'AI request bound missing'
 grep -q 'LDS_AI_MAX_RESPONSE_BYTES' "$PROVIDER" || fail 'AI response bound missing'
 grep -q 'multiple installed models are available' "$PROVIDER" || fail 'ambiguous-model fail-closed behavior missing'

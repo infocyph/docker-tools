@@ -527,6 +527,14 @@ function structuredData(string $file, string $format): array {
         return $decoded;
     }
 
+    if ($format === 'ini') {
+        $decoded = parse_ini_file($file, true, INI_SCANNER_RAW);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('unable to parse INI/config file');
+        }
+        return $decoded;
+    }
+
     if (!command_exists('yq')) {
         throw new RuntimeException('yq is required for YAML/TOML extraction');
     }
@@ -565,12 +573,34 @@ function configNodeId(string $relative, string $path): string {
     return $relative . '#config-' . substr(hash('sha256', $path), 0, 16);
 }
 
+function sensitiveConfigPath(string $path): bool {
+    return preg_match('/(?:^|[._-])(password|passwd|secret|token|credential|auth|private[_-]?key|api[_-]?key)(?:$|[._-])/i', $path) === 1;
+}
+
+function configReference(string $value): ?array {
+    $value = trim($value);
+    if ($value === '' || strlen($value) > 2048) {
+        return null;
+    }
+
+    if (preg_match('~^https?://[^\s]+$~i', $value) === 1) {
+        return ['target' => $value, 'reference_type' => 'url'];
+    }
+
+    if (preg_match('~^(?:\.?\.?/)?[^\s]+\.(?:md|markdown|rst|ya?ml|json|toml|ini|cfg)(?:#[A-Za-z0-9._:-]+)?$~i', $value) === 1) {
+        return ['target' => $value, 'reference_type' => 'config_path'];
+    }
+
+    return null;
+}
+
 function extractConfigKeys(
     mixed $value,
     string $relative,
     string $documentId,
     array &$nodes,
     array &$edges,
+    array &$unresolved,
     string $path = '',
     ?string $parentId = null
 ): void {
@@ -601,11 +631,36 @@ function extractConfigKeys(
                 'source_file' => $relative,
                 'evidence' => evidence($relative, null, 'document'),
             ]);
-            extractConfigKeys($child, $relative, $documentId, $nodes, $edges, $childPath, $id);
+            if (!is_array($child) && is_scalar($child) && !sensitiveConfigPath($childPath)) {
+                $reference = configReference((string)$child);
+                if (is_array($reference)) {
+                    if ($reference['reference_type'] === 'url') {
+                        addEdge($edges, [
+                            'source' => $id,
+                            'target' => $reference['target'],
+                            'relation' => 'references',
+                            'reference_type' => 'url',
+                            'source_file' => $relative,
+                            'evidence' => evidence($relative, null, 'document'),
+                        ]);
+                    } else {
+                        $unresolved[] = [
+                            'source' => $id,
+                            'target' => $reference['target'],
+                            'relation' => 'references',
+                            'reference_type' => $reference['reference_type'],
+                            'source_file' => $relative,
+                            'evidence' => evidence($relative, null, 'document'),
+                        ];
+                    }
+                }
+            }
+
+            extractConfigKeys($child, $relative, $documentId, $nodes, $edges, $unresolved, $childPath, $id);
             continue;
         }
 
-        extractConfigKeys($child, $relative, $documentId, $nodes, $edges, $childPath, $parentId);
+        extractConfigKeys($child, $relative, $documentId, $nodes, $edges, $unresolved, $childPath, $parentId);
     }
 }
 
@@ -617,6 +672,7 @@ function supportedFormat(string $path): ?string {
         'yaml', 'yml' => 'yaml',
         'json' => 'json',
         'toml' => 'toml',
+        'ini', 'cfg' => 'ini',
         default => null,
     };
 }
@@ -687,7 +743,7 @@ function parseArgs(array $argv): array {
         $arg = $argv[$i];
         if ($arg === '-h' || $arg === '--help') {
             echo "Usage: docstruct [path] [--output <file>] [--compact]\n";
-            echo "Deterministically extract Markdown/RST/YAML/JSON/TOML structure as docker-tools.docstruct/v1 JSON.\n";
+            echo "Deterministically extract Markdown/RST/YAML/JSON/TOML/INI structure as docker-tools.docstruct/v1 JSON.\n";
             echo "Limits: DOCSTRUCT_MAX_FILE_BYTES, DOCSTRUCT_MAX_CORPUS_BYTES, DOCSTRUCT_MAX_FILES, DOCSTRUCT_MAX_NODES, DOCSTRUCT_PARSE_TIMEOUT.\n";
             exit(0);
         }
@@ -759,6 +815,7 @@ foreach ($files as $file) {
             'rst' => 'pandoc+rst-supplement',
             'markdown' => 'pandoc',
             'json' => 'php-json',
+            'ini' => 'php-ini',
             default => 'yq',
         },
         'status' => 'ok',
@@ -774,7 +831,7 @@ foreach ($files as $file) {
             }
         } else {
             $structured = structuredData($file, $format);
-            extractConfigKeys($structured, $relative, $documentId, $nodes, $edges);
+            extractConfigKeys($structured, $relative, $documentId, $nodes, $edges, $unresolved);
         }
     } catch (Throwable $e) {
         $record['status'] = 'error';

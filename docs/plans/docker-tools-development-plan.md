@@ -1290,7 +1290,7 @@ Requirements:
 - bounded file size;
 - bounded total corpus size;
 - bounded include depth;
-- bounded reference count;
+- bounded reference count (`DOCSTRUCT_MAX_REFERENCES`);
 - bounded parse time;
 - symlink handling explicit and root-confined;
 - binary/secret-sensitive inputs refused through the existing safe-file policy where
@@ -1313,8 +1313,9 @@ The command should operate on:
 Default scan behavior should respect:
 
 - common VCS/vendor/build exclusions;
-- `.gitignore` where practical;
-- explicit include/exclude flags.
+- `.gitignore` when Git metadata is available;
+- repeatable `--include` / `--exclude` globs;
+- explicit `--no-gitignore` override.
 
 A repository mount should be read-only by default for analysis workflows.
 
@@ -1329,6 +1330,12 @@ schema-version + parser-version + file-content-hash
 ```
 
 Cache should be optional and disposable.
+
+The initial release intentionally does not persist a docstruct cache. The deterministic
+pass is bounded and correctness-first, while the eventual Graphify ingestion interface
+will determine the correct cache ownership and invalidation boundary. Add per-file
+docstruct caching only when that consumer exists; do not create a second persistent
+manifest beside Graphify prematurely.
 
 Do not make correctness depend on cache presence.
 
@@ -1487,7 +1494,7 @@ Exit criteria met.
 
 ### Batch 1 — normalized schema and CLI shell
 
-Status: **implemented; CI validation in progress**
+Status: **complete**
 
 - [x] define `docker-tools.docstruct/v1`;
 - [x] add `docstruct --help`;
@@ -1503,7 +1510,7 @@ Exit criteria:
 
 ### Batch 2 — Markdown extraction
 
-Status: **implemented; CI validation in progress**
+Status: **complete**
 
 - [x] document/title/section hierarchy;
 - [x] links;
@@ -1518,7 +1525,7 @@ Exit criteria:
 
 ### Batch 3 — RST/Sphinx extraction
 
-Status: **implemented; CI validation in progress**
+Status: **complete**
 
 - [x] headings;
 - [x] directives;
@@ -1535,7 +1542,7 @@ Exit criteria:
 
 ### Batch 4 — structured config extraction
 
-Status: **implemented; CI validation in progress**
+Status: **complete**
 
 - [x] YAML;
 - [x] JSON;
@@ -1569,7 +1576,7 @@ Exit criteria:
 
 ### Batch 6 — security/resource hardening
 
-Status: **implemented; CI validation in progress**
+Status: **complete**
 
 - [x] outside-root reference refusal;
 - [x] symlinked corpus entries skipped;
@@ -1586,7 +1593,7 @@ Exit criteria:
 
 ### Batch 7 — optional AI review
 
-Status: **implemented; CI validation in progress**
+Status: **complete**
 
 - [x] bounded normalized context;
 - [x] additive `docker-tools.docstruct-review/v1` enrichment schema;
@@ -1658,13 +1665,16 @@ Exit criteria:
 
 ### Batch 9 — documentation/release hardening
 
-- README;
-- command reference;
-- architecture docs;
-- release gate;
-- amd64/arm64 validation;
-- image-size comparison;
-- final security review.
+Status: **implemented; final CI run pending**
+
+- [x] README command/workflow documentation;
+- [x] canonical architecture/ownership documentation in this plan;
+- [x] built-image release gate executes the real deterministic contract;
+- [x] amd64/arm64 image build coverage;
+- [x] parser image-size comparison captured in Batch 0;
+- [x] security/resource contract coverage;
+- [x] real Graphify 0.9.65 semantic-fragment validation;
+- [x] one-time parser benchmark jobs removed after the dependency decision.
 
 ## 15.19 Evaluation metrics
 

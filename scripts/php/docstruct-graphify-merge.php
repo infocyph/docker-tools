@@ -32,6 +32,26 @@ function mergeReadJson(string $path, string $label): array
     return $decoded;
 }
 
+function docstructSemanticSource(string $sourceFile): bool
+{
+    $path = parse_url($sourceFile, PHP_URL_PATH);
+    if (!is_string($path) || $path === '') {
+        $path = $sourceFile;
+    }
+    $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+    return in_array($ext, ['md', 'markdown', 'rst', 'yaml', 'yml', 'json', 'toml', 'ini', 'cfg'], true);
+}
+
+function legacySemanticOwnedByDocstruct(array $node): bool
+{
+    $sourceFile = $node['source_file'] ?? null;
+    if (!is_string($sourceFile) || !docstructSemanticSource($sourceFile)) {
+        return false;
+    }
+    $fileType = strtolower((string)($node['file_type'] ?? ''));
+    return in_array($fileType, ['document', 'paper', 'image', 'concept', 'rationale'], true);
+}
+
 function docstructOwnedNode(array $node): bool
 {
     $id = $node['id'] ?? null;
@@ -76,7 +96,7 @@ function mergeGraphify(array $graph, array $fragment): array
         if (!is_array($node) || !is_string($node['id'] ?? null) || $node['id'] === '') {
             mergeFail('existing graph contains a node without a valid id', 65);
         }
-        if (docstructOwnedNode($node)) {
+        if (docstructOwnedNode($node) || legacySemanticOwnedByDocstruct($node)) {
             $removedIds[$node['id']] = true;
             continue;
         }

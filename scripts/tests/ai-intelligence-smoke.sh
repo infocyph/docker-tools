@@ -119,7 +119,7 @@ for name in status monitor-alerts monitor-slo monitor-db monitor-queue monitor-t
 done
 export PATH="$tmp/bin:$PATH"
 
-printf '1/7 operational explanation + deterministic redaction\n'
+printf '1/8 operational explanation + deterministic redaction\n'
 out="$(bash "$AIOPS" explain db --json --think)"
 jq -e '.ok == true and .source == "db" and .answer == "ok"' <<<"$out" >/dev/null || fail 'db explanation failed'
 context="$(jq -r '.context' <<<"$out")"
@@ -138,19 +138,19 @@ LDS_AI_THINK=true bash "$AIOPS" explain tls --think-auto >/dev/null || fail 'aio
 request_json="$(tail -n 1 "$capture_file" | base64 -d)"
 jq -e '(.think? == null) and (.reasoning_effort? == null)' <<<"$request_json" >/dev/null || fail 'aiops --think-auto did not omit thinking fields'
 
-printf '2/7 context-only never generates\n'
+printf '2/8 context-only never generates\n'
 before="$(wc -l <"$capture_file" | tr -d '[:space:]')"
 logs_context="$(bash "$AIOPS" explain logs --context-only)"
 after="$(wc -l <"$capture_file" | tr -d '[:space:]')"
 [[ "$before" == "$after" ]] || fail 'context-only unexpectedly called generation endpoint'
 grep -q '"errors":4' <<<"$logs_context" || fail 'log context missing deterministic heatmap data'
 
-printf '3/7 troubleshoot summary\n'
+printf '3/8 troubleshoot summary\n'
 troubleshoot="$(bash "$AIOPS" troubleshoot --json)"
 jq -e '.ok == true and .source == "troubleshoot" and .answer == "ok"' <<<"$troubleshoot" >/dev/null || fail 'troubleshoot analysis failed'
 jq -er '.context' <<<"$troubleshoot" | grep -q '"kind":"troubleshoot"' || fail 'troubleshoot context missing combined snapshot'
 
-printf '4/7 review + Graphify input safety\n'
+printf '4/8 review + Graphify input safety\n'
 printf 'server_name app.localhost;\n' >"$tmp/nginx.conf"
 [[ "$(bash "$AIOPS" review --file "$tmp/nginx.conf")" == ok ]] || fail 'safe config review failed'
 printf '{"nodes":3,"edges":2}\n' >"$tmp/graphify.json"
@@ -169,7 +169,59 @@ rc=$?
 set -e
 [[ "$rc" -eq 65 ]] || fail "oversized review input returned $rc instead of 65"
 
-printf '5/7 repository review is metadata-only\n'
+printf '5/8 deterministic document review is additive and validated\n'
+cat >"$tmp/docstruct.json" <<'JSON'
+{
+  "schema": "docker-tools.docstruct/v1",
+  "root": ".",
+  "files": [
+    {"path":"README.md","format":"markdown","sha256":"fixture","bytes":10,"parser":"pandoc","status":"ok","warnings":[]}
+  ],
+  "nodes": [
+    {"id":"README.md#document","type":"document","label":"README.md","source_file":"README.md","evidence":{"source_file":"README.md","precision":"document"}}
+  ],
+  "edges": [],
+  "unresolved_references": [],
+  "warnings": [],
+  "stats": {"files":1,"nodes":1,"edges":0,"unresolved_references":0}
+}
+JSON
+
+before="$(wc -l <"$capture_file" | tr -d '[:space:]')"
+doc_context="$(bash "$AIOPS" document-review --file "$tmp/docstruct.json" --context-only)"
+after="$(wc -l <"$capture_file" | tr -d '[:space:]')"
+[[ "$before" == "$after" ]] || fail 'document-review context-only unexpectedly called generation endpoint'
+jq -e '.schema == "docker-tools.docstruct/v1"' <<<"$doc_context" >/dev/null || fail 'document-review context-only altered deterministic artifact'
+
+printf 'docstruct-review\n' >"$mode_file"
+review_patch="$(bash "$AIOPS" document-review --file "$tmp/docstruct.json")"
+jq -e '
+  .schema == "docker-tools.docstruct-review/v1"
+  and .base_schema == "docker-tools.docstruct/v1"
+  and (.base_sha256 | type == "string" and length == 64)
+  and (.patch.add_nodes | length == 1)
+  and .patch.add_nodes[0].id == "README.md#semantic-runtime"
+  and (.patch.add_edges | length == 1)
+  and .patch.add_edges[0].source == "README.md#document"
+' <<<"$review_patch" >/dev/null || fail 'valid document-review additive patch was not accepted'
+
+printf 'docstruct-review-invalid-target\n' >"$mode_file"
+set +e
+bash "$AIOPS" document-review --file "$tmp/docstruct.json" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+[[ "$rc" -eq 69 ]] || fail "invalid document-review target returned $rc instead of 69"
+grep -q 'unknown nodes or source files' "$tmp/err" || fail 'invalid document-review target error missing'
+
+printf 'single\n' >"$mode_file"
+printf '{"schema":"wrong"}\n' >"$tmp/not-docstruct.json"
+set +e
+bash "$AIOPS" document-review --file "$tmp/not-docstruct.json" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+[[ "$rc" -eq 65 ]] || fail "invalid document-review input returned $rc instead of 65"
+
+printf '6/8 repository review is metadata-only\n'
 repo_dir="$tmp/repo"
 mkdir -p "$repo_dir"
 git -C "$repo_dir" init -q
@@ -187,7 +239,7 @@ if grep -q '^diff --git ' <<<"$repo_context"; then
   fail 'repo review unexpectedly included diff content'
 fi
 
-printf '6/7 bounded admin service delegates to aiops\n'
+printf '7/8 bounded admin service delegates to aiops\n'
 if [[ -r "$ADMIN_BOOTSTRAP" ]]; then
   AI_ADMIN_BOOTSTRAP="$ADMIN_BOOTSTRAP" php <<'PHP'
 <?php
@@ -228,7 +280,7 @@ if (($invalidThink['error'] ?? '') !== 'validation_think') {
 PHP
 fi
 
-printf '7/7 admin request-level thinking reaches provider\n'
+printf '8/8 admin request-level thinking reaches provider\n'
 request_json="$(tail -n 2 "$capture_file" | head -n 1 | base64 -d)"
 jq -e '.think == true and .reasoning_effort == "high"' <<<"$request_json" >/dev/null || fail 'admin think=on request fields missing'
 request_json="$(tail -n 1 "$capture_file" | base64 -d)"

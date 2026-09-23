@@ -242,7 +242,9 @@ aiops_docstruct_bin() {
 
 aiops_document_review() {
   local file="$1" context="$2" request="$3" extra_system="$4" context_only="$5" think_override="${6:-inherit}"
-  local redacted patch system base_hash review_context docstruct_bin structure_json passages_text review_payload
+  local review_context docstruct_bin base_hash system structure_json passages_text review_payload redacted
+  local chunk chunk_files chunk_structure chunk_passages chunk_payload chunk_redacted patch merged_patch
+  local existing_node conflict chunk_count=0
 
   if ! jq -e '
     .schema == "docker-tools.docstruct/v1"
@@ -265,6 +267,7 @@ aiops_document_review() {
     and .base_sha256 == $base_sha256
     and (.structure | type == "object")
     and (.passages | type == "array")
+    and (.chunks | type == "array")
   ' >/dev/null 2>&1 <<<"$review_context"; then
     aiops_error 'docstruct returned an invalid or mismatched review context'
     return 65
@@ -276,10 +279,6 @@ aiops_document_review() {
     | "\n--- SOURCE: \(.source_file) [\(.format)] truncated=\(.truncated) ---\n\(.content)"
   ' <<<"$review_context")" || return $?
   review_payload="$(printf 'DOCSTRUCT STRUCTURE (authoritative JSON)\n%s\n\nBOUNDED SOURCE PASSAGES%s\n' "$structure_json" "$passages_text")"
-
-  # Redact after decoding passage strings back to real lines. This keeps the
-  # existing line-oriented secret filters effective for KEY=value material that
-  # would otherwise be hidden behind JSON \\n escapes.
   redacted="$(printf '%s' "$review_payload" | ai_redact)"
   aiops_guard_context "$redacted" || return $?
 
@@ -288,84 +287,142 @@ aiops_document_review() {
     return 0
   fi
 
-  system='Review this bounded document-analysis payload. DOCSTRUCT STRUCTURE is authoritative mechanical JSON; BOUNDED SOURCE PASSAGES contains Markdown/RST prose for semantic interpretation. Mechanical nodes and edges must not be regenerated or removed. Config scalar values are intentionally absent. Return exactly one additive patch object with arrays add_nodes, add_edges, corrections, and unresolved. Every proposed item must include source_file, reason, and confidence from 0 to 1. Added nodes require id, type, label, source_file, reason, confidence. Added edges require source, target, relation, source_file, reason, confidence. Corrections require target_id, proposed_changes object, source_file, reason, confidence. Unresolved items require target, source_file, reason, confidence. Do not invent source files. Edges may reference only existing deterministic node IDs or node IDs added in the same patch.'
+  system='Review this bounded document-analysis chunk. DOCSTRUCT STRUCTURE contains authoritative mechanical facts for the files in this chunk; DOCUMENT INDEX lists the whole corpus; BOUNDED SOURCE PASSAGES contains only the current Markdown/RST prose. Mechanical nodes and edges must not be regenerated or removed. Config scalar values are intentionally absent. Return exactly one additive patch object with arrays add_nodes, add_edges, corrections, and unresolved. Every proposed item must include source_file, reason, and confidence from 0 to 1. Added nodes require id, type, label, source_file, reason, confidence. Added edges require source, target, relation, source_file, reason, confidence. Corrections require target_id, proposed_changes object, source_file, reason, confidence. Unresolved items require target, source_file, reason, confidence. Do not invent source files. Edges may reference only existing deterministic node IDs or node IDs added in the same patch.'
   if [[ -n "$extra_system" ]]; then
     system+=$'\nAdditional user instruction: '
     system+="$extra_system"
   fi
 
-  patch="$(ai_generate_context_json "$request" "$redacted" "$system" "$think_override")" || return $?
+  merged_patch='{"add_nodes":[],"add_edges":[],"corrections":[],"unresolved":[]}'
+  while IFS= read -r chunk; do
+    [[ -n "$chunk" ]] || continue
+    chunk_count=$((chunk_count + 1))
+    chunk_files="$(jq -c '.files' <<<"$chunk")" || return $?
 
-  if ! jq -e '
-    def conf: type == "number" and . >= 0 and . <= 1;
-    type == "object"
-    and (.add_nodes | type == "array")
-    and (.add_edges | type == "array")
-    and (.corrections | type == "array")
-    and (.unresolved | type == "array")
-    and all(.add_nodes[];
-      (.id | type == "string" and length > 0)
-      and (.type | type == "string" and length > 0)
-      and (.label | type == "string")
-      and (.source_file | type == "string" and length > 0)
-      and (.reason | type == "string" and length > 0)
-      and (.confidence | conf))
-    and all(.add_edges[];
-      (.source | type == "string" and length > 0)
-      and (.target | type == "string" and length > 0)
-      and (.relation | type == "string" and length > 0)
-      and (.source_file | type == "string" and length > 0)
-      and (.reason | type == "string" and length > 0)
-      and (.confidence | conf))
-    and all(.corrections[];
-      (.target_id | type == "string" and length > 0)
-      and (.proposed_changes | type == "object")
-      and (.source_file | type == "string" and length > 0)
-      and (.reason | type == "string" and length > 0)
-      and (.confidence | conf))
-    and all(.unresolved[];
-      (.target | type == "string" and length > 0)
-      and (.source_file | type == "string" and length > 0)
-      and (.reason | type == "string" and length > 0)
-      and (.confidence | conf))
-  ' >/dev/null 2>&1 <<<"$patch"; then
-    aiops_error 'document-review provider returned an invalid additive patch schema'
-    return 69
-  fi
+    chunk_structure="$(jq -c --argjson selected "$chunk_files" '
+      def selected_file($p): ($selected | index($p)) != null;
+      {
+        schema:.schema,
+        root:.root,
+        files:[.files[] | select(selected_file(.path))],
+        nodes:[.nodes[] | select(selected_file(.source_file))],
+        edges:[.edges[] | select(selected_file(.source_file))],
+        unresolved_references:[.unresolved_references[] | select(selected_file(.source_file))],
+        warnings:[.warnings[]? | select((.source_file // "") as $p | $p == "" or selected_file($p))],
+        stats:.stats
+      }
+    ' <<<"$context")" || return $?
 
-  if ! jq -en --argjson base "$context" --argjson patch "$patch" '
-    ($base.nodes | map(.id)) as $existing
-    | ($base.files | map(.path)) as $files
-    | ($patch.add_nodes | map(.id)) as $added
-    | ($existing + $added) as $all
-    | (($added | length) == ($added | unique | length))
-      and all($added[]; . as $id | ($existing | index($id) | not))
-      and all($patch.add_nodes[];
-        . as $node
-        | ($files | index($node.source_file)) != null)
-      and all($patch.add_edges[];
-        . as $edge
-        | (($all | index($edge.source)) != null)
-        and (($all | index($edge.target)) != null)
-        and (($files | index($edge.source_file)) != null))
-      and all($patch.corrections[];
-        . as $correction
-        | (($existing | index($correction.target_id)) != null)
-        and (($files | index($correction.source_file)) != null))
-      and all($patch.unresolved[];
-        . as $item
-        | ($files | index($item.source_file)) != null)
-  ' >/dev/null; then
-    aiops_error 'document-review patch references unknown nodes or source files'
-    return 69
-  fi
+    chunk_passages="$(jq -r '
+      .passages[]
+      | "\n--- SOURCE: \(.source_file) [\(.format)] truncated=\(.truncated) ---\n\(.content)"
+    ' <<<"$chunk")" || return $?
+
+    chunk_payload="$(
+      printf 'DOCUMENT INDEX (all source files)\n'
+      jq -r '.files[].path' <<<"$context"
+      printf '\nDOCSTRUCT STRUCTURE (authoritative JSON for this chunk)\n%s\n\nBOUNDED SOURCE PASSAGES%s\n'         "$chunk_structure" "$chunk_passages"
+    )"
+    chunk_redacted="$(printf '%s' "$chunk_payload" | ai_redact)"
+    aiops_guard_context "$chunk_redacted" || return $?
+
+    patch="$(ai_generate_context_json "$request" "$chunk_redacted" "$system" "$think_override")" || return $?
+
+    if ! jq -e '
+      def conf: type == "number" and . >= 0 and . <= 1;
+      type == "object"
+      and (.add_nodes | type == "array")
+      and (.add_edges | type == "array")
+      and (.corrections | type == "array")
+      and (.unresolved | type == "array")
+      and all(.add_nodes[];
+        (.id | type == "string" and length > 0)
+        and (.type | type == "string" and length > 0)
+        and (.label | type == "string")
+        and (.source_file | type == "string" and length > 0)
+        and (.reason | type == "string" and length > 0)
+        and (.confidence | conf))
+      and all(.add_edges[];
+        (.source | type == "string" and length > 0)
+        and (.target | type == "string" and length > 0)
+        and (.relation | type == "string" and length > 0)
+        and (.source_file | type == "string" and length > 0)
+        and (.reason | type == "string" and length > 0)
+        and (.confidence | conf))
+      and all(.corrections[];
+        (.target_id | type == "string" and length > 0)
+        and (.proposed_changes | type == "object")
+        and (.source_file | type == "string" and length > 0)
+        and (.reason | type == "string" and length > 0)
+        and (.confidence | conf))
+      and all(.unresolved[];
+        (.target | type == "string" and length > 0)
+        and (.source_file | type == "string" and length > 0)
+        and (.reason | type == "string" and length > 0)
+        and (.confidence | conf))
+    ' >/dev/null 2>&1 <<<"$patch"; then
+      aiops_error "document-review chunk $chunk_count returned an invalid additive patch schema"
+      return 69
+    fi
+
+    if ! jq -en --argjson base "$context" --argjson prior "$merged_patch" --argjson patch "$patch" '
+      ($base.nodes | map(.id)) as $existing
+      | ($base.files | map(.path)) as $files
+      | ($prior.add_nodes | map(.id)) as $prior_added
+      | ($patch.add_nodes | map(.id)) as $new_added
+      | ($existing + $prior_added + $new_added) as $all
+      | (($new_added | length) == ($new_added | unique | length))
+        and all($patch.add_nodes[];
+          . as $node
+          | ($existing | index($node.id) | not)
+          and (($files | index($node.source_file)) != null))
+        and all($patch.add_edges[];
+          . as $edge
+          | (($all | index($edge.source)) != null)
+          and (($all | index($edge.target)) != null)
+          and (($files | index($edge.source_file)) != null))
+        and all($patch.corrections[];
+          . as $correction
+          | (($existing | index($correction.target_id)) != null)
+          and (($files | index($correction.source_file)) != null))
+        and all($patch.unresolved[];
+          . as $item
+          | ($files | index($item.source_file)) != null)
+    ' >/dev/null; then
+      aiops_error "document-review chunk $chunk_count references unknown nodes or source files"
+      return 69
+    fi
+
+    conflict="$(jq -rn --argjson prior "$merged_patch" --argjson patch "$patch" '
+      [
+        $patch.add_nodes[] as $new
+        | $prior.add_nodes[]
+        | select(.id == $new.id and . != $new)
+        | .id
+      ][0] // ""
+    ')"
+    if [[ -n "$conflict" ]]; then
+      aiops_error "document-review produced conflicting definitions for added node: $conflict"
+      return 69
+    fi
+
+    merged_patch="$(jq -nc --argjson prior "$merged_patch" --argjson patch "$patch" '
+      {
+        add_nodes: (($prior.add_nodes + $patch.add_nodes) | unique_by(.id)),
+        add_edges: (($prior.add_edges + $patch.add_edges) | unique_by([.source,.target,.relation,.source_file])),
+        corrections: (($prior.corrections + $patch.corrections) | unique_by([.target_id,.source_file,.reason])),
+        unresolved: (($prior.unresolved + $patch.unresolved) | unique_by([.target,.source_file,.reason]))
+      }
+    ')" || return $?
+  done < <(jq -c '.chunks[]' <<<"$review_context")
 
   jq -nc \
     --arg schema 'docker-tools.docstruct-review/v1' \
     --arg base_schema 'docker-tools.docstruct/v1' \
     --arg base_sha256 "$base_hash" \
-    --argjson patch "$patch" \
-    '{schema:$schema,base_schema:$base_schema,base_sha256:$base_sha256,patch:$patch}'
+    --argjson patch "$merged_patch" \
+    --argjson chunks "$chunk_count" \
+    '{schema:$schema,base_schema:$base_schema,base_sha256:$base_sha256,review_chunks:$chunks,patch:$patch}'
 }
 
 main() {

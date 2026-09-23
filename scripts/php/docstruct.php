@@ -362,6 +362,127 @@ function extractRstSupplement(
     }
 }
 
+function normalizeRelativeTarget(string $sourceFile, string $target): string {
+    $target = str_replace('\\\\', '/', trim($target));
+    if ($target === '') {
+        return '';
+    }
+
+    $parts = explode('#', $target, 2);
+    $pathPart = $parts[0];
+    $fragment = $parts[1] ?? '';
+
+    if ($pathPart === '') {
+        $normalized = $sourceFile;
+    } else {
+        $base = dirname($sourceFile);
+        $combined = ($base === '.' ? '' : $base . '/') . $pathPart;
+        $segments = [];
+        foreach (explode('/', $combined) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+            if ($segment === '..') {
+                array_pop($segments);
+                continue;
+            }
+            $segments[] = $segment;
+        }
+        $normalized = implode('/', $segments);
+    }
+
+    return $fragment !== '' ? $normalized . '#' . slug($fragment) : $normalized;
+}
+
+function resolveReferences(array &$nodes, array &$edges, array &$unresolved): void {
+    $documentIds = [];
+    $anchorIds = [];
+
+    foreach ($nodes as $id => $node) {
+        if (($node['type'] ?? '') === 'document') {
+            $documentIds[(string)$node['source_file']] = $id;
+        }
+        if (str_contains($id, '#') && ($node['type'] ?? '') !== 'document') {
+            [, $anchor] = explode('#', $id, 2);
+            $anchorIds[$anchor][] = $id;
+        }
+    }
+
+    $remaining = [];
+
+    foreach ($unresolved as $reference) {
+        $sourceFile = (string)($reference['source_file'] ?? '');
+        $target = (string)($reference['target'] ?? '');
+        $referenceType = (string)($reference['reference_type'] ?? '');
+        $relation = (string)($reference['relation'] ?? 'references');
+        $resolvedTarget = null;
+
+        if ($referenceType === 'ref') {
+            $key = slug($target);
+            if (isset($anchorIds[$key]) && count($anchorIds[$key]) === 1) {
+                $resolvedTarget = $anchorIds[$key][0];
+            }
+        } elseif (in_array($referenceType, ['class', 'func', 'meth', 'mod'], true)) {
+            $remaining[] = $reference;
+            continue;
+        } else {
+            $candidate = normalizeRelativeTarget($sourceFile, $target);
+            $parts = explode('#', $candidate, 2);
+            $path = $parts[0];
+            $fragment = $parts[1] ?? '';
+
+            $candidates = [$path];
+            if ($path !== '' && pathinfo($path, PATHINFO_EXTENSION) === '') {
+                $candidates[] = $path . '.rst';
+                $candidates[] = $path . '.md';
+                $candidates[] = rtrim($path, '/') . '/index.rst';
+                $candidates[] = rtrim($path, '/') . '/index.md';
+            }
+
+            foreach ($candidates as $candidatePath) {
+                if (!isset($documentIds[$candidatePath])) {
+                    continue;
+                }
+                if ($fragment !== '') {
+                    $candidateId = $candidatePath . '#' . slug($fragment);
+                    if (isset($nodes[$candidateId])) {
+                        $resolvedTarget = $candidateId;
+                        break;
+                    }
+                    continue;
+                }
+                $resolvedTarget = $documentIds[$candidatePath];
+                break;
+            }
+
+            if ($resolvedTarget === null && $referenceType === 'doc') {
+                foreach ($candidates as $candidatePath) {
+                    if (isset($documentIds[$candidatePath])) {
+                        $resolvedTarget = $documentIds[$candidatePath];
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($resolvedTarget === null) {
+            $remaining[] = $reference;
+            continue;
+        }
+
+        addEdge($edges, [
+            'source' => (string)$reference['source'],
+            'target' => $resolvedTarget,
+            'relation' => $relation,
+            'source_file' => $sourceFile,
+            'reference_type' => $referenceType !== '' ? $referenceType : null,
+            'evidence' => $reference['evidence'] ?? evidence($sourceFile),
+        ]);
+    }
+
+    $unresolved = $remaining;
+}
+
 function supportedFormat(string $path): ?string {
     $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
     return match ($ext) {
@@ -502,6 +623,7 @@ foreach ($files as $file) {
     $records[] = $record;
 }
 
+resolveReferences($nodes, $edges, $unresolved);
 ksort($nodes, SORT_STRING);
 ksort($edges, SORT_STRING);
 usort($unresolved, fn(array $a, array $b): int =>

@@ -25,7 +25,7 @@ cmp -s "$tmp/one.json" "$tmp/two.json" || fail "same corpus did not produce dete
 
 jq -e '
   .schema == "docker-tools.docstruct/v1"
-  and .stats.files == 4
+  and .stats.files == 7
   and (.nodes | any(.id == "sample.md#document" and .type == "document"))
   and (.nodes | any(.source_file == "sample.md" and .type == "section" and .label == "Runtime Guide"))
   and (.nodes | any(.source_file == "sample.md" and .type == "code_block" and .language == "bash"))
@@ -37,6 +37,12 @@ jq -e '
   and (.edges | any(.source == "sample.rst#document" and .target == "other.rst#document" and .reference_type == "toctree"))
   and (.unresolved_references | any(.source_file == "sample.rst" and .target == "RuntimeManager" and .reference_type == "class"))
   and (.unresolved_references | any(.source_file == "sample.rst" and .target == "RuntimeAdapter.start" and .reference_type == "meth"))
+  and (.files | any(.path == "bug_report.yml" and .format == "yaml" and .parser == "yq"))
+  and (.files | any(.path == "config.json" and .format == "json" and .parser == "php-json"))
+  and (.files | any(.path == "project.toml" and .format == "toml" and .parser == "yq"))
+  and (.nodes | any(.source_file == "bug_report.yml" and .type == "config_key" and .key_path == "body"))
+  and (.nodes | any(.source_file == "config.json" and .type == "config_key" and .key_path == "runtime.provider"))
+  and (.nodes | any(.source_file == "project.toml" and .type == "config_key" and .key_path == "tool.docstruct.enabled"))
 ' "$tmp/one.json" >/dev/null || fail "normalized document structure contract failed"
 
 jq -e '

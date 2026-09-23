@@ -56,7 +56,7 @@ function graphifyStem(string $sourceFile): string
 
 function graphifyId(string $sourceFile, string $entity): string
 {
-    $id = graphifyStem($sourceFile) . '_' . graphifySlug($entity);
+    $id = 'docstruct_' . graphifyStem($sourceFile) . '_' . graphifySlug($entity);
     if (strlen($id) <= 240) {
         return $id;
     }
@@ -122,6 +122,7 @@ function mechanicalNode(array $node, string $root): ?array
         'captured_at' => null,
         'author' => null,
         'contributor' => null,
+        'docstruct_origin' => DOCSTRUCT_GRAPHIFY_SCHEMA,
     ];
 }
 
@@ -243,6 +244,7 @@ function buildGraphifyFragment(array $doc, ?array $review): array
             'source_file' => absoluteSource($root, $sourceFile),
             'source_location' => graphifyLocation(is_array($edge['evidence'] ?? null) ? $edge['evidence'] : []),
             'weight' => 1.0,
+            'docstruct_origin' => DOCSTRUCT_GRAPHIFY_SCHEMA,
         ];
     }
 
@@ -290,6 +292,7 @@ function buildGraphifyFragment(array $doc, ?array $review): array
                 'captured_at' => null,
                 'author' => null,
                 'contributor' => null,
+                'docstruct_origin' => DOCSTRUCT_GRAPHIFY_SCHEMA,
             ];
             $reason = trim((string)($node['reason'] ?? ''));
             if ($reason !== '') {
@@ -325,6 +328,7 @@ function buildGraphifyFragment(array $doc, ?array $review): array
                 'source_file' => absoluteSource($root, $sourceFile),
                 'source_location' => null,
                 'weight' => 1.0,
+                'docstruct_origin' => DOCSTRUCT_GRAPHIFY_SCHEMA,
             ];
         }
 

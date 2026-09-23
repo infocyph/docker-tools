@@ -1,0 +1,9 @@
+{
+  "runtime": {
+    "provider": "ollama",
+    "models": ["qwen3.5:9b"]
+  },
+  "features": {
+    "document_structure": true
+  }
+}

@@ -64,6 +64,7 @@ printf 'docstruct-contract: bounded review context\n'
 
 DOCSTRUCT_IMPL="$IMPL" \
 DOCSTRUCT_CONTEXT_IMPL="$CONTEXT_IMPL" \
+DOCSTRUCT_REVIEW_ROOT="$FIXTURES" \
 DOCSTRUCT_PHP_BIN="$PHP_BIN" \
   bash "$DOCSTRUCT" context "$tmp/one.json" >"$tmp/review-context.json"
 
@@ -83,6 +84,7 @@ DOCSTRUCT_REVIEW_FILE_BYTES=32 \
 DOCSTRUCT_REVIEW_TOTAL_BYTES=80 \
 DOCSTRUCT_IMPL="$IMPL" \
 DOCSTRUCT_CONTEXT_IMPL="$CONTEXT_IMPL" \
+DOCSTRUCT_REVIEW_ROOT="$FIXTURES" \
 DOCSTRUCT_PHP_BIN="$PHP_BIN" \
   bash "$DOCSTRUCT" context "$tmp/one.json" >"$tmp/review-context-small.json"
 jq -e '
@@ -91,6 +93,19 @@ jq -e '
   and .stats.total_limit_bytes == 80
   and (.passages | any(.truncated == true))
 ' "$tmp/review-context-small.json" >/dev/null || fail "review context limits were not enforced"
+
+jq '.root = "/"' "$tmp/one.json" >"$tmp/review-context-outside.json"
+set +e
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_CONTEXT_IMPL="$CONTEXT_IMPL" \
+DOCSTRUCT_REVIEW_ROOT="$FIXTURES" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" context "$tmp/review-context-outside.json" >/dev/null 2>"$tmp/review-context-outside.err"
+rc=$?
+set -e
+[[ "$rc" -eq 77 ]] || fail "outside-workspace review root returned $rc instead of 77"
+grep -q 'outside the allowed review workspace' "$tmp/review-context-outside.err" ||
+  fail "outside-workspace review root error missing"
 
 printf 'docstruct-contract: Graphify fragment export\n'
 

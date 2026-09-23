@@ -22,7 +22,7 @@ Baseline:
 
 Harden `docker-tools` as the LocalDevStack control plane while making it the primary **AI consumer** in the ecosystem.
 
-Tools should remain fully functional without AI. When `docker-llm-ollama` is available, Tools should be able to use it through a small, reusable provider layer for many future developer/ops workflows.
+Tools should remain fully functional without AI. When the common LocalDevStack `llm` service is available, Tools should be able to use it through the provider-neutral layer for future developer/ops workflows.
 
 The core architectural rule is:
 
@@ -324,7 +324,7 @@ Requirements:
 7. Never execute generated shell/SQL/code automatically.
 8. If future actions are introduced, require explicit user confirmation and validate against allowlisted operations.
 9. No Docker socket command should be generated and executed directly from LLM text.
-10. CI tests use fake/mock Ollama endpoints; never require a real model download.
+10. CI tests use a fake/mock OpenAI-compatible `llm` endpoint; never require a real model download.
 
 ---
 
@@ -374,7 +374,7 @@ Plan:
 - inventory every Nginx/Apache/Node/PHP template;
 - ensure Docker DNS names are used;
 - align streaming/WebSocket behavior with Nginx 0.4.1;
-- no LLM-specific Nginx routing belongs here if Nginx owns reserved `llm-ollama.localhost`; avoid duplicate route sources.
+- no LLM-specific Nginx routing belongs here; Nginx owns user-facing `llm.localhost` and provider-specific diagnostic routes.
 
 ## 8.5 `scripts/docker-templates/`
 
@@ -382,7 +382,7 @@ Plan:
 - remove duplicate service-version/profile truth where possible;
 - consume canonical service/runtime metadata;
 - keep PHP/Node as locally-built developer runtimes, not published generic images;
-- prepare optional environment injection for AI-aware developer tools without adding `llm-ollama` lifecycle here.
+- prepare optional environment injection for AI-aware developer tools without adding LLM lifecycle ownership here.
 
 ## 8.6 `scripts/fpm-templates/`
 
@@ -446,7 +446,7 @@ Plan:
 - validate/sanitize user-controlled request parameters;
 - audit all shell-command construction;
 - introduce an internal API/helper layer for AI later rather than embedding curl logic in each PHP page;
-- add optional AI status indicator when `llm-ollama` is reachable;
+- add optional AI status indicator when the common `llm` service is reachable;
 - future AI actions remain explicitly user-triggered.
 
 ## 8.13 `README.md`
@@ -456,7 +456,7 @@ Update after implementation stabilizes:
 - define Tools as LocalDevStack control plane;
 - document shared foundations;
 - document AI as optional consumer functionality;
-- document `llm-ollama` as separate provider;
+- document the common `llm` service and provider-neutral client contract;
 - document `LDS_AI_*` variables;
 - document Docker socket security boundary;
 - document admin panel and major command surfaces;
@@ -475,7 +475,7 @@ Add `.github/workflows/check.yml` with layers:
 5. real Docker image build;
 6. container startup/admin-panel/notifier smoke;
 7. Docker-socket integration tests only in disposable CI Docker environment;
-8. fake Ollama HTTP server tests for `ai-provider.sh`/`askai`;
+8. fake OpenAI-compatible HTTP server tests for `ai-provider.sh`/`askai`;
 9. LocalDevStack compatibility checks;
 10. architecture/release-contract audit preventing embedded Ollama from returning.
 
@@ -518,17 +518,14 @@ LDS_AI_PROVIDER=llm
 LDS_AI_URL=http://llm:11434
 ```
 
-and network connectivity to the optional `llm-ollama` service.
+and Docker-network connectivity to the optional common `llm` service.
 
-User-facing browser/API access remains:
+Tools-to-LLM requests stay inside the Docker network at `http://llm:11434/v1`.
 
-```text
-https://llm-ollama.localhost
-```
+User-facing browser/API access may remain available through Nginx-owned routes such as
+`https://llm.localhost`; provider-specific hostnames are diagnostics/low-level surfaces only.
 
-through Nginx 0.4.1+.
-
-Tools does not create/start/remove the `llm-ollama` container itself.
+Tools does not create/start/remove whichever provider container currently owns the `llm` identity.
 
 ---
 
@@ -540,9 +537,9 @@ The Tools hardening release is ready when:
 2. image builds from fresh rolling dependencies;
 3. Scriptomatic/Toolset contracts match completed foundations;
 4. no Ollama runtime exists inside Tools;
-5. all existing Tools workflows remain functional without `llm-ollama`;
-6. `askai`/AI-provider tests pass against a fake Ollama endpoint;
-7. `gitx` can use `llm-ollama` through `GITX_OLLAMA_URL` when enabled;
+5. all existing Tools workflows remain functional without the optional `llm` service;
+6. `askai`/AI-provider tests pass against a fake OpenAI-compatible endpoint;
+7. Toolset-owned `gitx ai-commit` remains delegated without introducing provider-specific logic into docker-tools;
 8. monitors remain deterministic and machine-readable;
 9. admin panel remains functional without AI;
 10. generated PHP/Node/Nginx/Apache configs pass representative syntax tests;
@@ -607,7 +604,7 @@ Maintain an explicit compatibility matrix covering:
 - Tools -> Nginx: generated vhosts, TLS paths, FPM socket assumptions, proxy include names, streaming/WebSocket behavior and reserved localhost routes;
 - Tools -> Apache: generated vhosts, `/app`, log paths, TLS/mTLS certificate paths, HTTP/2 and PHP-FPM proxy behavior;
 - Tools -> Runner: cron/supervisor directories, generated config format and safe reload behavior;
-- Tools -> `llm-ollama`: HTTP client contract at `http://llm:11434`, with no lifecycle ownership;
+- Tools -> common `llm`: OpenAI-compatible client contract at `http://llm:11434/v1`, with no lifecycle ownership;
 - Tools -> LocalDevStack: canonical service catalog, mounted state/config paths, network/service names, image compatibility and product-level orchestration ownership.
 
 Compatibility tests should use the actual hardened sibling images or explicit tested refs, not reimplement their syntax/contracts with local mocks. Floating `latest` may still exist operationally, but a LocalDevStack release should record which image versions/digests were compatibility-tested together.
@@ -710,13 +707,13 @@ Runtime metadata generation should also sort PHP/Node versions semantically/nume
 
 ## 14.7 Reserved LocalDevStack routes are an ecosystem ABI
 
-The hardened Nginx image owns predefined convenience routes such as `admin.localhost` and `llm-ollama.localhost`. `mkhost` must not allow generated user hosts to shadow reserved product routes.
+The hardened Nginx image owns predefined convenience routes such as `admin.localhost`, `llm.localhost`, and provider-specific diagnostic LLM routes. `mkhost` must not allow generated user hosts to shadow reserved product routes.
 
 Requirements:
 
 - reject collisions with LocalDevStack-reserved convenience hostnames during host creation/edit;
 - source the reserved-route list from the canonical LocalDevStack catalog/route contract when that contract becomes available rather than maintaining another permanent hard-coded copy in Tools;
-- keep `llm-ollama.localhost` fully Nginx-owned; Tools does not generate a competing LLM vhost;
+- keep `llm.localhost` and provider-specific diagnostic LLM hostnames fully Nginx-owned; Tools does not generate competing LLM vhosts;
 - add a CI guard that renders every maintained Tools Nginx template against the actual hardened Nginx image and verifies every referenced include exists (`proxy_params`, timeout/buffer/streaming/WebSocket/H2/FastCGI snippets, etc.);
 - validate Apache templates against the hardened Apache image and its loaded-module/TLS/mTLS contract;
 - validate Runner scheduler paths against the hardened Runner image rather than assuming path compatibility.
@@ -726,7 +723,7 @@ Requirements:
 Extend the provider layer with the following operational rules:
 
 - separate a short provider/DNS/connect timeout from the potentially long generation timeout;
-- cache positive/negative availability briefly so a missing optional `llm-ollama` does not add repeated connection latency to every command/panel render;
+- cache positive/negative availability briefly so a missing optional `llm` service does not add repeated connection latency to every command/panel render;
 - bound request bytes, response bytes and diagnostic/context bytes independently;
 - retry safe reachability/preflight requests only; do not blindly replay a generation after partial streamed output;
 - if `LDS_AI_MODEL` is empty, auto-select only when the provider state makes the choice deterministic; if multiple installed models are plausible, return a clear ambiguity error rather than silently choosing the first result;
@@ -734,7 +731,7 @@ Extend the provider layer with the following operational rules:
 - make redaction deterministic and test it with credential/token/URL/header/.env fixtures before any content reaches the provider;
 - do not persist raw prompts/responses by default; optional debug telemetry should contain redacted metadata such as provider, model, duration, byte counts and a safe request/context hash rather than secret-bearing payloads;
 - admin-panel generations should support streaming/cancellation or another bounded UX rather than tying up a PHP request for the full maximum generation timeout;
-- keep fake-provider tests as the normal Tools CI path and add lightweight protocol/schema compatibility coverage for the `llm-ollama` API without requiring a real model download in every Tools check.
+- keep fake-provider tests as the normal Tools CI path and add lightweight OpenAI-compatible protocol/schema coverage for the common `llm` API without requiring a real model download in every Tools check.
 
 ## 14.9 Tools-owned service health and lifecycle
 
@@ -745,7 +742,7 @@ The healthcheck should:
 - verify the main notifier/control process is alive and its FIFO/runtime state is sane;
 - verify the admin panel only when `ADMIN_PANEL_AUTOSTART=1`;
 - surface a dead background admin process instead of leaving the container permanently "healthy" because `notifierd` is still PID 1;
-- remain independent of Docker daemon reachability, database availability and `llm-ollama` availability;
+- remain independent of Docker daemon reachability, database availability and common `llm` availability;
 - keep AI strictly optional, so an absent LLM can never make Tools unhealthy.
 
 The notifier TCP listener should remain an internal LocalDevStack transport by default. Do not publish it to the host unless explicitly requested; if future external exposure is supported, require authentication rather than relying on the current optional empty token.
@@ -763,7 +760,7 @@ In addition to Sections 9 and 12, add focused gates for:
 7. host-edit failure rollback preserving the previous working host;
 8. cron/supervisor invalid-update rollback preserving the previous Runner config;
 9. concurrent `env-store` writers without lost/corrupt updates;
-10. rejection of reserved LocalDevStack hostnames including `llm-ollama.localhost`;
+10. rejection of reserved LocalDevStack hostnames including `llm.localhost` and provider-specific diagnostic LLM routes;
 11. actual Nginx include/template ABI validation against the hardened Nginx image;
 12. actual Apache/FPM/TLS template validation against the hardened Apache/runtime contract;
 13. AI-disabled, provider-unreachable, ambiguous-model, redaction, oversized-context, timeout and interrupted-stream behavior;
@@ -784,7 +781,7 @@ software can extract mechanically.
 The mechanical extractor must work with AI disabled. Optional AI review consumes its
 normalized output and proposes additive semantic improvements.
 
-## Architectural ownership
+## 15.2 Architectural ownership
 
 ### docker-tools owns
 
@@ -839,7 +836,7 @@ LocalDevStack should remain orchestration/provider selection:
 Do **not** add Pandoc, Sphinx, repository parsers, document AST tools, or graph logic to
 LLM images.
 
-## Core principle
+## 15.3 Core principle
 
 > Never ask the LLM to infer something that a deterministic parser can know.
 
@@ -873,7 +870,7 @@ Examples that remain appropriate for the LLM:
 - implicit workflow/dependency interpretation;
 - identifying important omissions in the deterministic graph.
 
-## Proposed user-facing capability
+## 15.4 Proposed user-facing capability
 
 Introduce one generic command name, provisionally:
 
@@ -912,7 +909,7 @@ Do not make the deterministic extractor automatically invoke an LLM in the first
 implementation. Deterministic extraction and semantic review should remain independently
 testable.
 
-## Normalized intermediate contract
+## 15.5 Normalized intermediate contract
 
 The extractor should output a versioned schema such as:
 
@@ -928,7 +925,7 @@ The extractor should output a versioned schema such as:
 }
 ```
 
-### 1 File records
+### 15.5.1 File records
 
 Each file record should include at minimum:
 
@@ -941,7 +938,7 @@ Each file record should include at minimum:
 - warnings/errors;
 - optional document title.
 
-### 2 Node types
+### 15.5.2 Node types
 
 Initial node vocabulary should stay intentionally small:
 
@@ -956,7 +953,7 @@ Initial node vocabulary should stay intentionally small:
 
 Do not attempt a large ontology in docker-tools.
 
-### 3 Edge types
+### 15.5.3 Edge types
 
 Initial deterministic relationships:
 
@@ -971,7 +968,7 @@ Initial deterministic relationships:
 If the relationship cannot be proved mechanically, leave it unresolved instead of
 creating an inferred edge.
 
-### 4 Evidence
+### 15.5.4 Evidence
 
 Every mechanically created node/edge should retain evidence:
 
@@ -986,7 +983,7 @@ Every mechanically created node/edge should retain evidence:
 Where exact line mapping is unavailable from the selected parser, retain the closest
 stable source locator available and clearly mark its precision.
 
-### 5 Stable IDs
+### 15.5.5 Stable IDs
 
 IDs must be deterministic and reproducible.
 
@@ -1006,9 +1003,9 @@ docs/runtime.rst#runtime-adapter
 
 Avoid random UUIDs for structural nodes.
 
-## Format strategy
+## 15.6 Format strategy
 
-## 1 Markdown
+### 15.6.1 Markdown
 
 Mechanically extract:
 
@@ -1026,7 +1023,7 @@ Mechanically extract:
 
 Do not turn every paragraph into a node.
 
-## 2 reStructuredText
+### 15.6.2 reStructuredText
 
 Mechanically extract:
 
@@ -1050,7 +1047,7 @@ Mechanically extract:
 RST/Sphinx handling is a high-value part of this plan because these constructs encode
 relationships that an LLM should not need to rediscover.
 
-## 3 YAML / JSON / TOML
+### 15.6.3 YAML / JSON / TOML
 
 Mechanically extract:
 
@@ -1063,7 +1060,7 @@ Mechanically extract:
 The generic representation should not hard-code GitHub issue-template semantics into
 the base parser. Optional recognizers may annotate known formats later.
 
-## 4 INI/config
+### 15.6.4 INI/config
 
 Start conservative:
 
@@ -1074,7 +1071,7 @@ Start conservative:
 
 Never treat config values as executable input.
 
-## Parser/tooling decision
+## 15.7 Parser/tooling decision
 
 A short implementation spike should compare the following options before locking
 dependencies into the image.
@@ -1145,7 +1142,7 @@ Do not add Python solely to implement this feature unless the evaluation proves 
 Python/docutils path is materially better than the alternatives. The goal is to avoid
 another bespoke Python compatibility layer.
 
-## Recommended initial direction
+## 15.8 Recommended initial direction
 
 Start with:
 
@@ -1158,11 +1155,11 @@ Start with:
 If Pandoc's image cost is unacceptably high, switch to a small static helper rather than
 accumulating several scripting runtimes.
 
-## Deterministic reference resolution
+## 15.9 Deterministic reference resolution
 
 Resolution should be a separate stage from parsing.
 
-### 1 Document references
+### 15.9.1 Document references
 
 Resolve mechanically where possible:
 
@@ -1173,7 +1170,7 @@ Resolve mechanically where possible:
 - toctree members;
 - explicit repository-relative paths.
 
-### 2 Symbol references
+### 15.9.2 Symbol references
 
 For things like:
 
@@ -1193,7 +1190,7 @@ without pretending it can prove the final code symbol if no code index was suppl
 
 A future Graphify integration can resolve these against Graphify's code AST nodes.
 
-### 3 No guessing
+### 15.9.3 No guessing
 
 Unresolved references belong in:
 
@@ -1203,7 +1200,7 @@ Unresolved references belong in:
 
 They should not silently become edges.
 
-## LLM review contract
+## 15.10 LLM review contract
 
 The LLM should review deterministic output, not regenerate it from scratch.
 
@@ -1233,7 +1230,7 @@ Preferred LLM output should be additive:
 
 Do not ask the model to reproduce all deterministic nodes/edges.
 
-### Evidence rule
+### 15.10.1 Evidence rule
 
 Every LLM proposal must include:
 
@@ -1242,7 +1239,7 @@ Every LLM proposal must include:
 - reason;
 - confidence.
 
-### Validation
+### 15.10.2 Validation
 
 Before returning LLM enrichment:
 
@@ -1254,7 +1251,7 @@ Before returning LLM enrichment:
 
 If review fails, the mechanical result remains valid.
 
-## Safety and trust boundary
+## 15.11 Safety and trust boundary
 
 Document parsing must treat repositories as untrusted input.
 
@@ -1280,7 +1277,7 @@ Deterministic parsing may inspect non-secret config files without sending them t
 LLM. AI review must continue to use docker-tools' existing redaction and safe-input
 boundary.
 
-## Workspace model
+## 15.12 Workspace model
 
 Do not silently scan arbitrary host repositories.
 
@@ -1298,7 +1295,7 @@ Default scan behavior should respect:
 
 A repository mount should be read-only by default for analysis workflows.
 
-## Performance and incremental behavior
+## 15.13 Performance and incremental behavior
 
 The deterministic stage should be cheap enough to run before every semantic review.
 
@@ -1321,12 +1318,12 @@ Useful metrics:
 - unresolved reference count;
 - parse duration by format.
 
-## Integration with existing docker-tools AI
+## 15.14 Integration with existing docker-tools AI
 
 Reuse the existing provider-neutral AI plumbing:
 
 - `LDS_AI_PROVIDER=llm`;
-- `LDS_AI_URL=http://llm:11434`;
+- `LDS_AI_URL=http://llm:11434` (OpenAI-compatible API root `http://llm:11434/v1`);
 - bounded requests;
 - thinking controls;
 - redaction;
@@ -1337,7 +1334,7 @@ Do not add provider-specific FastFlow/Ollama logic to the document extractor.
 
 The deterministic extractor itself should work with AI disabled.
 
-## Graphify integration boundary
+## 15.15 Graphify integration boundary
 
 The initial docker-tools release should **not** patch Graphify output directly.
 
@@ -1353,7 +1350,7 @@ code AST and final graph schema.
 
 Do not make docker-tools maintain a Graphify-specific fork.
 
-## Image-size and dependency budget
+## 15.16 Image-size and dependency budget
 
 Before adding any parser dependency, record:
 
@@ -1372,9 +1369,9 @@ Suggested acceptance target:
 
 If Pandoc adds excessive image weight, the static-helper option should be preferred.
 
-## Testing strategy
+## 15.17 Testing strategy
 
-### Unit/contract fixtures
+### 15.17.1 Unit/contract fixtures
 
 Include representative fixtures:
 
@@ -1393,16 +1390,16 @@ Include representative fixtures:
 - oversized input;
 - include recursion.
 
-### Determinism tests
+### 15.17.2 Determinism tests
 
 The same input must produce byte-for-byte equivalent normalized structure after sorting
 canonical collections.
 
-### Source evidence tests
+### 15.17.3 Source evidence tests
 
 Verify line/source locators for every supported structural type.
 
-### Security tests
+### 15.17.4 Security tests
 
 Verify:
 
@@ -1413,7 +1410,7 @@ Verify:
 - size caps;
 - secret-sensitive AI review refusal.
 
-### AI review tests
+### 15.17.5 AI review tests
 
 Using the existing fake OpenAI-compatible endpoint:
 
@@ -1423,7 +1420,7 @@ Using the existing fake OpenAI-compatible endpoint:
 - unknown node/edge targets are rejected;
 - AI unavailable still returns deterministic results successfully.
 
-### Release gate
+### 15.17.6 Release gate
 
 The final image gate should verify:
 
@@ -1434,7 +1431,7 @@ The final image gate should verify:
 - JSON schema validity;
 - no LLM required for deterministic mode.
 
-## Proposed implementation batches
+## 15.18 Proposed implementation batches
 
 ### Batch 0 — benchmark and dependency decision
 
@@ -1570,7 +1567,7 @@ Exit criteria:
 - image-size comparison;
 - final security review.
 
-## Evaluation metrics
+## 15.19 Evaluation metrics
 
 The plan should be judged on measurable improvement, not merely parser completeness.
 
@@ -1602,7 +1599,7 @@ rather than:
 all docs -> LLM -> complete graph
 ```
 
-## Non-goals
+## 15.20 Non-goals
 
 Do not use this effort to:
 
@@ -1616,7 +1613,7 @@ Do not use this effort to:
 - automatically rewrite repository documentation;
 - automatically mutate Graphify output before an explicit interoperability contract exists.
 
-## Definition of done
+## 15.21 Definition of done
 
 This initiative is ready for release when:
 

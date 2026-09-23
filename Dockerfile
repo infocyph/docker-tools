@@ -267,6 +267,7 @@ COPY --from=fetch /out/runtime-versions.json /etc/share/runtime-versions.json
 
 COPY scripts/lib/ai-provider.sh /usr/local/lib/docker-tools/ai-provider.sh
 COPY scripts/php/docstruct.php /usr/local/lib/docker-tools/docstruct.php
+COPY scripts/php/docstruct-graphify.php /usr/local/lib/docker-tools/docstruct-graphify.php
 COPY scripts/shells/docstruct.sh /usr/local/bin/docstruct
 COPY scripts/shells/askai.sh /usr/local/bin/askai
 COPY scripts/shells/aiops.sh /usr/local/bin/aiops
@@ -370,7 +371,7 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
       /usr/local/bin/composer \
       /etc/share/scripts/tests/senv-smoke.sh \
       /etc/share/scripts/tests/ai-provider-smoke.sh \
-  && chmod 0644 /usr/local/lib/docker-tools/ai-provider.sh /usr/local/lib/docker-tools/docstruct.php \
+  && chmod 0644 /usr/local/lib/docker-tools/ai-provider.sh /usr/local/lib/docker-tools/docstruct.php /usr/local/lib/docker-tools/docstruct-graphify.php \
   && init-php-dirs \
   && chmod -R 755 /etc/share/vhosts \
   && mkdir -p /etc/profile.d \
@@ -398,6 +399,7 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
     } >> /root/.bashrc \
   && bash -n /usr/local/lib/docker-tools/ai-provider.sh \
   && php -l /usr/local/lib/docker-tools/docstruct.php >/dev/null \
+  && php -l /usr/local/lib/docker-tools/docstruct-graphify.php >/dev/null \
   && bash -n /usr/local/bin/docstruct \
   && docstruct --help >/dev/null \
   && bash -n /usr/local/bin/askai \

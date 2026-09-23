@@ -18,10 +18,13 @@ if [[ "${1:-}" == 'ai-commit' ]]; then
   fi
 
   # Toolset owns ai-commit. Its current local provider contract is Ollama/Gemini,
-  # not generic OpenAI. Force the local Ollama path so Toolset can never fall back
-  # to Gemini/cloud from LocalDevStack. If the active common llm backend is
-  # FastFlow, Toolset ai-commit will fail locally until Toolset gains an OpenAI
-  # provider; docker-tools must not duplicate that implementation.
+  # not generic OpenAI. Fail explicitly when LocalDevStack selected FastFlow
+  # instead of pretending that provider speaks Ollama-native APIs.
+  if [[ "$LDS_AI_PROVIDER" != ollama ]]; then
+    echo "gitx: ai-commit is unavailable for LDS_AI_RUNTIME=$LDS_AI_RUNTIME until Toolset supports a generic OpenAI provider" >&2
+    exit 69
+  fi
+
   export GITX_AI_PROVIDER=ollama
   export GITX_OLLAMA_URL="$LDS_AI_URL"
   unset GEMINI_API_KEY

@@ -89,7 +89,7 @@ jobs:
             -v "$PWD:/work:ro" \
             -w /work \
             alpine:latest \
-            sh -lc 'apk add --no-cache bash jq pandoc >/dev/null && bash scripts/tests/docstruct-pandoc-feasibility.sh'
+            sh -lc 'apk add --no-cache bash jq pandoc php php-mbstring >/dev/null && bash scripts/tests/docstruct-pandoc-feasibility.sh && bash scripts/tests/docstruct-contract.sh'
 
       - name: Env-store concurrency and corruption recovery
         run: bash scripts/tests/env-store-concurrency.sh

@@ -199,13 +199,216 @@ before="$(wc -l <"$capture_file" | tr -d '[:space:]')"
 doc_context="$(bash "$AIOPS" document-review --file "$tmp/docstruct.json" --context-only)"
 after="$(wc -l <"$capture_file" | tr -d '[:space:]')"
 [[ "$before" == "$after" ]] || fail 'document-review context-only unexpectedly called generation endpoint'
+grep -q '^DOCSTRUCT STRUCTURE (authoritative JSON)
+if grep -q 'secret-token-value' <<<"$doc_context"; then
+  fail 'document-review passage leaked a secret value'
+fi
+grep -q 'PASSWORD=\[REDACTED\]' <<<"$doc_context" || fail 'document-review passage was not redacted'
+
+printf 'docstruct-review\n' >"$mode_file"
+review_patch="$(bash "$AIOPS" document-review --file "$tmp/docstruct.json")"
 jq -e '
-  .schema == "docker-tools.docstruct-context/v1"
+  .schema == "docker-tools.docstruct-review/v1"
   and .base_schema == "docker-tools.docstruct/v1"
-  and (.structure.schema == "docker-tools.docstruct/v1")
-  and (.passages | length == 1)
-  and .passages[0].source_file == "README.md"
-' <<<"$doc_context" >/dev/null || fail 'document-review context did not include bounded source passage'
+  and (.base_sha256 | type == "string" and length == 64)
+  and (.patch.add_nodes | length == 1)
+  and .patch.add_nodes[0].id == "README.md#semantic-runtime"
+  and (.patch.add_edges | length == 1)
+  and .patch.add_edges[0].source == "README.md#document"
+' <<<"$review_patch" >/dev/null || fail 'valid document-review additive patch was not accepted'
+
+printf 'docstruct-review-invalid-target\n' >"$mode_file"
+set +e
+bash "$AIOPS" document-review --file "$tmp/docstruct.json" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+[[ "$rc" -eq 69 ]] || fail "invalid document-review target returned $rc instead of 69"
+grep -q 'unknown nodes or source files' "$tmp/err" || fail 'invalid document-review target error missing'
+
+printf 'single\n' >"$mode_file"
+printf '{"schema":"wrong"}\n' >"$tmp/not-docstruct.json"
+set +e
+bash "$AIOPS" document-review --file "$tmp/not-docstruct.json" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+[[ "$rc" -eq 65 ]] || fail "invalid document-review input returned $rc instead of 65"
+
+unset DOCSTRUCT_REVIEW_ROOT
+
+printf '6/8 repository review is metadata-only\n'
+repo_dir="$tmp/repo"
+mkdir -p "$repo_dir"
+git -C "$repo_dir" init -q
+git -C "$repo_dir" config user.email smoke@example.invalid
+git -C "$repo_dir" config user.name smoke
+printf 'base\n' >"$repo_dir/file.txt"
+git -C "$repo_dir" add file.txt
+git -C "$repo_dir" commit -qm init
+printf 'changed\n' >>"$repo_dir/file.txt"
+repo_context="$(cd "$repo_dir" && bash "$AIOPS" repo-review --context-only)"
+grep -q '"kind":"repository-metadata"' <<<"$repo_context" || fail 'repo review metadata contract missing'
+grep -q 'file.txt' <<<"$repo_context" || fail 'repo review metadata did not include changed filename'
+grep -q '"unstaged_files"' <<<"$repo_context" || fail 'repo review unstaged metadata field missing'
+if grep -q '^diff --git ' <<<"$repo_context"; then
+  fail 'repo review unexpectedly included diff content'
+fi
+
+printf '7/8 bounded admin service delegates to aiops\n'
+if [[ -r "$ADMIN_BOOTSTRAP" ]]; then
+  AI_ADMIN_BOOTSTRAP="$ADMIN_BOOTSTRAP" php <<'PHP'
+<?php
+declare(strict_types=1);
+
+require getenv('AI_ADMIN_BOOTSTRAP');
+$service = new AdminPanel\Service\AiAssistantService();
+
+$status = $service->status();
+if (($status['available'] ?? false) !== true || ($status['think'] ?? '') !== 'auto') {
+    fwrite(STDERR, "admin AI status did not report available/default thinking mode\n");
+    exit(1);
+}
+
+$result = $service->analyze(['source' => 'db', 'request' => 'Explain the failure.', 'think' => 'on']);
+if (($result['ok'] ?? false) !== true || ($result['answer'] ?? '') !== 'ok' || !str_contains((string)($result['context'] ?? ''), '[REDACTED]')) {
+    fwrite(STDERR, "admin AI analysis contract failed\n");
+    exit(1);
+}
+
+$off = $service->analyze(['source' => 'queue', 'think' => false]);
+if (($off['ok'] ?? false) !== true) {
+    fwrite(STDERR, "admin AI boolean no-thinking contract failed\n");
+    exit(1);
+}
+
+$invalid = $service->analyze(['source' => 'not-a-source']);
+if (($invalid['error'] ?? '') !== 'validation_source') {
+    fwrite(STDERR, "admin AI source validation contract failed\n");
+    exit(1);
+}
+
+$invalidThink = $service->analyze(['source' => 'db', 'think' => 'sometimes']);
+if (($invalidThink['error'] ?? '') !== 'validation_think') {
+    fwrite(STDERR, "admin AI thinking validation contract failed\n");
+    exit(1);
+}
+PHP
+fi
+
+printf '8/8 admin request-level thinking reaches provider\n'
+request_json="$(tail -n 2 "$capture_file" | head -n 1 | base64 -d)"
+jq -e '.think == true and .reasoning_effort == "high"' <<<"$request_json" >/dev/null || fail 'admin think=on request fields missing'
+request_json="$(tail -n 1 "$capture_file" | base64 -d)"
+jq -e '.think == false and .reasoning_effort == "none"' <<<"$request_json" >/dev/null || fail 'admin think=false request fields missing'
+
+printf 'ai-intelligence-smoke: ok\n'
+ <<<"$doc_context" ||
+  fail 'document-review mechanical context header missing'
+grep -q '"schema":"docker-tools.docstruct/v1"' <<<"$doc_context" ||
+  fail 'document-review deterministic structure missing'
+grep -q '^--- SOURCE: README.md \[markdown\] truncated=false ---
+if grep -q 'secret-token-value' <<<"$doc_context"; then
+  fail 'document-review passage leaked a secret value'
+fi
+grep -q 'PASSWORD=\[REDACTED\]' <<<"$doc_context" || fail 'document-review passage was not redacted'
+
+printf 'docstruct-review\n' >"$mode_file"
+review_patch="$(bash "$AIOPS" document-review --file "$tmp/docstruct.json")"
+jq -e '
+  .schema == "docker-tools.docstruct-review/v1"
+  and .base_schema == "docker-tools.docstruct/v1"
+  and (.base_sha256 | type == "string" and length == 64)
+  and (.patch.add_nodes | length == 1)
+  and .patch.add_nodes[0].id == "README.md#semantic-runtime"
+  and (.patch.add_edges | length == 1)
+  and .patch.add_edges[0].source == "README.md#document"
+' <<<"$review_patch" >/dev/null || fail 'valid document-review additive patch was not accepted'
+
+printf 'docstruct-review-invalid-target\n' >"$mode_file"
+set +e
+bash "$AIOPS" document-review --file "$tmp/docstruct.json" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+[[ "$rc" -eq 69 ]] || fail "invalid document-review target returned $rc instead of 69"
+grep -q 'unknown nodes or source files' "$tmp/err" || fail 'invalid document-review target error missing'
+
+printf 'single\n' >"$mode_file"
+printf '{"schema":"wrong"}\n' >"$tmp/not-docstruct.json"
+set +e
+bash "$AIOPS" document-review --file "$tmp/not-docstruct.json" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+[[ "$rc" -eq 65 ]] || fail "invalid document-review input returned $rc instead of 65"
+
+unset DOCSTRUCT_REVIEW_ROOT
+
+printf '6/8 repository review is metadata-only\n'
+repo_dir="$tmp/repo"
+mkdir -p "$repo_dir"
+git -C "$repo_dir" init -q
+git -C "$repo_dir" config user.email smoke@example.invalid
+git -C "$repo_dir" config user.name smoke
+printf 'base\n' >"$repo_dir/file.txt"
+git -C "$repo_dir" add file.txt
+git -C "$repo_dir" commit -qm init
+printf 'changed\n' >>"$repo_dir/file.txt"
+repo_context="$(cd "$repo_dir" && bash "$AIOPS" repo-review --context-only)"
+grep -q '"kind":"repository-metadata"' <<<"$repo_context" || fail 'repo review metadata contract missing'
+grep -q 'file.txt' <<<"$repo_context" || fail 'repo review metadata did not include changed filename'
+grep -q '"unstaged_files"' <<<"$repo_context" || fail 'repo review unstaged metadata field missing'
+if grep -q '^diff --git ' <<<"$repo_context"; then
+  fail 'repo review unexpectedly included diff content'
+fi
+
+printf '7/8 bounded admin service delegates to aiops\n'
+if [[ -r "$ADMIN_BOOTSTRAP" ]]; then
+  AI_ADMIN_BOOTSTRAP="$ADMIN_BOOTSTRAP" php <<'PHP'
+<?php
+declare(strict_types=1);
+
+require getenv('AI_ADMIN_BOOTSTRAP');
+$service = new AdminPanel\Service\AiAssistantService();
+
+$status = $service->status();
+if (($status['available'] ?? false) !== true || ($status['think'] ?? '') !== 'auto') {
+    fwrite(STDERR, "admin AI status did not report available/default thinking mode\n");
+    exit(1);
+}
+
+$result = $service->analyze(['source' => 'db', 'request' => 'Explain the failure.', 'think' => 'on']);
+if (($result['ok'] ?? false) !== true || ($result['answer'] ?? '') !== 'ok' || !str_contains((string)($result['context'] ?? ''), '[REDACTED]')) {
+    fwrite(STDERR, "admin AI analysis contract failed\n");
+    exit(1);
+}
+
+$off = $service->analyze(['source' => 'queue', 'think' => false]);
+if (($off['ok'] ?? false) !== true) {
+    fwrite(STDERR, "admin AI boolean no-thinking contract failed\n");
+    exit(1);
+}
+
+$invalid = $service->analyze(['source' => 'not-a-source']);
+if (($invalid['error'] ?? '') !== 'validation_source') {
+    fwrite(STDERR, "admin AI source validation contract failed\n");
+    exit(1);
+}
+
+$invalidThink = $service->analyze(['source' => 'db', 'think' => 'sometimes']);
+if (($invalidThink['error'] ?? '') !== 'validation_think') {
+    fwrite(STDERR, "admin AI thinking validation contract failed\n");
+    exit(1);
+}
+PHP
+fi
+
+printf '8/8 admin request-level thinking reaches provider\n'
+request_json="$(tail -n 2 "$capture_file" | head -n 1 | base64 -d)"
+jq -e '.think == true and .reasoning_effort == "high"' <<<"$request_json" >/dev/null || fail 'admin think=on request fields missing'
+request_json="$(tail -n 1 "$capture_file" | base64 -d)"
+jq -e '.think == false and .reasoning_effort == "none"' <<<"$request_json" >/dev/null || fail 'admin think=false request fields missing'
+
+printf 'ai-intelligence-smoke: ok\n'
+ <<<"$doc_context" ||
+  fail 'document-review bounded passage header missing'
 grep -q 'runtime delegates provider selection' <<<"$doc_context" || fail 'document-review source passage missing'
 if grep -q 'secret-token-value' <<<"$doc_context"; then
   fail 'document-review passage leaked a secret value'

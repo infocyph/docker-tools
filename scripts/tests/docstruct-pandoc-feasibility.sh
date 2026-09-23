@@ -54,7 +54,7 @@ report="$(jq -n \
   --argjson rst_headers "$rst_headers" \
   --argjson rst_code "$rst_code" \
   --argjson rst_raw "$rst_raw" \
-  --argjson md_runtime_link "$(contains "$md_text" 'runtime.rst#runtime-adapter')" \
+  --argjson md_runtime_link "$(contains "$md_text" 'sample.rst#runtime-adapter')" \
   --argjson rst_class_text "$(contains "$rst_text" 'RuntimeManager')" \
   --argjson rst_method_text "$(contains "$rst_text" 'RuntimeAdapter.start')" \
   --argjson rst_include_text "$(contains "$rst_text" 'Included Notes')" \

@@ -381,8 +381,9 @@ aiops_document_review() {
       return 69
     fi
 
-    if ! jq -en --argjson base "$context" --argjson prior "$merged_patch" --argjson patch "$patch" '
-      ($base.nodes | map(.id)) as $existing
+    if ! jq -en --slurpfile base_file "$file" --argjson prior "$merged_patch" --argjson patch "$patch" '
+      ($base_file[0]) as $base
+      | ($base.nodes | map(.id)) as $existing
       | ($base.files | map(.path)) as $files
       | ($prior.add_nodes | map(.id)) as $prior_added
       | ($patch.add_nodes | map(.id)) as $new_added

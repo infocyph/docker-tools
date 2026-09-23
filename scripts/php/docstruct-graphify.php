@@ -172,15 +172,18 @@ function allowedReviewRelation(string $relation): bool
  *  @param array<string,mixed>|null $review
  *  @return array<string,mixed>
  */
-function buildGraphifyFragment(array $doc, ?array $review): array
+function buildGraphifyFragment(array $doc, ?array $review, ?string $sourceRootOverride = null): array
 {
     if (($doc['schema'] ?? null) !== DOCSTRUCT_GRAPHIFY_SCHEMA) {
         graphifyFail('input is not docker-tools.docstruct/v1', 65);
     }
 
-    $root = (string)($doc['root'] ?? '');
+    $root = $sourceRootOverride ?? (string)($doc['root'] ?? '');
     if ($root === '') {
-        graphifyFail('docstruct root is missing', 65);
+        graphifyFail('Graphify source root is missing', 65);
+    }
+    if (!str_starts_with(str_replace('\\', '/', $root), '/') && preg_match('~^[A-Za-z]:[\\\\/]~', $root) !== 1) {
+        graphifyFail('Graphify source root must be absolute', 65);
     }
 
     $filePaths = [];
@@ -352,18 +355,19 @@ function buildGraphifyFragment(array $doc, ?array $review): array
     ];
 }
 
-/** @return array{input:string,review:?string,output:?string,pretty:bool} */
+/** @return array{input:string,review:?string,output:?string,source_root:?string,pretty:bool} */
 function parseGraphifyArgs(array $argv): array
 {
     $input = '';
     $review = null;
     $output = null;
+    $sourceRoot = null;
     $pretty = true;
 
     for ($i = 1; $i < count($argv); $i++) {
         $arg = $argv[$i];
         if ($arg === '-h' || $arg === '--help') {
-            echo "Usage: docstruct graphify <docstruct.json> [--review <docstruct-review.json>] [--output <file>] [--compact]\n";
+            echo "Usage: docstruct graphify <docstruct.json> [--review <docstruct-review.json>] [--source-root <host-root>] [--output <file>] [--compact]\n";
             exit(0);
         }
         if ($arg === '--review') {
@@ -372,6 +376,10 @@ function parseGraphifyArgs(array $argv): array
         }
         if ($arg === '--output') {
             $output = $argv[++$i] ?? graphifyFail('--output requires a file');
+            continue;
+        }
+        if ($arg === '--source-root') {
+            $sourceRoot = $argv[++$i] ?? graphifyFail('--source-root requires an absolute path');
             continue;
         }
         if ($arg === '--compact') {
@@ -391,14 +399,14 @@ function parseGraphifyArgs(array $argv): array
         graphifyFail('a docstruct JSON input is required');
     }
 
-    return ['input' => $input, 'review' => $review, 'output' => $output, 'pretty' => $pretty];
+    return ['input' => $input, 'review' => $review, 'output' => $output, 'source_root' => $sourceRoot, 'pretty' => $pretty];
 }
 
 $options = parseGraphifyArgs($argv);
 $GLOBALS['docstructInputPath'] = $options['input'];
 $doc = readJsonObject($options['input'], 'docstruct input');
 $review = $options['review'] !== null ? readJsonObject($options['review'], 'review input') : null;
-$fragment = buildGraphifyFragment($doc, $review);
+$fragment = buildGraphifyFragment($doc, $review, $options['source_root']);
 
 $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
 if ($options['pretty']) {

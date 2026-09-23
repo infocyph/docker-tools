@@ -195,6 +195,12 @@ cat >"$tmp/code-graph.json" <<'JSON'
       "file_type": "document",
       "source_file": "/tmp/old.md",
       "docstruct_origin": "docker-tools.docstruct/v1"
+    },
+    {
+      "id": "legacy_semantic_doc",
+      "label": "Legacy semantic document",
+      "file_type": "document",
+      "source_file": "/tmp/legacy.rst"
     }
   ],
   "edges": [
@@ -227,6 +233,7 @@ DOCSTRUCT_PHP_BIN="$PHP_BIN" \
 jq -e '
   (.nodes | any(.id == "src_runtime_php_runtime" and .file_type == "class"))
   and ([.nodes[].id] | index("docstruct_old_document") == null)
+  and ([.nodes[].id] | index("legacy_semantic_doc") == null)
   and (.nodes | any(.id == "docstruct_sample_document"))
   and (.edges | any(.relation == "calls" and .source == "src_runtime_php_runtime"))
   and ([.edges[] | select(.source == "docstruct_old_document" or .target == "docstruct_old_document")] | length == 0)

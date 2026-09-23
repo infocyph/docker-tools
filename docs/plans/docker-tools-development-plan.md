@@ -1568,7 +1568,7 @@ Exit criteria:
 
 ### Batch 6 — security/resource hardening
 
-Status: **in progress**
+Status: **implemented; CI validation in progress**
 
 - [x] outside-root reference refusal;
 - [x] symlinked corpus entries skipped;
@@ -1576,7 +1576,8 @@ Status: **in progress**
 - [x] corpus/file/file-count/node caps;
 - [x] parser timeouts;
 - [x] no network fetch path in deterministic extraction;
-- [ ] malformed-input fixture matrix and final hardening review.
+- [x] malformed JSON/TOML fixture handling;
+- [x] adversarial symlink/oversize/outside-root contract coverage.
 
 Exit criteria:
 
@@ -1584,12 +1585,16 @@ Exit criteria:
 
 ### Batch 7 — optional AI review
 
-- bounded normalized context;
-- additive enrichment schema;
-- provider-neutral `llm` use;
-- validation;
-- evidence/confidence;
-- deterministic output survives AI failure.
+Status: **implemented; CI validation in progress**
+
+- [x] bounded normalized context;
+- [x] additive `docker-tools.docstruct-review/v1` enrichment schema;
+- [x] runtime-selected provider-neutral OpenAI-compatible AI path;
+- [x] source-file/node-reference validation;
+- [x] evidence reason/confidence contract;
+- [x] deterministic output is never mutated or replaced;
+- [x] context-only mode does not call the model;
+- [x] malformed/unknown-target review patches are rejected.
 
 Exit criteria:
 

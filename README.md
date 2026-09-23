@@ -197,7 +197,9 @@ Current deterministic coverage:
 - RST headings/code blocks through Pandoc plus explicit Sphinx/RST targets, directives, `include`, `toctree`, and `:doc:`/`:ref:`/`:class:`/`:func:`/`:meth:`/`:mod:` references;
 - YAML/JSON/TOML key hierarchy without scalar-value export;
 - resolution of provable local document links/includes/toctree references;
-- source evidence and explicit unresolved references.
+- source evidence and explicit unresolved references;
+- bounded review context is split into small file/byte-limited chunks before any LLM call;
+- Graphify export uses a reserved `docstruct_` namespace and a safe replacement merge that preserves code nodes.
 
 Resource controls:
 

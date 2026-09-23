@@ -1535,14 +1535,15 @@ Exit criteria:
 
 ### Batch 4 — structured config extraction
 
-Status: **partially implemented**
+Status: **implemented; CI validation in progress**
 
 - [x] YAML;
 - [x] JSON;
 - [x] TOML;
-- [ ] conservative INI/config handling;
-- [x] key hierarchy;
-- [ ] explicit safe path/URL reference extraction.
+- [x] conservative INI/`.cfg` handling;
+- [x] key hierarchy without scalar-value export;
+- [x] explicit safe document/config path and HTTP(S) URL reference extraction;
+- [x] secret-looking config keys excluded from scalar-reference extraction.
 
 Exit criteria:
 
@@ -1551,7 +1552,7 @@ Exit criteria:
 
 ### Batch 5 — deterministic resolver
 
-Status: **partially implemented**
+Status: **complete within docker-tools' non-code boundary**
 
 - [x] document links;
 - [x] RST refs/docs where the deterministic document target exists;
@@ -1602,17 +1603,58 @@ Exit criteria:
 
 ### Batch 8 — Graphify interoperability research
 
-- prototype sidecar handoff;
-- identify minimum upstream Graphify change;
-- compare:
-  - Graphify raw semantic extraction;
-  - deterministic structure + LLM review;
-- measure hollow/malformed/retry rate;
-- measure runtime/token reduction.
+Status: **producer/handoff complete; Graphify ingestion API required**
+
+Findings:
+
+- Graphify already owns code AST extraction through `--code-only`; docker-tools must not
+  duplicate PHP or other code parsing.
+- Graphify's public `merge-chunks` command validates and combines semantic fragments
+  with the same untrusted-fragment limits used by its semantic pipeline.
+- `merge-semantic` combines cached/new semantic fragment files, but neither command is
+  an incremental project-ingestion API: they do not themselves own Graphify's
+  manifest/cache replacement semantics or update `graph.json` safely.
+- Current `graphify extract` has no supported `--semantic-fragment`,
+  `--semantic-sidecar`, or equivalent option.
+- Calling Graphify's private `build_merge()` / `merge_raw_extraction()` functions from
+  LocalDevStack would couple LDS to internal implementation details and recreate the
+  compatibility-layer problem this work is intended to remove.
+
+Implemented handoff:
+
+- [x] `docstruct graphify <docstruct.json>` emits Graphify semantic-fragment JSON;
+- [x] optional `--review <docstruct-review.json>` adds only validated semantic deltas;
+- [x] deterministic document/section nodes and provable internal references are mapped;
+- [x] config scalars, external URL targets, corrections and unresolved code-symbol refs
+  are not silently turned into graph facts;
+- [x] source paths are absolute for Graphify provenance;
+- [x] Graphify-compatible IDs and confidence fields are generated deterministically;
+- [x] review artifact hash must match the deterministic sidecar;
+- [x] CI validates the emitted fragment with `graphifyy==0.9.65` and
+  `graphify merge-chunks`.
+
+Recommended Graphify-side addition:
+
+```text
+graphify extract <path> --semantic-fragment <validated-fragment.json>
+```
+
+or an equivalent supported import command that performs, inside Graphify:
+
+1. semantic-fragment validation/sanitization;
+2. source scoping against the current corpus;
+3. semantic cache/update bookkeeping;
+4. tier-aware incremental replacement/merge;
+5. manifest stamping only for files represented successfully;
+6. normal cluster/label/output handling.
+
+docker-tools should not implement those Graphify-owned semantics.
 
 Exit criteria:
 
-- clear recommendation for the upstream Graphify integration path.
+- docker-tools' sidecar and Graphify-fragment producer are complete and tested;
+- the remaining integration requirement is isolated to one explicit Graphify-owned
+  ingestion interface.
 
 ### Batch 9 — documentation/release hardening
 

@@ -54,9 +54,17 @@ function legacySemanticOwnedByDocstruct(array $node): bool
 
 function docstructOwnedNode(array $node): bool
 {
+    if (($node['docstruct_origin'] ?? null) === DOCSTRUCT_GRAPHIFY_ORIGIN) {
+        return true;
+    }
+
     $id = $node['id'] ?? null;
-    return ($node['docstruct_origin'] ?? null) === DOCSTRUCT_GRAPHIFY_ORIGIN
-        || (is_string($id) && str_starts_with($id, 'docstruct_'));
+    if (!is_string($id) || !str_starts_with($id, 'docstruct_')) {
+        return false;
+    }
+
+    $fileType = strtolower((string)($node['file_type'] ?? ''));
+    return in_array($fileType, ['document', 'paper', 'image', 'concept', 'rationale'], true);
 }
 
 function docstructOwnedEdge(array $edge): bool

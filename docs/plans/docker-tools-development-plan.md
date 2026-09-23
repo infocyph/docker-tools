@@ -1292,6 +1292,9 @@ Requirements:
 - bounded include depth;
 - bounded reference count (`DOCSTRUCT_MAX_REFERENCES`);
 - bounded parse time;
+- bounded semantic-review source excerpts;
+- review sidecar roots confined to the current/explicit workspace;
+- source hashes revalidated before prose is read for AI review;
 - symlink handling explicit and root-confined;
 - binary/secret-sensitive inputs refused through the existing safe-file policy where
   the AI path is involved.
@@ -1595,7 +1598,10 @@ Exit criteria:
 
 Status: **complete**
 
-- [x] bounded normalized context;
+- [x] bounded `docker-tools.docstruct-context/v1` with deterministic structure plus Markdown/RST passages;
+- [x] config scalar values excluded from semantic review context;
+- [x] source hashes verified before review and source roots confined to the active workspace;
+- [x] complete review context redacted before provider transmission;
 - [x] additive `docker-tools.docstruct-review/v1` enrichment schema;
 - [x] runtime-selected provider-neutral OpenAI-compatible AI path;
 - [x] source-file/node-reference validation;

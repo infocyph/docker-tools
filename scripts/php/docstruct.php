@@ -8,6 +8,7 @@ const DOCSTRUCT_DEFAULT_MAX_FILE_BYTES = 2097152;
 const DOCSTRUCT_DEFAULT_MAX_CORPUS_BYTES = 33554432;
 const DOCSTRUCT_DEFAULT_MAX_FILES = 1000;
 const DOCSTRUCT_DEFAULT_MAX_NODES = 20000;
+const DOCSTRUCT_DEFAULT_MAX_REFERENCES = 50000;
 const DOCSTRUCT_DEFAULT_PARSE_TIMEOUT = 15;
 
 function fail(string $message, int $code = 64): never {
@@ -677,7 +678,87 @@ function supportedFormat(string $path): ?string {
     };
 }
 
-function discoverFiles(string $input): array {
+function matchesAnyPattern(string $relative, array $patterns): bool {
+    foreach ($patterns as $pattern) {
+        if (fnmatch($pattern, $relative, FNM_PATHNAME) || fnmatch($pattern, basename($relative))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/** @param list<string> $paths
+ *  @return array<string,true>
+ */
+function gitIgnoredPaths(string $root, array $paths): array {
+    if ($paths === [] || !command_exists('git')) {
+        return [];
+    }
+
+    $pipes = [];
+    $proc = proc_open(
+        ['git', '-C', $root, 'rev-parse', '--show-toplevel'],
+        [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes
+    );
+    if (!is_resource($proc)) {
+        return [];
+    }
+    $repoRoot = trim((string)stream_get_contents($pipes[1]));
+    stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    if (proc_close($proc) !== 0 || $repoRoot === '') {
+        return [];
+    }
+
+    $repoRoot = rtrim(str_replace('\\', '/', $repoRoot), '/');
+    $repoRelative = [];
+    foreach ($paths as $path) {
+        $normalized = str_replace('\\', '/', $path);
+        if (!str_starts_with($normalized, $repoRoot . '/')) {
+            continue;
+        }
+        $relative = substr($normalized, strlen($repoRoot) + 1);
+        $repoRelative[$relative] = $path;
+    }
+    if ($repoRelative === []) {
+        return [];
+    }
+
+    $pipes = [];
+    $proc = proc_open(
+        ['git', '-C', $repoRoot, 'check-ignore', '-z', '--stdin'],
+        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes
+    );
+    if (!is_resource($proc)) {
+        return [];
+    }
+
+    fwrite($pipes[0], implode("\0", array_keys($repoRelative)) . "\0");
+    fclose($pipes[0]);
+    $stdout = (string)stream_get_contents($pipes[1]);
+    stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $code = proc_close($proc);
+    if (!in_array($code, [0, 1], true)) {
+        return [];
+    }
+
+    $ignored = [];
+    foreach (array_filter(explode("\0", $stdout), static fn(string $value): bool => $value !== '') as $relative) {
+        if (isset($repoRelative[$relative])) {
+            $ignored[$repoRelative[$relative]] = true;
+        }
+    }
+
+    return $ignored;
+}
+
+function discoverFiles(string $input, array $includes = [], array $excludes = [], bool $respectGitignore = true): array {
     $real = realpath($input);
     $maxFileBytes = envUint('DOCSTRUCT_MAX_FILE_BYTES', DOCSTRUCT_DEFAULT_MAX_FILE_BYTES);
     $maxCorpusBytes = envUint('DOCSTRUCT_MAX_CORPUS_BYTES', DOCSTRUCT_DEFAULT_MAX_CORPUS_BYTES);
@@ -691,6 +772,10 @@ function discoverFiles(string $input): array {
         if (supportedFormat($real) === null) {
             return [];
         }
+        $relative = basename($real);
+        if (($includes !== [] && !matchesAnyPattern($relative, $includes)) || matchesAnyPattern($relative, $excludes)) {
+            return [];
+        }
         $bytes = filesize($real);
         if ($bytes === false || $bytes > $maxFileBytes) {
             fail("file exceeds DOCSTRUCT_MAX_FILE_BYTES: {$input}", 65);
@@ -698,7 +783,7 @@ function discoverFiles(string $input): array {
         return [$real];
     }
 
-    $files = [];
+    $candidates = [];
     $iterator = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($real, FilesystemIterator::SKIP_DOTS),
         RecursiveIteratorIterator::LEAVES_ONLY
@@ -714,19 +799,33 @@ function discoverFiles(string $input): array {
         if (array_intersect($segments, DOCSTRUCT_EXCLUDES)) {
             continue;
         }
-        if (supportedFormat($path) !== null) {
-            $bytes = $info->getSize();
-            if ($bytes > $maxFileBytes) {
-                fail("file exceeds DOCSTRUCT_MAX_FILE_BYTES: {$relative}", 65);
-            }
-            $corpusBytes += $bytes;
-            if ($corpusBytes > $maxCorpusBytes) {
-                fail('corpus exceeds DOCSTRUCT_MAX_CORPUS_BYTES', 65);
-            }
-            $files[] = $path;
-            if (count($files) > $maxFiles) {
-                fail('corpus exceeds DOCSTRUCT_MAX_FILES', 65);
-            }
+        if (supportedFormat($path) === null) {
+            continue;
+        }
+        if (($includes !== [] && !matchesAnyPattern($relative, $includes)) || matchesAnyPattern($relative, $excludes)) {
+            continue;
+        }
+        $candidates[] = $path;
+    }
+
+    $ignored = $respectGitignore ? gitIgnoredPaths($real, $candidates) : [];
+    $files = [];
+    foreach ($candidates as $path) {
+        if (isset($ignored[$path])) {
+            continue;
+        }
+        $relative = relPath($path, $real);
+        $bytes = filesize($path);
+        if ($bytes === false || $bytes > $maxFileBytes) {
+            fail("file exceeds DOCSTRUCT_MAX_FILE_BYTES: {$relative}", 65);
+        }
+        $corpusBytes += $bytes;
+        if ($corpusBytes > $maxCorpusBytes) {
+            fail('corpus exceeds DOCSTRUCT_MAX_CORPUS_BYTES', 65);
+        }
+        $files[] = $path;
+        if (count($files) > $maxFiles) {
+            fail('corpus exceeds DOCSTRUCT_MAX_FILES', 65);
         }
     }
 
@@ -738,17 +837,33 @@ function parseArgs(array $argv): array {
     $path = '.';
     $output = null;
     $pretty = true;
+    $includes = [];
+    $excludes = [];
+    $respectGitignore = true;
 
     for ($i = 1; $i < count($argv); $i++) {
         $arg = $argv[$i];
         if ($arg === '-h' || $arg === '--help') {
-            echo "Usage: docstruct [path] [--output <file>] [--compact]\n";
+            echo "Usage: docstruct [path] [--include <glob>] [--exclude <glob>] [--no-gitignore] [--output <file>] [--compact]\n";
             echo "Deterministically extract Markdown/RST/YAML/JSON/TOML/INI structure as docker-tools.docstruct/v1 JSON.\n";
-            echo "Limits: DOCSTRUCT_MAX_FILE_BYTES, DOCSTRUCT_MAX_CORPUS_BYTES, DOCSTRUCT_MAX_FILES, DOCSTRUCT_MAX_NODES, DOCSTRUCT_PARSE_TIMEOUT.\n";
+            echo "Repeat --include/--exclude to shape directory scans. .gitignore is respected by default when Git metadata is available.\n";
+            echo "Limits: DOCSTRUCT_MAX_FILE_BYTES, DOCSTRUCT_MAX_CORPUS_BYTES, DOCSTRUCT_MAX_FILES, DOCSTRUCT_MAX_NODES, DOCSTRUCT_MAX_REFERENCES, DOCSTRUCT_PARSE_TIMEOUT.\n";
             exit(0);
         }
         if ($arg === '--output') {
             $output = $argv[++$i] ?? fail('--output requires a file');
+            continue;
+        }
+        if ($arg === '--include') {
+            $includes[] = $argv[++$i] ?? fail('--include requires a glob');
+            continue;
+        }
+        if ($arg === '--exclude') {
+            $excludes[] = $argv[++$i] ?? fail('--exclude requires a glob');
+            continue;
+        }
+        if ($arg === '--no-gitignore') {
+            $respectGitignore = false;
             continue;
         }
         if ($arg === '--compact') {
@@ -761,21 +876,36 @@ function parseArgs(array $argv): array {
         $path = $arg;
     }
 
-    return [$path, $output, $pretty];
+    return [
+        'path' => $path,
+        'output' => $output,
+        'pretty' => $pretty,
+        'includes' => $includes,
+        'excludes' => $excludes,
+        'respect_gitignore' => $respectGitignore,
+    ];
 }
 
-[$input, $output, $pretty] = parseArgs($argv);
-
-if (!command_exists('pandoc')) {
-    fail('pandoc is required but not installed', 69);
-}
+$options = parseArgs($argv);
+$input = $options['path'];
+$output = $options['output'];
+$pretty = $options['pretty'];
 
 $inputReal = realpath($input);
 if ($inputReal === false) {
     fail("path not found: {$input}", 66);
 }
 $root = is_dir($inputReal) ? $inputReal : dirname($inputReal);
-$files = discoverFiles($inputReal);
+$files = discoverFiles(
+    $inputReal,
+    $options['includes'],
+    $options['excludes'],
+    $options['respect_gitignore']
+);
+if (array_filter($files, static fn(string $file): bool => in_array(supportedFormat($file), ['markdown', 'rst'], true)) !== []
+    && !command_exists('pandoc')) {
+    fail('pandoc is required for Markdown/RST extraction but is not installed', 69);
+}
 
 $records = [];
 $nodes = [];
@@ -842,6 +972,9 @@ foreach ($files as $file) {
     $records[] = $record;
     if (count($nodes) > envUint('DOCSTRUCT_MAX_NODES', DOCSTRUCT_DEFAULT_MAX_NODES)) {
         fail('extracted structure exceeds DOCSTRUCT_MAX_NODES', 65);
+    }
+    if (count($edges) + count($unresolved) > envUint('DOCSTRUCT_MAX_REFERENCES', DOCSTRUCT_DEFAULT_MAX_REFERENCES)) {
+        fail('extracted structure exceeds DOCSTRUCT_MAX_REFERENCES', 65);
     }
 }
 

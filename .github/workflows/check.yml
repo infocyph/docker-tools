@@ -92,7 +92,7 @@ jobs:
             -v "$PWD:/work:ro" \
             -w /work \
             alpine:latest \
-            sh -lc 'apk add --no-cache bash jq yq pandoc php php-mbstring >/dev/null && bash scripts/tests/docstruct-contract.sh'
+            sh -lc 'apk add --no-cache bash git jq yq pandoc php php-mbstring >/dev/null && bash scripts/tests/docstruct-contract.sh'
 
       - name: Graphify minimum fragment compatibility
         run: |
@@ -106,7 +106,7 @@ jobs:
             -w /work \
             alpine:latest \
             sh -lc '
-              apk add --no-cache bash jq yq pandoc php php-mbstring >/dev/null
+              apk add --no-cache bash git jq yq pandoc php php-mbstring >/dev/null
               bash scripts/shells/docstruct.sh scripts/tests/fixtures/docstruct --output /out/docstruct.json
               bash scripts/shells/docstruct.sh graphify /out/docstruct.json --output /out/fragment.json
             '

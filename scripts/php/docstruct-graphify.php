@@ -85,7 +85,7 @@ function absoluteSource(string $root, string $relative): string
     if ($relative === '') {
         graphifyFail('source_file cannot be empty', 65);
     }
-    if (str_starts_with($relative, '/') || preg_match('/^[A-Za-z]:[\\\/]/', $relative) === 1) {
+    if (str_starts_with($relative, '/') || preg_match('~^[A-Za-z]:[\\\\/]~', $relative) === 1) {
         return $relative;
     }
 

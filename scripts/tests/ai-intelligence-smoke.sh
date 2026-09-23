@@ -199,11 +199,17 @@ before="$(wc -l <"$capture_file" | tr -d '[:space:]')"
 doc_context="$(bash "$AIOPS" document-review --file "$tmp/docstruct.json" --context-only)"
 after="$(wc -l <"$capture_file" | tr -d '[:space:]')"
 [[ "$before" == "$after" ]] || fail 'document-review context-only unexpectedly called generation endpoint'
-grep -q '^DOCSTRUCT STRUCTURE (authoritative JSON)
+grep -q '^DOCSTRUCT STRUCTURE (authoritative JSON)$' <<<"$doc_context" ||
+  fail 'document-review context missing authoritative structure boundary'
+grep -q '^BOUNDED SOURCE PASSAGES$' <<<"$doc_context" ||
+  fail 'document-review context missing source-passage boundary'
+grep -q 'runtime delegates provider selection' <<<"$doc_context" ||
+  fail 'document-review source passage missing'
 if grep -q 'secret-token-value' <<<"$doc_context"; then
   fail 'document-review passage leaked a secret value'
 fi
-grep -q 'PASSWORD=\[REDACTED\]' <<<"$doc_context" || fail 'document-review passage was not redacted'
+grep -q 'PASSWORD=\[REDACTED\]' <<<"$doc_context" ||
+  fail 'document-review passage was not redacted'
 
 printf 'docstruct-review\n' >"$mode_file"
 review_patch="$(bash "$AIOPS" document-review --file "$tmp/docstruct.json")"

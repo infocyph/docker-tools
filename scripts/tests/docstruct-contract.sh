@@ -89,4 +89,23 @@ jq -e '
   | any(.target == "../../outside.md" and .reason == "target_outside_root")
 ' "$tmp/escape.json" >/dev/null || fail "outside-root reference was not retained as unresolved"
 
+printf 'docstruct-contract: malformed input handling\n'
+
+mkdir -p "$tmp/malformed"
+printf '{"broken": ' >"$tmp/malformed/bad.json"
+cat >"$tmp/malformed/bad.toml" <<'TOML'
+[tool
+broken = true
+TOML
+
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" "$tmp/malformed" --output "$tmp/malformed.json"
+
+jq -e '
+  (.files | any(.path == "bad.json" and .status == "error"))
+  and (.files | any(.path == "bad.toml" and .status == "error"))
+  and (.warnings | length >= 2)
+' "$tmp/malformed.json" >/dev/null || fail "malformed inputs were not surfaced deterministically"
+
 printf 'docstruct-contract: ok\n'

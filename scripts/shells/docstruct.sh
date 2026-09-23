@@ -4,7 +4,6 @@ set -euo pipefail
 PHP_BIN="${DOCSTRUCT_PHP_BIN:-/usr/bin/php}"
 IMPL="${DOCSTRUCT_IMPL:-/usr/local/lib/docker-tools/docstruct.php}"
 GRAPHIFY_IMPL="${DOCSTRUCT_GRAPHIFY_IMPL:-/usr/local/lib/docker-tools/docstruct-graphify.php}"
-GRAPHIFY_MERGE_IMPL="${DOCSTRUCT_GRAPHIFY_MERGE_IMPL:-/usr/local/lib/docker-tools/docstruct-graphify-merge.php}"
 CONTEXT_IMPL="${DOCSTRUCT_CONTEXT_IMPL:-/usr/local/lib/docker-tools/docstruct-context.php}"
 
 if [[ ! -r "$IMPL" ]]; then

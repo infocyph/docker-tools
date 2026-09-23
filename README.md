@@ -122,7 +122,7 @@ Published GitHub releases are the immutable source for versioned images.
 - RST gets a narrow deterministic Sphinx supplement for explicit targets, directives, `include`, `toctree`, and typed roles
 - YAML/JSON/TOML extraction records key hierarchy only; scalar values are not copied into the sidecar by default
 - local document links/includes/toctree targets are resolved mechanically when possible
-- unresolved semantic symbol references remain explicit for later code-index/AI review
+- typed code-symbol references remain explicit and unresolved; Graphify already owns code AST extraction and any later reconciliation
 - parser work is bounded by file/corpus/file-count/node-count/time limits
 
 ---
@@ -217,6 +217,11 @@ aiops troubleshoot --stream
 
 # explicitly supplied review inputs
 aiops review --file ./nginx.conf
+
+# deterministic document structure -> validated additive semantic patch
+docstruct docs/ --output /tmp/docstruct.json
+aiops document-review --file /tmp/docstruct.json
+
 aiops graphify --file ./graphify-output.json
 
 # repository metadata only; it does not implicitly send file/diff contents
@@ -234,7 +239,8 @@ AI safety contract:
 - `.env`, `.ssh`, private keys, credential/secret files, P12/PFX, and binary inputs are refused for automatic file ingestion;
 - monitor/log/config/repository data is treated as untrusted data inside a fixed prompt boundary;
 - raw prompts/responses are not persisted by default;
-- model output is never executed as shell, SQL, code, or Docker commands.
+- model output is never executed as shell, SQL, code, or Docker commands;
+- `aiops document-review` never rewrites the deterministic sidecar; it returns a separately versioned additive patch and rejects unknown source files or node IDs.
 
 The Admin Panel exposes an explicit **AI Assistant** page. It performs only a provider availability check on load; analysis starts only after the user presses **Run Analysis**. The response shows the redacted context that was supplied to the provider and can be cancelled/bounded by the UI/server timeout.
 

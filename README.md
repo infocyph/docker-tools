@@ -204,6 +204,10 @@ DOCSTRUCT_MAX_FILES=1000
 DOCSTRUCT_MAX_NODES=20000
 DOCSTRUCT_MAX_REFERENCES=50000
 DOCSTRUCT_PARSE_TIMEOUT=15
+DOCSTRUCT_REVIEW_FILE_BYTES=16384
+DOCSTRUCT_REVIEW_TOTAL_BYTES=262144
+# optional explicit review-workspace boundary:
+DOCSTRUCT_REVIEW_ROOT=/workspace
 ```
 
 Directory scans respect `.gitignore` by default when Git metadata is available; `--no-gitignore` disables that behavior. Repeatable `--include` and `--exclude` globs provide explicit corpus shaping. Symlinked corpus entries are not followed, and references that would escape the supplied root remain unresolved.

@@ -51,6 +51,7 @@ assert_present 'nano-syntax pandoc' Dockerfile
 assert_present 'COPY scripts/php/docstruct\.php /usr/local/lib/docker-tools/docstruct\.php' Dockerfile
 assert_present 'COPY scripts/php/docstruct-context\.php /usr/local/lib/docker-tools/docstruct-context\.php' Dockerfile
 assert_present 'COPY scripts/php/docstruct-graphify\.php /usr/local/lib/docker-tools/docstruct-graphify\.php' Dockerfile
+assert_present 'COPY scripts/php/docstruct-graphify-merge\.php /usr/local/lib/docker-tools/docstruct-graphify-merge\.php' Dockerfile
 assert_present 'COPY scripts/shells/docstruct\.sh /usr/local/bin/docstruct' Dockerfile
 assert_present 'need_cmd flock' scripts/shells/env-store.sh
 

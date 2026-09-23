@@ -7,6 +7,7 @@ DOCSTRUCT="${DOCSTRUCT_BIN:-$ROOT/scripts/shells/docstruct.sh}"
 IMPL="${DOCSTRUCT_IMPL:-$ROOT/scripts/php/docstruct.php}"
 GRAPHIFY_IMPL="${DOCSTRUCT_GRAPHIFY_IMPL:-$ROOT/scripts/php/docstruct-graphify.php}"
 GRAPHIFY_MERGE_IMPL="${DOCSTRUCT_GRAPHIFY_MERGE_IMPL:-$ROOT/scripts/php/docstruct-graphify-merge.php}"
+CONTEXT_IMPL="${DOCSTRUCT_CONTEXT_IMPL:-$ROOT/scripts/php/docstruct-context.php}"
 PHP_BIN="${DOCSTRUCT_PHP_BIN:-$(command -v php || true)}"
 
 fail() {
@@ -75,6 +76,8 @@ jq -e --arg base_sha256 "$base_hash" '
   and .base_schema == "docker-tools.docstruct/v1"
   and .base_sha256 == $base_sha256
   and (.passages | length == 4)
+  and (.chunks | type == "array" and length >= 1)
+  and (.chunks | all((.files | length) <= 4 and .bytes <= 49152))
   and (.passages | all(.format == "markdown" or .format == "rst"))
   and ([.passages[].source_file] | index("settings.ini") == null)
   and ([.passages[].source_file] | index("config.json") == null)

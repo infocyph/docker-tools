@@ -47,6 +47,9 @@ assert_present 'lazydocker/releases/download/\$\{lazy_tag\}' Dockerfile
 assert_present 'checksums\.txt' Dockerfile
 assert_present 'def version_parts: split\("\."\) \| map\(tonumber\);' Dockerfile
 assert_present 'netcat-openbsd gzip flock' Dockerfile
+assert_present 'nano-syntax pandoc' Dockerfile
+assert_present 'COPY scripts/php/docstruct\.php /usr/local/lib/docker-tools/docstruct\.php' Dockerfile
+assert_present 'COPY scripts/shells/docstruct\.sh /usr/local/bin/docstruct' Dockerfile
 assert_present 'need_cmd flock' scripts/shells/env-store.sh
 
 # Preserve baseline image/runtime behavior while hardening lifecycle and health.

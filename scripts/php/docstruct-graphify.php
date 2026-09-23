@@ -379,6 +379,13 @@ function parseGraphifyArgs(array $argv): array
             continue;
         }
         if ($arg === '--source-root') {
+            $sourceRoot = $argv[++$i] ?? graphifyFail('--source-root requires a path');
+            if ($sourceRoot === '') {
+                graphifyFail('--source-root cannot be empty');
+            }
+            continue;
+        }
+        if ($arg === '--source-root') {
             $sourceRoot = $argv[++$i] ?? graphifyFail('--source-root requires an absolute path');
             continue;
         }

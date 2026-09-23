@@ -1211,7 +1211,7 @@ the deterministic extractor should emit:
 
 without pretending it can prove the final code symbol if no code index was supplied.
 
-A future Graphify integration can resolve these against Graphify's code AST nodes.
+docstruct deliberately stops at the typed reference text. Graphify already owns code AST extraction through its code-only phase, so any future symbol reconciliation belongs in Graphify rather than docker-tools.
 
 ### 15.9.3 No guessing
 
@@ -1559,7 +1559,7 @@ Status: **partially implemented**
 - [x] toctree;
 - [x] unresolved reference inventory;
 - [x] canonical document/anchor target IDs;
-- [ ] code-symbol resolution against an external code index.
+- [x] typed code-symbol references remain explicit and unresolved; code-symbol resolution is out of scope for docker-tools and belongs to Graphify's existing code graph.
 
 Exit criteria:
 
@@ -1655,6 +1655,8 @@ all docs -> LLM -> complete graph
 
 Do not use this effort to:
 
+- parse or index PHP/code ASTs in docker-tools; Graphify already owns code-only structural extraction;
+- resolve documentation symbol references against source code inside docker-tools;
 - turn docker-tools into a second Graphify;
 - embed an LLM in docker-tools;
 - move inference dependencies into Tools;

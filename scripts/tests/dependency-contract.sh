@@ -49,6 +49,7 @@ assert_present 'def version_parts: split\("\."\) \| map\(tonumber\);' Dockerfile
 assert_present 'netcat-openbsd gzip flock' Dockerfile
 assert_present 'nano-syntax pandoc' Dockerfile
 assert_present 'COPY scripts/php/docstruct\.php /usr/local/lib/docker-tools/docstruct\.php' Dockerfile
+assert_present 'COPY scripts/php/docstruct-graphify\.php /usr/local/lib/docker-tools/docstruct-graphify\.php' Dockerfile
 assert_present 'COPY scripts/shells/docstruct\.sh /usr/local/bin/docstruct' Dockerfile
 assert_present 'need_cmd flock' scripts/shells/env-store.sh
 

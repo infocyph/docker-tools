@@ -143,6 +143,45 @@ set -e
 grep -q 'does not belong to this docstruct artifact' "$tmp/graphify-review.err" ||
   fail "mismatched Graphify review error missing"
 
+printf 'docstruct-contract: scan selection and gitignore\n'
+
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" "$FIXTURES" --include '*.rst' --exclude 'included.rst' --output "$tmp/filtered.json"
+jq -e '
+  .stats.files == 2
+  and (.files | all(.format == "rst"))
+  and ([.files[].path] | index("included.rst") == null)
+' "$tmp/filtered.json" >/dev/null || fail "include/exclude scan filters failed"
+
+if command -v git >/dev/null 2>&1; then
+  mkdir -p "$tmp/gitignored"
+  git -C "$tmp/gitignored" init -q
+  printf 'ignored.md\n' >"$tmp/gitignored/.gitignore"
+  printf '# Keep\n' >"$tmp/gitignored/keep.md"
+  printf '# Ignore\n' >"$tmp/gitignored/ignored.md"
+
+  DOCSTRUCT_IMPL="$IMPL" DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+    bash "$DOCSTRUCT" "$tmp/gitignored" --output "$tmp/gitignored-default.json"
+  jq -e '.stats.files == 1 and .files[0].path == "keep.md"' "$tmp/gitignored-default.json" >/dev/null ||
+    fail "default gitignore filtering failed"
+
+  DOCSTRUCT_IMPL="$IMPL" DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+    bash "$DOCSTRUCT" "$tmp/gitignored" --no-gitignore --output "$tmp/gitignored-all.json"
+  jq -e '.stats.files == 2' "$tmp/gitignored-all.json" >/dev/null ||
+    fail "--no-gitignore did not restore ignored document"
+fi
+
+set +e
+DOCSTRUCT_MAX_REFERENCES=1 \
+DOCSTRUCT_IMPL="$IMPL" DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" "$FIXTURES/sample.md" >/dev/null 2>"$tmp/reference-limit.err"
+rc=$?
+set -e
+[[ "$rc" -eq 65 ]] || fail "reference cap returned $rc instead of 65"
+grep -q 'DOCSTRUCT_MAX_REFERENCES' "$tmp/reference-limit.err" || fail "reference cap error missing"
+
 printf 'docstruct-contract: security bounds\n'
 
 mkdir -p "$tmp/security/root"

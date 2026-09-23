@@ -11,8 +11,8 @@ fail() {
 
 assert_absent() {
   local pattern="$1"
-  if grep -RInE --exclude-dir=.git --exclude='docker-tools-hardening-ai-plan.md' "$pattern" Dockerfile scripts .github README.md >/dev/null 2>&1; then
-    grep -RInE --exclude-dir=.git --exclude='docker-tools-hardening-ai-plan.md' "$pattern" Dockerfile scripts .github README.md >&2 || true
+  if grep -RInE --exclude-dir=.git "$pattern" Dockerfile scripts .github README.md >/dev/null 2>&1; then
+    grep -RInE --exclude-dir=.git "$pattern" Dockerfile scripts .github README.md >&2 || true
     fail "forbidden pattern present: $pattern"
   fi
 }
@@ -47,6 +47,12 @@ assert_present 'lazydocker/releases/download/\$\{lazy_tag\}' Dockerfile
 assert_present 'checksums\.txt' Dockerfile
 assert_present 'def version_parts: split\("\."\) \| map\(tonumber\);' Dockerfile
 assert_present 'netcat-openbsd gzip flock' Dockerfile
+assert_present 'nano-syntax pandoc' Dockerfile
+assert_present 'COPY scripts/php/docstruct\.php /usr/local/lib/docker-tools/docstruct\.php' Dockerfile
+assert_present 'COPY scripts/php/docstruct-context\.php /usr/local/lib/docker-tools/docstruct-context\.php' Dockerfile
+assert_present 'COPY scripts/php/docstruct-graphify\.php /usr/local/lib/docker-tools/docstruct-graphify\.php' Dockerfile
+assert_present 'COPY scripts/php/docstruct-graphify-merge\.php /usr/local/lib/docker-tools/docstruct-graphify-merge\.php' Dockerfile
+assert_present 'COPY scripts/shells/docstruct\.sh /usr/local/bin/docstruct' Dockerfile
 assert_present 'need_cmd flock' scripts/shells/env-store.sh
 
 # Preserve baseline image/runtime behavior while hardening lifecycle and health.

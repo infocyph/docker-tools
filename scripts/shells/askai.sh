@@ -30,7 +30,7 @@ usage() {
   cat <<'USAGE'
 Usage: askai [options] [prompt...]
 
-Pure LocalDevStack AI client. The common provider endpoint defaults to http://llm:11434.
+Pure LocalDevStack AI client. The provider endpoint is resolved from LDS_AI_RUNTIME: npu -> llm-fastflow:11434, otherwise llm-ollama:11434.
 
 Options:
   -f, --file PATH       Add a non-sensitive text file as untrusted context.
@@ -139,7 +139,7 @@ if ((status_only)); then
   think_status=auto
   [[ "$LDS_AI_THINK" == true ]] && think_status=on
   [[ "$LDS_AI_THINK" == false ]] && think_status=off
-  printf 'enabled=%s\nprovider=%s\nurl=%s\nthink=%s\n' "$LDS_AI_ENABLED" "$LDS_AI_PROVIDER" "$LDS_AI_URL" "$think_status"
+  printf 'enabled=%s\nruntime=%s\nprovider=%s\nurl=%s\nthink=%s\n' "$LDS_AI_ENABLED" "$LDS_AI_RUNTIME" "$LDS_AI_PROVIDER" "$LDS_AI_URL" "$think_status"
   if [[ "$LDS_AI_ENABLED" == 0 ]]; then
     printf 'available=0\nmodel=\n'
     exit 0

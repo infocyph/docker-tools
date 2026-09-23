@@ -32,10 +32,12 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   test -x /usr/local/bin/lazydocker
   test -x /usr/local/bin/composer
   test -x /usr/local/bin/gitx
+  test -x /usr/local/bin/docstruct
+  command -v pandoc >/dev/null
   test -x /usr/local/bin/askai
   test -x /usr/local/bin/aiops
   test -r "$LDS_AI_PROVIDER_LIB"
-  test "$LDS_AI_URL" = "http://llm:11434"
+  test "$LDS_AI_RUNTIME" = "cpu"
   test -x /usr/local/bin/chromacat
   test -x /usr/local/bin/sqlitex
   test -x /usr/local/bin/netx
@@ -69,6 +71,13 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   lazydocker --version >/dev/null
   composer --version --no-ansi >/dev/null
   gitx --version >/dev/null
+  docstruct --help >/dev/null
+  DOCSTRUCT_BIN=/usr/local/bin/docstruct \
+  DOCSTRUCT_IMPL=/usr/local/lib/docker-tools/docstruct.php \
+  DOCSTRUCT_CONTEXT_IMPL=/usr/local/lib/docker-tools/docstruct-context.php \
+  DOCSTRUCT_GRAPHIFY_IMPL=/usr/local/lib/docker-tools/docstruct-graphify.php \
+  DOCSTRUCT_GRAPHIFY_MERGE_IMPL=/usr/local/lib/docker-tools/docstruct-graphify-merge.php \
+  bash /etc/share/scripts/tests/docstruct-contract.sh >/dev/null
   askai --help >/dev/null
   aiops --help >/dev/null
   status --help >/dev/null

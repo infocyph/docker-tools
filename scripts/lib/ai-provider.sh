@@ -23,10 +23,32 @@ ai_normalize_think_mode() {
   esac
 }
 
+ai_runtime_provider() {
+  case "${1,,}" in
+    npu) printf '%s' fastflow ;;
+    ""|cpu|nvidia|amd) printf '%s' ollama ;;
+    *)
+      ai_error "unsupported LDS_AI_RUNTIME=${1:-} (expected cpu, nvidia, amd, or npu)"
+      return 64
+      ;;
+  esac
+}
+
+ai_runtime_url() {
+  case "${1,,}" in
+    npu) printf '%s' 'http://llm-fastflow:11434' ;;
+    ""|cpu|nvidia|amd) printf '%s' 'http://llm-ollama:11434' ;;
+    *)
+      ai_error "unsupported LDS_AI_RUNTIME=${1:-} (expected cpu, nvidia, amd, or npu)"
+      return 64
+      ;;
+  esac
+}
+
 ai_config_init() {
   : "${LDS_AI_ENABLED:=auto}"
-  : "${LDS_AI_PROVIDER:=llm}"
-  : "${LDS_AI_URL:=http://llm:11434}"
+  : "${LDS_AI_RUNTIME:=cpu}"
+  : "${LDS_AI_URL:=}"
   : "${LDS_AI_MODEL:=}"
   : "${LDS_AI_THINK:=}"
   : "${LDS_AI_CONNECT_TIMEOUT:=2}"
@@ -43,10 +65,11 @@ ai_config_init() {
     *) ai_error "invalid LDS_AI_ENABLED=$LDS_AI_ENABLED (expected auto, 0, or 1)"; return 64 ;;
   esac
 
-  case "$LDS_AI_PROVIDER" in
-    llm) ;;
-    *) ai_error "unsupported LDS_AI_PROVIDER=$LDS_AI_PROVIDER (expected llm)"; return 64 ;;
-  esac
+  LDS_AI_RUNTIME="${LDS_AI_RUNTIME,,}"
+  LDS_AI_PROVIDER="$(ai_runtime_provider "$LDS_AI_RUNTIME")" || return $?
+  if [[ -z "$LDS_AI_URL" ]]; then
+    LDS_AI_URL="$(ai_runtime_url "$LDS_AI_RUNTIME")" || return $?
+  fi
 
   if [[ "$LDS_AI_URL" == *$'\n'* || "$LDS_AI_URL" == *$'\r'* || "$LDS_AI_URL" == *' '* || "$LDS_AI_URL" == *'@'* ]]; then
     ai_error 'LDS_AI_URL contains unsupported whitespace or credentials'
@@ -90,7 +113,7 @@ ai_config_init() {
 }
 
 ai__cache_key() {
-  printf '%s' "${LDS_AI_PROVIDER}|${LDS_AI_URL}" | sha256sum | awk '{print $1}'
+  printf '%s' "${LDS_AI_RUNTIME}|${LDS_AI_PROVIDER}|${LDS_AI_URL}" | sha256sum | awk '{print $1}'
 }
 
 ai__cache_paths() {

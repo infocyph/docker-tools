@@ -104,7 +104,9 @@ Published GitHub releases are the immutable source for versioned images.
 ### 9) Optional local AI consumer
 - `docker-tools` never embeds, starts, pulls, or stores Ollama models
 - The active provider/runtime is either `docker-llm-ollama` or `docker-llm-fastflow`
-- Container-to-container common endpoint: `http://llm:11434`
+- Container-to-container endpoint is resolved from `LDS_AI_RUNTIME`:
+  - `npu` -> `http://llm-fastflow:11434/v1`
+  - `cpu|nvidia|amd` -> `http://llm-ollama:11434/v1`
 - User-facing endpoint remains Nginx-owned at `https://llm.localhost`
 - `askai` provides direct prompt/file/stdin access with per-request `--think`, `--no-think`, and `--think-auto`
 - `aiops` exposes the same per-request thinking switches for diagnostic/review analysis
@@ -114,6 +116,14 @@ Published GitHub releases are the immutable source for versioned images.
 - `gitx ai-commit` remains implemented by Toolset; docker-tools only forces its local Ollama mode and disables Gemini/cloud fallback
 - when the active `llm` backend is FastFlow, current Toolset `gitx ai-commit` is not backend-compatible until Toolset gains a generic OpenAI provider
 - AI output is advisory only and is never auto-executed
+
+### 10) Deterministic document structure
+- `docstruct` extracts Markdown/RST structure through Pandoc without requiring an LLM
+- RST gets a narrow deterministic Sphinx supplement for explicit targets, directives, `include`, `toctree`, and typed roles
+- YAML/JSON/TOML extraction records key hierarchy only; scalar values are not copied into the sidecar by default
+- local document links/includes/toctree targets are resolved mechanically when possible
+- typed code-symbol references remain explicit and unresolved; Graphify already owns code AST extraction and any later reconciliation
+- parser work is bounded by file/corpus/file-count/node-count/time limits
 
 ---
 
@@ -135,6 +145,7 @@ Published GitHub releases are the immutable source for versioned images.
 | `domain-which` | Resolve app/container/profile/docroot for a domain (supports `--json`) |
 | `es-policy` | Bootstrap/update Elasticsearch ILM + templates + Kibana data views |
 | `gitx` | Git helper CLI; AI commit mode is pinned to local Ollama when enabled |
+| `docstruct` | Deterministic Markdown/RST/YAML/JSON/TOML structural extractor |
 | `askai` | Direct optional local-LLM client with file/stdin/JSON/stream support |
 | `aiops` | Bounded AI explanations for stack diagnostics, troubleshooting, review, and Graphify output |
 | `chromacat` | Colorized output |
@@ -144,16 +155,80 @@ Published GitHub releases are the immutable source for versioned images.
 
 ---
 
+## 📚 Deterministic document structure
+
+`docstruct` creates a versioned `docker-tools.docstruct/v1` JSON sidecar without contacting an LLM.
+
+```bash
+docstruct README.md
+docstruct docs/
+docstruct docs/ --include '*.md' --include '*.rst'
+docstruct docs/ --exclude 'generated/*' --output /tmp/docstruct.json
+docstruct docs/ --no-gitignore --compact
+```
+
+Optional semantic review remains separate and additive:
+
+```bash
+docstruct docs/ --output /tmp/docstruct.json
+aiops document-review --file /tmp/docstruct.json > /tmp/docstruct-review.json
+docstruct graphify /tmp/docstruct.json \
+  --review /tmp/docstruct-review.json \
+  --source-root /home/user/project \
+  --output /tmp/docstruct.graphify.json
+```
+
+The last command exports a Graphify-compatible semantic fragment containing only
+mechanically safe non-code facts plus validated additive review nodes/edges. When
+docstruct ran inside `SERVER_TOOLS` against `/app`, `--source-root` can remap
+provenance to the host project root used by host Graphify without requiring that host
+path to exist inside the container. It does not modify `graphify-out/graph.json`,
+Graphify caches, or manifests. CI validates the emitted
+fragment with the real minimum supported Graphify (`graphifyy==0.9.65`) via
+`graphify merge-chunks`.
+
+Current Graphify does not yet expose a supported `extract --semantic-fragment` (or
+equivalent) ingestion flag that owns incremental manifest/cache replacement semantics.
+Until such an interface exists, docker-tools stops at the validated fragment boundary.
+
+Current deterministic coverage:
+
+- Markdown headings, links, anchors, and code blocks through Pandoc;
+- RST headings/code blocks through Pandoc plus explicit Sphinx/RST targets, directives, `include`, `toctree`, and `:doc:`/`:ref:`/`:class:`/`:func:`/`:meth:`/`:mod:` references;
+- YAML/JSON/TOML key hierarchy without scalar-value export;
+- resolution of provable local document links/includes/toctree references;
+- source evidence and explicit unresolved references;
+- bounded review context is split into small file/byte-limited chunks before any LLM call;
+- Graphify export uses a reserved `docstruct_` namespace and a safe replacement merge that preserves code nodes.
+
+Resource controls:
+
+```text
+DOCSTRUCT_MAX_FILE_BYTES=2097152
+DOCSTRUCT_MAX_CORPUS_BYTES=33554432
+DOCSTRUCT_MAX_FILES=1000
+DOCSTRUCT_MAX_NODES=20000
+DOCSTRUCT_MAX_REFERENCES=50000
+DOCSTRUCT_PARSE_TIMEOUT=15
+DOCSTRUCT_REVIEW_FILE_BYTES=32768
+DOCSTRUCT_REVIEW_TOTAL_BYTES=1048576
+DOCSTRUCT_REVIEW_CHUNK_BYTES=49152
+DOCSTRUCT_REVIEW_CHUNK_FILES=4
+# optional explicit review-workspace boundary:
+DOCSTRUCT_REVIEW_ROOT=/workspace
+```
+
+Directory scans respect `.gitignore` by default when Git metadata is available; `--no-gitignore` disables that behavior. Repeatable `--include` and `--exclude` globs provide explicit corpus shaping. Symlinked corpus entries are not followed, and references that would escape the supplied root remain unresolved.
+
 ## 🤖 Optional local AI
 
-AI is an optional consumer feature. All ordinary Tools/admin/monitor behavior works without `llm-ollama`.
+AI is an optional consumer feature. All ordinary Tools/admin/monitor/document-structure behavior works without an LLM provider.
 
 Default provider contract:
 
 ```text
 LDS_AI_ENABLED=auto
-LDS_AI_PROVIDER=llm
-LDS_AI_URL=http://llm:11434
+LDS_AI_RUNTIME=cpu
 LDS_AI_MODEL=
 ```
 
@@ -176,6 +251,11 @@ aiops troubleshoot --stream
 
 # explicitly supplied review inputs
 aiops review --file ./nginx.conf
+
+# deterministic document structure -> validated additive semantic patch
+docstruct docs/ --output /tmp/docstruct.json
+aiops document-review --file /tmp/docstruct.json
+
 aiops graphify --file ./graphify-output.json
 
 # repository metadata only; it does not implicitly send file/diff contents
@@ -193,7 +273,8 @@ AI safety contract:
 - `.env`, `.ssh`, private keys, credential/secret files, P12/PFX, and binary inputs are refused for automatic file ingestion;
 - monitor/log/config/repository data is treated as untrusted data inside a fixed prompt boundary;
 - raw prompts/responses are not persisted by default;
-- model output is never executed as shell, SQL, code, or Docker commands.
+- model output is never executed as shell, SQL, code, or Docker commands;
+- `aiops document-review` never rewrites the deterministic sidecar; it returns a separately versioned additive patch and rejects unknown source files or node IDs.
 
 The Admin Panel exposes an explicit **AI Assistant** page. It performs only a provider availability check on load; analysis starts only after the user presses **Run Analysis**. The response shows the redacted context that was supplied to the provider and can be cancelled/bounded by the UI/server timeout.
 
@@ -830,8 +911,8 @@ docker logs -f docker-tools 2>/dev/null | awk -v p="__HOST_NOTIFY__" '
 | `ADMIN_PANEL_TOKEN`     | (empty)                            | stack-scoped control token for mutations/sensitive downloads |
 | `ADMIN_PANEL_LOG_ROOTS` | `/global/log`                     | colon-separated admin log roots; legacy `LOGVIEW_ROOTS` is accepted as a compatibility fallback |
 | `LDS_AI_ENABLED`        | `auto`                            | `auto`, `0`, or `1`; AI remains optional |
-| `LDS_AI_PROVIDER`       | `llm`                             | provider-neutral local LLM identity |
-| `LDS_AI_URL`            | `http://llm:11434`                | common OpenAI-compatible internal endpoint |
+| `LDS_AI_RUNTIME`        | `cpu`                             | selects `llm-fastflow` for `npu`, otherwise `llm-ollama` |
+| `LDS_AI_URL`            | derived                           | optional override; normally resolved from `LDS_AI_RUNTIME` |
 | `LDS_AI_MODEL`          | (empty)                            | explicit model override; required when installed-model choice is ambiguous |
 | `LDS_AI_THINK`          | (empty)                            | default thinking override: empty/provider default, `true`, or `false`; request-level controls can override it |
 | `LDS_AI_CONNECT_TIMEOUT` | `2`                              | provider connect timeout seconds |

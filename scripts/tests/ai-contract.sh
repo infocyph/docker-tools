@@ -19,23 +19,24 @@ for file in "$PROVIDER" "$ASKAI" "$GITX" "$ENTRYPOINT" "$HEALTH"; do
   [[ -s "$file" ]] || fail "missing AI contract input: $file"
 done
 
-if grep -REn --exclude='docker-tools-hardening-ai-plan.md' --exclude='ai-contract.sh' \
+if grep -REn --exclude='ai-contract.sh' \
   'ollama[[:space:]]+serve|ollama[[:space:]]+pull|ollama/ollama|EXPOSE[[:space:]]+11434' \
   Dockerfile scripts .github 2>/dev/null; then
   fail 'embedded Ollama runtime/lifecycle contract reappeared'
 fi
 
-grep -q 'LDS_AI_URL=http://llm:11434' Dockerfile || fail 'Docker image AI URL default is not common llm:11434'
-grep -q 'LDS_AI_URL:=http://llm:11434' "$PROVIDER" || fail 'provider AI URL default is not common llm:11434'
+grep -q 'LDS_AI_RUNTIME=cpu' Dockerfile || fail 'Docker image AI runtime default is not cpu'
+grep -q "npu) printf '%s' fastflow" "$PROVIDER" || fail 'NPU to FastFlow provider mapping missing'
+grep -q "cpu|nvidia|amd) printf '%s' ollama" "$PROVIDER" || fail 'CPU/GPU to Ollama provider mapping missing'
+grep -q "npu) printf '%s' 'http://llm-fastflow:11434'" "$PROVIDER" || fail 'FastFlow direct service URL missing'
+grep -q "cpu|nvidia|amd) printf '%s' 'http://llm-ollama:11434'" "$PROVIDER" || fail 'Ollama direct service URL missing'
 if grep -R -n 'https://llm\.localhost' "$PROVIDER" "$ASKAI" "$GITX" "$ENTRYPOINT"; then
   fail 'container-side AI client references user-facing HTTPS route instead of Docker DNS'
 fi
-
-grep -q 'LDS_AI_PROVIDER:=llm' "$PROVIDER" || fail 'common llm provider default missing'
 grep -q 'LDS_AI_THINK:=' "$PROVIDER" || fail 'common thinking default missing'
 grep -q 'LDS_AI_THINK=' Dockerfile || fail 'Docker image common thinking env missing'
-grep -q 'export LDS_AI_ENABLED LDS_AI_PROVIDER LDS_AI_URL LDS_AI_MODEL LDS_AI_THINK' "$ENTRYPOINT" || fail 'entrypoint does not export common thinking setting'
-grep -q 'unsupported LDS_AI_PROVIDER' "$PROVIDER" || fail 'unsupported provider guard missing'
+grep -q 'export LDS_AI_ENABLED LDS_AI_RUNTIME LDS_AI_PROVIDER LDS_AI_URL LDS_AI_MODEL LDS_AI_THINK' "$ENTRYPOINT" || fail 'entrypoint does not export runtime-derived AI routing'
+grep -q 'unsupported LDS_AI_RUNTIME' "$PROVIDER" || fail 'unsupported runtime guard missing'
 grep -q '/v1/models' "$PROVIDER" || fail 'OpenAI models preflight missing'
 grep -q '/v1/chat/completions' "$PROVIDER" || fail 'OpenAI chat-completions transport missing'
 grep -q 'reasoning_effort:"high"' "$PROVIDER" || fail 'thinking-on OpenAI request mapping missing'
@@ -50,8 +51,9 @@ if grep -REn 'api\.openai\.com|generativelanguage\.googleapis\.com|anthropic\.co
   fail 'implicit external AI provider endpoint added'
 fi
 
+grep -q 'LDS_AI_PROVIDER" != ollama' "$GITX" || fail 'gitx wrapper does not reject FastFlow explicitly'
 grep -q 'GITX_AI_PROVIDER=ollama' "$GITX" || fail 'gitx wrapper does not force Toolset local Ollama mode'
-grep -q 'GITX_OLLAMA_URL="$LDS_AI_URL"' "$GITX" || fail 'gitx wrapper does not point Toolset at the LocalDevStack llm endpoint'
+grep -q 'GITX_OLLAMA_URL="$LDS_AI_URL"' "$GITX" || fail 'gitx wrapper does not point Toolset at the selected Ollama endpoint'
 grep -q 'selected_model="$(ai_model)"' "$GITX" || fail 'gitx wrapper does not pin deterministic local model selection'
 grep -q 'unset GEMINI_API_KEY' "$GITX" || fail 'gitx wrapper does not prevent Gemini/cloud fallback'
 grep -q '/usr/local/libexec/gitx-toolset' "$GITX" || fail 'gitx Toolset delegation path missing'

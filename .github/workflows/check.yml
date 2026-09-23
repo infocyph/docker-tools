@@ -52,6 +52,9 @@ jobs:
           php -l scripts/tests/process-runner-smoke.php >/dev/null
           php -l scripts/tests/admin-monitoring-smoke.php >/dev/null
           php -l scripts/tests/fake-llm-router.php >/dev/null
+          while IFS= read -r -d '' file; do
+            php -l "$file" >/dev/null
+          done < <(find scripts/php -type f -name '*.php' -print0)
 
       - name: Dependency and architecture contracts
         run: bash scripts/tests/dependency-contract.sh
@@ -82,6 +85,41 @@ jobs:
 
       - name: AI intelligence and admin smoke
         run: bash scripts/tests/ai-intelligence-smoke.sh
+
+      - name: Document structure contract on Alpine
+        run: |
+          docker run --rm \
+            -v "$PWD:/work:ro" \
+            -w /work \
+            alpine:latest \
+            sh -lc 'apk add --no-cache bash git jq yq pandoc php php-mbstring >/dev/null && bash scripts/tests/docstruct-contract.sh'
+
+      - name: Graphify minimum fragment compatibility
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          docker run --rm \
+            -v "$PWD:/work:ro" \
+            -v "$tmp:/out" \
+            -w /work \
+            alpine:latest \
+            sh -lc '
+              apk add --no-cache bash git jq yq pandoc php php-mbstring >/dev/null
+              bash scripts/shells/docstruct.sh scripts/tests/fixtures/docstruct --output /out/docstruct.json
+              bash scripts/shells/docstruct.sh graphify /out/docstruct.json --output /out/fragment.json
+            '
+
+          python3 -m venv "$tmp/venv"
+          "$tmp/venv/bin/pip" install --quiet 'graphifyy==0.9.65'
+          "$tmp/venv/bin/graphify" merge-chunks "$tmp/fragment.json" --out "$tmp/merged.json"
+
+          jq -e '
+            (.nodes | length > 0)
+            and (.nodes | all(.file_type == "document"))
+            and (.edges | all(.confidence == "EXTRACTED"))
+          ' "$tmp/merged.json" >/dev/null
 
       - name: Env-store concurrency and corruption recovery
         run: bash scripts/tests/env-store-concurrency.sh
@@ -173,8 +211,11 @@ jobs:
             command -v php >/dev/null &&
             test -x /usr/local/libexec/gitx-toolset &&
             test -r "$LDS_AI_PROVIDER_LIB" &&
-            test "$LDS_AI_PROVIDER" = "llm" &&
-            test "$LDS_AI_URL" = "http://llm:11434" &&
+            test "$LDS_AI_RUNTIME" = "cpu" &&
+            source "$LDS_AI_PROVIDER_LIB" &&
+            ai_config_init &&
+            test "$LDS_AI_PROVIDER" = "ollama" &&
+            test "$LDS_AI_URL" = "http://llm-ollama:11434" &&
             mkcert -version >/dev/null &&
             lazydocker --version >/dev/null &&
             gitx --version >/dev/null &&
@@ -226,7 +267,7 @@ jobs:
           done
 
           docker exec "$name" tools-healthcheck
-          docker exec "$name" bash -c 'test "$LDS_AI_ENABLED" = auto && test "$LDS_AI_URL" = http://llm:11434'
+          docker exec "$name" bash -c 'test "$LDS_AI_ENABLED" = auto && test "$LDS_AI_RUNTIME" = cpu && source "$LDS_AI_PROVIDER_LIB" && ai_config_init && test "$LDS_AI_PROVIDER" = ollama && test "$LDS_AI_URL" = http://llm-ollama:11434'
           docker exec "$name" sh -lc 'tr "\0" "\n" </proc/1/environ | grep -qx "NOTIFY_TOKEN="'
           docker exec "$name" sh -lc 'tr "\0" " " </proc/1/cmdline | grep -q notifierd'
 
@@ -313,7 +354,11 @@ jobs:
             command -v flock >/dev/null &&
             test -x /usr/local/libexec/gitx-toolset &&
             test -r "$LDS_AI_PROVIDER_LIB" &&
-            test "$LDS_AI_URL" = "http://llm:11434" &&
+            test "$LDS_AI_RUNTIME" = "cpu" &&
+            source "$LDS_AI_PROVIDER_LIB" &&
+            ai_config_init &&
+            test "$LDS_AI_PROVIDER" = "ollama" &&
+            test "$LDS_AI_URL" = "http://llm-ollama:11434" &&
             mkcert -version >/dev/null &&
             lazydocker --version >/dev/null &&
             gitx --version >/dev/null &&

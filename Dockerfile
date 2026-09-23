@@ -194,8 +194,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     SOPS_GLOBAL_DIR=/etc/share/sops/global \
     SOPS_REPO_DIR=/etc/share/vhosts/sops \
     LDS_AI_ENABLED=auto \
-    LDS_AI_PROVIDER=llm \
-    LDS_AI_URL=http://llm:11434 \
+    LDS_AI_RUNTIME=cpu \
     LDS_AI_MODEL= \
     LDS_AI_THINK= \
     LDS_AI_CONNECT_TIMEOUT=2 \
@@ -231,7 +230,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
 RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
-      docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax \
+      docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax pandoc \
       bind-tools iproute2 traceroute mtr netcat-openbsd gzip flock \
       lnav multitail less php php-mbstring php-curl php-zip php-phar php-openssl php-common \
   && update-ca-certificates \
@@ -267,6 +266,11 @@ COPY --from=fetch /out/composer /usr/local/bin/composer
 COPY --from=fetch /out/runtime-versions.json /etc/share/runtime-versions.json
 
 COPY scripts/lib/ai-provider.sh /usr/local/lib/docker-tools/ai-provider.sh
+COPY scripts/php/docstruct.php /usr/local/lib/docker-tools/docstruct.php
+COPY scripts/php/docstruct-context.php /usr/local/lib/docker-tools/docstruct-context.php
+COPY scripts/php/docstruct-graphify.php /usr/local/lib/docker-tools/docstruct-graphify.php
+COPY scripts/php/docstruct-graphify-merge.php /usr/local/lib/docker-tools/docstruct-graphify-merge.php
+COPY scripts/shells/docstruct.sh /usr/local/bin/docstruct
 COPY scripts/shells/askai.sh /usr/local/bin/askai
 COPY scripts/shells/aiops.sh /usr/local/bin/aiops
 COPY scripts/shells/gitx-wrapper.sh /tmp/gitx-wrapper
@@ -332,6 +336,7 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
   && rm -f /tmp/toolset-install.sh \
   && chmod +x \
       /usr/local/bin/gitx \
+      /usr/local/bin/docstruct \
       /usr/local/bin/askai \
       /usr/local/bin/aiops \
       /usr/local/bin/git-default \
@@ -368,7 +373,7 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
       /usr/local/bin/composer \
       /etc/share/scripts/tests/senv-smoke.sh \
       /etc/share/scripts/tests/ai-provider-smoke.sh \
-  && chmod 0644 /usr/local/lib/docker-tools/ai-provider.sh \
+  && chmod 0644 /usr/local/lib/docker-tools/ai-provider.sh /usr/local/lib/docker-tools/docstruct.php /usr/local/lib/docker-tools/docstruct-context.php /usr/local/lib/docker-tools/docstruct-graphify.php \
   && init-php-dirs \
   && chmod -R 755 /etc/share/vhosts \
   && mkdir -p /etc/profile.d \
@@ -395,6 +400,12 @@ RUN curl -fsSL --retry 3 --retry-delay 1 --retry-all-errors --connect-timeout 10
       echo 'fi'; \
     } >> /root/.bashrc \
   && bash -n /usr/local/lib/docker-tools/ai-provider.sh \
+  && php -l /usr/local/lib/docker-tools/docstruct.php >/dev/null \
+  && php -l /usr/local/lib/docker-tools/docstruct-context.php >/dev/null \
+  && php -l /usr/local/lib/docker-tools/docstruct-graphify.php >/dev/null \
+  && php -l /usr/local/lib/docker-tools/docstruct-graphify-merge.php >/dev/null \
+  && bash -n /usr/local/bin/docstruct \
+  && docstruct --help >/dev/null \
   && bash -n /usr/local/bin/askai \
   && bash -n /usr/local/bin/aiops \
   && bash -n /usr/local/bin/gitx \

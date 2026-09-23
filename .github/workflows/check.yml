@@ -94,6 +94,33 @@ jobs:
             alpine:latest \
             sh -lc 'apk add --no-cache bash jq yq pandoc php php-mbstring >/dev/null && bash scripts/tests/docstruct-pandoc-feasibility.sh && bash scripts/tests/docstruct-contract.sh'
 
+      - name: Graphify minimum fragment compatibility
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          docker run --rm \
+            -v "$PWD:/work:ro" \
+            -v "$tmp:/out" \
+            -w /work \
+            alpine:latest \
+            sh -lc '
+              apk add --no-cache bash jq yq pandoc php php-mbstring >/dev/null
+              bash scripts/shells/docstruct.sh scripts/tests/fixtures/docstruct --output /out/docstruct.json
+              bash scripts/shells/docstruct.sh graphify /out/docstruct.json --output /out/fragment.json
+            '
+
+          python3 -m venv "$tmp/venv"
+          "$tmp/venv/bin/pip" install --quiet 'graphifyy==0.9.65'
+          "$tmp/venv/bin/graphify" merge-chunks "$tmp/fragment.json" --out "$tmp/merged.json"
+
+          jq -e '
+            (.nodes | length > 0)
+            and (.nodes | all(.file_type == "document"))
+            and (.edges | all(.confidence == "EXTRACTED"))
+          ' "$tmp/merged.json" >/dev/null
+
       - name: Env-store concurrency and corruption recovery
         run: bash scripts/tests/env-store-concurrency.sh
 

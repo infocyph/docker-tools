@@ -11,8 +11,9 @@ Baseline:
 - Repository: `infocyph/docker-tools`
 - Default branch: `main`
 - Runtime role: LocalDevStack control-plane / developer toolbox / admin panel / AI consumer
-- LLM runtime remains external: active provider is exposed through the common Docker-network identity `llm`
-- Internal OpenAI-compatible endpoint: `http://llm:11434/v1`
+- LLM runtime remains external and is selected by `LDS_AI_RUNTIME`
+- `LDS_AI_RUNTIME=npu` -> FastFlow at `http://llm-fastflow:11434/v1`
+- `LDS_AI_RUNTIME=cpu|nvidia|amd` -> Ollama at `http://llm-ollama:11434/v1`
 - LLM images remain inference-only
 - This file supersedes the previous hardening/AI, provider-abstraction, and document-structural-extraction plan files.
 
@@ -22,7 +23,7 @@ Baseline:
 
 Harden `docker-tools` as the LocalDevStack control plane while making it the primary **AI consumer** in the ecosystem.
 
-Tools should remain fully functional without AI. When the common LocalDevStack `llm` service is available, Tools should be able to use it through the provider-neutral layer for future developer/ops workflows.
+Tools should remain fully functional without AI. When LocalDevStack AI is enabled, Tools resolves the active provider directly from `LDS_AI_RUNTIME` and uses that provider container through the shared OpenAI-compatible contract.
 
 The core architectural rule is:
 
@@ -68,7 +69,7 @@ Preserve these responsibilities:
 - AI must be optional and failure-isolated.
 - Docker DNS/service names replace static-IP assumptions.
 - User/project content must never be sent to an external model provider implicitly.
-- The common `llm` service identity is the only provider-neutral Tools target.
+- The selected LLM provider service identity is the only provider-neutral Tools target.
 
 ---
 
@@ -117,22 +118,23 @@ The image should naturally inherit Toolset's existing Ollama-aware `gitx` suppor
 
 docker-tools is an AI **consumer**, never an LLM runtime.
 
-The active LocalDevStack model provider is exposed inside the Docker network through one
-stable identity:
+LocalDevStack exposes the selected runtime to Tools through `LDS_AI_RUNTIME`. Tools
+uses that value as the source of truth for the direct Docker-network target:
 
 ```text
-http://llm:11434/v1
+npu             -> http://llm-fastflow:11434/v1
+cpu|nvidia|amd  -> http://llm-ollama:11434/v1
 ```
 
-The active backend may be FastFlow or Ollama. Tools must not need to know which runtime
-owns the `llm` alias.
+FastFlow's standalone image defaults to port 52625, but LocalDevStack deliberately sets
+`FLM_SERVE_PORT=11434`, so both provider containers expose the same internal API port
+inside the LocalDevStack topology.
 
 Recommended environment contract:
 
 ```text
 LDS_AI_ENABLED=auto
-LDS_AI_PROVIDER=llm
-LDS_AI_URL=http://llm:11434
+LDS_AI_RUNTIME=<npu|cpu|nvidia|amd>
 LDS_AI_MODEL=
 LDS_AI_THINK=
 ```
@@ -147,8 +149,9 @@ Do not use Ollama-native `/api/tags`, `/api/generate`, or `/api/chat` from the s
 Tools client.
 
 Do not route Tools-to-LLM traffic through `llm.localhost`. That hostname is for
-user-facing/browser access through Nginx. Container-to-container traffic uses the direct
-Docker-network service identity `llm:11434`.
+user-facing/browser access through Nginx. Container-to-container traffic resolves the
+active provider from `LDS_AI_RUNTIME` and talks directly to `llm-fastflow:11434` or
+`llm-ollama:11434`.
 
 Thinking is provider-neutral and request-aware:
 
@@ -446,7 +449,7 @@ Plan:
 - validate/sanitize user-controlled request parameters;
 - audit all shell-command construction;
 - introduce an internal API/helper layer for AI later rather than embedding curl logic in each PHP page;
-- add optional AI status indicator when the common `llm` service is reachable;
+- add optional AI status indicator when the selected LLM provider service is reachable;
 - future AI actions remain explicitly user-triggered.
 
 ## 8.13 `README.md`
@@ -456,7 +459,7 @@ Update after implementation stabilizes:
 - define Tools as LocalDevStack control plane;
 - document shared foundations;
 - document AI as optional consumer functionality;
-- document the common `llm` service and provider-neutral client contract;
+- document the selected LLM provider service and provider-neutral client contract;
 - document `LDS_AI_*` variables;
 - document Docker socket security boundary;
 - document admin panel and major command surfaces;
@@ -514,13 +517,13 @@ Tools should expect LocalDevStack to eventually supply:
 
 ```text
 LDS_AI_ENABLED=auto
-LDS_AI_PROVIDER=llm
-LDS_AI_URL=http://llm:11434
+LDS_AI_RUNTIME=<npu|cpu|nvidia|amd>
+LDS_AI_MODEL=
 ```
 
-and Docker-network connectivity to the optional common `llm` service.
+and Docker-network connectivity to the selected provider service: `llm-fastflow` for `npu`, otherwise `llm-ollama`.
 
-Tools-to-LLM requests stay inside the Docker network at `http://llm:11434/v1`.
+Tools-to-LLM requests stay inside the Docker network and resolve from `LDS_AI_RUNTIME`: `npu` uses `http://llm-fastflow:11434/v1`; `cpu|nvidia|amd` use `http://llm-ollama:11434/v1`.
 
 User-facing browser/API access may remain available through Nginx-owned routes such as
 `https://llm.localhost`; provider-specific hostnames are diagnostics/low-level surfaces only.
@@ -604,7 +607,7 @@ Maintain an explicit compatibility matrix covering:
 - Tools -> Nginx: generated vhosts, TLS paths, FPM socket assumptions, proxy include names, streaming/WebSocket behavior and reserved localhost routes;
 - Tools -> Apache: generated vhosts, `/app`, log paths, TLS/mTLS certificate paths, HTTP/2 and PHP-FPM proxy behavior;
 - Tools -> Runner: cron/supervisor directories, generated config format and safe reload behavior;
-- Tools -> common `llm`: OpenAI-compatible client contract at `http://llm:11434/v1`, with no lifecycle ownership;
+- Tools -> selected LLM provider: `LDS_AI_RUNTIME=npu` targets `http://llm-fastflow:11434/v1`; `cpu|nvidia|amd` target `http://llm-ollama:11434/v1`, with no lifecycle ownership;
 - Tools -> LocalDevStack: canonical service catalog, mounted state/config paths, network/service names, image compatibility and product-level orchestration ownership.
 
 Compatibility tests should use the actual hardened sibling images or explicit tested refs, not reimplement their syntax/contracts with local mocks. Floating `latest` may still exist operationally, but a LocalDevStack release should record which image versions/digests were compatibility-tested together.
@@ -742,7 +745,7 @@ The healthcheck should:
 - verify the main notifier/control process is alive and its FIFO/runtime state is sane;
 - verify the admin panel only when `ADMIN_PANEL_AUTOSTART=1`;
 - surface a dead background admin process instead of leaving the container permanently "healthy" because `notifierd` is still PID 1;
-- remain independent of Docker daemon reachability, database availability and common `llm` availability;
+- remain independent of Docker daemon reachability, database availability and selected LLM provider availability;
 - keep AI strictly optional, so an absent LLM can never make Tools unhealthy.
 
 The notifier TCP listener should remain an internal LocalDevStack transport by default. Do not publish it to the host unless explicitly requested; if future external exposure is supported, require authentication rather than relying on the current optional empty token.
@@ -1322,8 +1325,9 @@ Useful metrics:
 
 Reuse the existing provider-neutral AI plumbing:
 
-- `LDS_AI_PROVIDER=llm`;
-- `LDS_AI_URL=http://llm:11434` (OpenAI-compatible API root `http://llm:11434/v1`);
+- `LDS_AI_RUNTIME` as the provider-selection source of truth;
+- `npu` -> `http://llm-fastflow:11434/v1`;
+- `cpu|nvidia|amd` -> `http://llm-ollama:11434/v1`;
 - bounded requests;
 - thinking controls;
 - redaction;
@@ -1633,11 +1637,12 @@ This initiative is ready for release when:
 
 ## 15.22 Internal LLM transport rule
 
-Any optional AI review launched from docker-tools must use the direct Docker-network
-endpoint:
+Any optional AI review launched from docker-tools must resolve the direct Docker-network
+endpoint from `LDS_AI_RUNTIME`:
 
 ```text
-http://llm:11434/v1
+npu             -> http://llm-fastflow:11434/v1
+cpu|nvidia|amd  -> http://llm-ollama:11434/v1
 ```
 
 Do not use `llm.localhost` for Tools-to-LLM traffic. The localhost/TLS route remains

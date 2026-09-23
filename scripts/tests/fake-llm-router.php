@@ -113,7 +113,7 @@ if ($mode === 'docstruct-review' || $mode === 'docstruct-review-invalid-target')
         'add_edges' => [[
             'source' => $source,
             'target' => 'README.md#semantic-runtime',
-            'relation' => 'describes',
+            'relation' => 'conceptually_related_to',
             'source_file' => 'README.md',
             'reason' => 'The document node describes the semantic runtime concept.',
             'confidence' => 0.9,

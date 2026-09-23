@@ -166,6 +166,26 @@ docstruct docs/ --output /tmp/docstruct.json
 docstruct docs/ --compact
 ```
 
+Optional semantic review remains separate and additive:
+
+```bash
+docstruct docs/ --output /tmp/docstruct.json
+aiops document-review --file /tmp/docstruct.json > /tmp/docstruct-review.json
+docstruct graphify /tmp/docstruct.json \
+  --review /tmp/docstruct-review.json \
+  --output /tmp/docstruct.graphify.json
+```
+
+The last command exports a Graphify-compatible semantic fragment containing only
+mechanically safe non-code facts plus validated additive review nodes/edges. It does not
+modify `graphify-out/graph.json`, Graphify caches, or manifests. CI validates the emitted
+fragment with the real minimum supported Graphify (`graphifyy==0.9.65`) via
+`graphify merge-chunks`.
+
+Current Graphify does not yet expose a supported `extract --semantic-fragment` (or
+equivalent) ingestion flag that owns incremental manifest/cache replacement semantics.
+Until such an interface exists, docker-tools stops at the validated fragment boundary.
+
 Current deterministic coverage:
 
 - Markdown headings, links, anchors, and code blocks through Pandoc;

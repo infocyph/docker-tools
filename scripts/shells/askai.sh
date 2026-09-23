@@ -139,7 +139,7 @@ if ((status_only)); then
   think_status=auto
   [[ "$LDS_AI_THINK" == true ]] && think_status=on
   [[ "$LDS_AI_THINK" == false ]] && think_status=off
-  printf 'enabled=%s\nprovider=%s\nurl=%s\nthink=%s\n' "$LDS_AI_ENABLED" "$LDS_AI_PROVIDER" "$LDS_AI_URL" "$think_status"
+  printf 'enabled=%s\nruntime=%s\nprovider=%s\nurl=%s\nthink=%s\n' "$LDS_AI_ENABLED" "$LDS_AI_RUNTIME" "$LDS_AI_PROVIDER" "$LDS_AI_URL" "$think_status"
   if [[ "$LDS_AI_ENABLED" == 0 ]]; then
     printf 'available=0\nmodel=\n'
     exit 0

@@ -74,6 +74,7 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   docstruct --help >/dev/null
   DOCSTRUCT_BIN=/usr/local/bin/docstruct \
   DOCSTRUCT_IMPL=/usr/local/lib/docker-tools/docstruct.php \
+  DOCSTRUCT_CONTEXT_IMPL=/usr/local/lib/docker-tools/docstruct-context.php \
   DOCSTRUCT_GRAPHIFY_IMPL=/usr/local/lib/docker-tools/docstruct-graphify.php \
   bash /etc/share/scripts/tests/docstruct-contract.sh >/dev/null
   askai --help >/dev/null

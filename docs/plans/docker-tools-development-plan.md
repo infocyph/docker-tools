@@ -1116,7 +1116,20 @@ Costs:
 - more implementation/maintenance responsibility;
 - Markdown and especially RST parser quality must be verified carefully.
 
-### Option C — packaged format tools
+### Option C — MyST / m2r2 / conversion-oriented Python tooling
+
+Evaluate the current Python documentation ecosystem explicitly:
+
+- MyST-Parser: strong Sphinx/Docutils Markdown integration and rich directive/role support,
+  but it is primarily a Sphinx parser and brings Python + Sphinx + Docutils dependencies;
+- m2r2: lightweight Markdown-to-RST conversion/Sphinx extension, useful as a compatibility
+  reference but not a normalized structural AST by itself;
+- md-rst: conversion wrapper around Pandoc, so it does not remove Pandoc's footprint.
+
+These tools should be benchmarked for what structural information they expose, not merely
+whether they can convert one markup language into another.
+
+### Option D — packaged format tools
 
 Compose existing Alpine-packaged CLIs plus `jq`/`yq`.
 
@@ -1150,13 +1163,20 @@ another bespoke Python compatibility layer.
 Start with:
 
 1. Pandoc feasibility benchmark for Markdown/RST;
-2. small deterministic Sphinx/RST role/directive scanner if Pandoc does not preserve
-   enough semantic detail;
-3. existing `jq`/`yq` for JSON/YAML normalization where appropriate;
-4. explicit benchmark of final image-size growth.
+2. compare MyST-Parser and m2r2 specifically for Sphinx/RST/Markdown structural fidelity
+   and dependency footprint;
+3. small deterministic Sphinx/RST role/directive scanner where generic converters lose
+   explicit directives such as includes or typed references;
+4. existing `jq`/`yq` for JSON/YAML normalization where appropriate;
+5. explicit benchmark of final image-size growth.
 
-If Pandoc's image cost is unacceptably high, switch to a small static helper rather than
-accumulating several scripting runtimes.
+Current Batch-0 evidence already shows Pandoc preserves basic Markdown/RST structure and
+Sphinx symbol text, but does not resolve the representative `.. include::` fixture.
+That means Pandoc alone is insufficient for the target contract.
+
+If the Python/Sphinx or Pandoc dependency cost is excessive, prefer a small extractor
+built from dependencies already present in docker-tools (PHP is already shipped) or a
+small static helper rather than accumulating another large runtime stack.
 
 ## 15.9 Deterministic reference resolution
 

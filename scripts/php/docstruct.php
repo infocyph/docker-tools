@@ -4,10 +4,34 @@ declare(strict_types=1);
 
 const DOCSTRUCT_SCHEMA = 'docker-tools.docstruct/v1';
 const DOCSTRUCT_EXCLUDES = ['.git', '.hg', '.svn', 'vendor', 'node_modules', 'dist', 'build', 'coverage', 'graphify-out'];
+const DOCSTRUCT_DEFAULT_MAX_FILE_BYTES = 2097152;
+const DOCSTRUCT_DEFAULT_MAX_CORPUS_BYTES = 33554432;
+const DOCSTRUCT_DEFAULT_MAX_FILES = 1000;
+const DOCSTRUCT_DEFAULT_MAX_NODES = 20000;
+const DOCSTRUCT_DEFAULT_PARSE_TIMEOUT = 15;
 
 function fail(string $message, int $code = 64): never {
     fwrite(STDERR, "docstruct: {$message}\n");
     exit($code);
+}
+
+function envUint(string $name, int $default, int $min = 1): int {
+    $raw = getenv($name);
+    if ($raw === false || $raw === '') {
+        return $default;
+    }
+    if (!preg_match('/^\\d+$/', $raw)) {
+        fail("{$name} must be an unsigned integer", 64);
+    }
+    $value = (int)$raw;
+    if ($value < $min) {
+        fail("{$name} must be >= {$min}", 64);
+    }
+    return $value;
+}
+
+function parserTimeout(): int {
+    return envUint('DOCSTRUCT_PARSE_TIMEOUT', DOCSTRUCT_DEFAULT_PARSE_TIMEOUT);
 }
 
 function isList(array $value): bool {
@@ -84,7 +108,7 @@ function walkAst(mixed $value, callable $callback): void {
 
 function pandocAst(string $file, string $format): array {
     $from = $format === 'markdown' ? 'gfm' : 'rst';
-    $cmd = ['pandoc', '--from=' . $from, '--to=json', '--wrap=none', $file];
+    $cmd = ['timeout', parserTimeout() . 's', 'pandoc', '--from=' . $from, '--to=json', '--wrap=none', $file];
     $pipes = [];
     $proc = proc_open($cmd, [
         0 => ['file', '/dev/null', 'r'],
@@ -362,7 +386,7 @@ function extractRstSupplement(
     }
 }
 
-function normalizeRelativeTarget(string $sourceFile, string $target): string {
+function normalizeRelativeTarget(string $sourceFile, string $target): ?string {
     $target = str_replace('\\\\', '/', trim($target));
     if ($target === '') {
         return '';
@@ -383,6 +407,9 @@ function normalizeRelativeTarget(string $sourceFile, string $target): string {
                 continue;
             }
             if ($segment === '..') {
+                if ($segments === []) {
+                    return null;
+                }
                 array_pop($segments);
                 continue;
             }
@@ -427,6 +454,10 @@ function resolveReferences(array &$nodes, array &$edges, array &$unresolved): vo
             continue;
         } else {
             $candidate = normalizeRelativeTarget($sourceFile, $target);
+            if ($candidate === null) {
+                $remaining[] = $reference + ['reason' => 'target_outside_root'];
+                continue;
+            }
             $parts = explode('#', $candidate, 2);
             $path = $parts[0];
             $fragment = $parts[1] ?? '';
@@ -501,7 +532,7 @@ function structuredData(string $file, string $format): array {
     }
 
     $inputFormat = $format === 'toml' ? 'toml' : 'yaml';
-    $cmd = ['yq', '-p=' . $inputFormat, '-o=json', '.', $file];
+    $cmd = ['timeout', parserTimeout() . 's', 'yq', '-p=' . $inputFormat, '-o=json', '.', $file];
     $pipes = [];
     $proc = proc_open($cmd, [
         0 => ['file', '/dev/null', 'r'],
@@ -592,12 +623,23 @@ function supportedFormat(string $path): ?string {
 
 function discoverFiles(string $input): array {
     $real = realpath($input);
+    $maxFileBytes = envUint('DOCSTRUCT_MAX_FILE_BYTES', DOCSTRUCT_DEFAULT_MAX_FILE_BYTES);
+    $maxCorpusBytes = envUint('DOCSTRUCT_MAX_CORPUS_BYTES', DOCSTRUCT_DEFAULT_MAX_CORPUS_BYTES);
+    $maxFiles = envUint('DOCSTRUCT_MAX_FILES', DOCSTRUCT_DEFAULT_MAX_FILES);
+    $corpusBytes = 0;
     if ($real === false) {
         fail("path not found: {$input}", 66);
     }
 
     if (is_file($real)) {
-        return supportedFormat($real) !== null ? [$real] : [];
+        if (supportedFormat($real) === null) {
+            return [];
+        }
+        $bytes = filesize($real);
+        if ($bytes === false || $bytes > $maxFileBytes) {
+            fail("file exceeds DOCSTRUCT_MAX_FILE_BYTES: {$input}", 65);
+        }
+        return [$real];
     }
 
     $files = [];
@@ -617,7 +659,18 @@ function discoverFiles(string $input): array {
             continue;
         }
         if (supportedFormat($path) !== null) {
+            $bytes = $info->getSize();
+            if ($bytes > $maxFileBytes) {
+                fail("file exceeds DOCSTRUCT_MAX_FILE_BYTES: {$relative}", 65);
+            }
+            $corpusBytes += $bytes;
+            if ($corpusBytes > $maxCorpusBytes) {
+                fail('corpus exceeds DOCSTRUCT_MAX_CORPUS_BYTES', 65);
+            }
             $files[] = $path;
+            if (count($files) > $maxFiles) {
+                fail('corpus exceeds DOCSTRUCT_MAX_FILES', 65);
+            }
         }
     }
 
@@ -634,7 +687,8 @@ function parseArgs(array $argv): array {
         $arg = $argv[$i];
         if ($arg === '-h' || $arg === '--help') {
             echo "Usage: docstruct [path] [--output <file>] [--compact]\n";
-            echo "Deterministically extract Markdown/RST structure as docker-tools.docstruct/v1 JSON.\n";
+            echo "Deterministically extract Markdown/RST/YAML/JSON/TOML structure as docker-tools.docstruct/v1 JSON.\n";
+            echo "Limits: DOCSTRUCT_MAX_FILE_BYTES, DOCSTRUCT_MAX_CORPUS_BYTES, DOCSTRUCT_MAX_FILES, DOCSTRUCT_MAX_NODES, DOCSTRUCT_PARSE_TIMEOUT.\n";
             exit(0);
         }
         if ($arg === '--output') {
@@ -729,6 +783,9 @@ foreach ($files as $file) {
     }
 
     $records[] = $record;
+    if (count($nodes) > envUint('DOCSTRUCT_MAX_NODES', DOCSTRUCT_DEFAULT_MAX_NODES)) {
+        fail('extracted structure exceeds DOCSTRUCT_MAX_NODES', 65);
+    }
 }
 
 resolveReferences($nodes, $edges, $unresolved);

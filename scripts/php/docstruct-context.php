@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 const DOCSTRUCT_CONTEXT_SCHEMA = 'docker-tools.docstruct-context/v1';
 const DOCSTRUCT_CONTEXT_BASE_SCHEMA = 'docker-tools.docstruct/v1';
-const DOCSTRUCT_CONTEXT_DEFAULT_FILE_BYTES = 16384;
-const DOCSTRUCT_CONTEXT_DEFAULT_TOTAL_BYTES = 262144;
+const DOCSTRUCT_CONTEXT_DEFAULT_FILE_BYTES = 32768;
+const DOCSTRUCT_CONTEXT_DEFAULT_TOTAL_BYTES = 1048576;
+const DOCSTRUCT_CONTEXT_DEFAULT_CHUNK_BYTES = 49152;
+const DOCSTRUCT_CONTEXT_DEFAULT_CHUNK_FILES = 4;
 
 /** @return never */
 function contextFail(string $message, int $code = 64): never
@@ -109,7 +111,7 @@ function contextArgs(array $argv): array
         if ($arg === '-h' || $arg === '--help') {
             echo "Usage: docstruct context <docstruct.json> [--compact]\n";
             echo "Build bounded Markdown/RST review passages without exposing config scalar values.\n";
-            echo "Limits: DOCSTRUCT_REVIEW_ROOT, DOCSTRUCT_REVIEW_FILE_BYTES, DOCSTRUCT_REVIEW_TOTAL_BYTES.\n";
+            echo "Limits: DOCSTRUCT_REVIEW_ROOT, DOCSTRUCT_REVIEW_FILE_BYTES, DOCSTRUCT_REVIEW_TOTAL_BYTES, DOCSTRUCT_REVIEW_CHUNK_BYTES, DOCSTRUCT_REVIEW_CHUNK_FILES.\n";
             exit(0);
         }
         if ($arg === '--compact') {
@@ -201,17 +203,46 @@ foreach (($doc['files'] ?? []) as $file) {
     ];
 }
 
+$chunkByteLimit = contextLimit('DOCSTRUCT_REVIEW_CHUNK_BYTES', DOCSTRUCT_CONTEXT_DEFAULT_CHUNK_BYTES);
+$chunkFileLimit = contextLimit('DOCSTRUCT_REVIEW_CHUNK_FILES', DOCSTRUCT_CONTEXT_DEFAULT_CHUNK_FILES);
+$chunks = [];
+$current = ['files' => [], 'passages' => [], 'bytes' => 0];
+
+foreach ($passages as $passage) {
+    $passageBytes = (int)($passage['bytes'] ?? 0);
+    $wouldOverflow = $current['passages'] !== []
+        && (
+            count($current['passages']) >= $chunkFileLimit
+            || $current['bytes'] + $passageBytes > $chunkByteLimit
+        );
+    if ($wouldOverflow) {
+        $chunks[] = $current;
+        $current = ['files' => [], 'passages' => [], 'bytes' => 0];
+    }
+
+    $current['files'][] = (string)$passage['source_file'];
+    $current['passages'][] = $passage;
+    $current['bytes'] += $passageBytes;
+}
+if ($current['passages'] !== []) {
+    $chunks[] = $current;
+}
+
 $result = [
     'schema' => DOCSTRUCT_CONTEXT_SCHEMA,
     'base_schema' => DOCSTRUCT_CONTEXT_BASE_SCHEMA,
     'base_sha256' => hash('sha256', rtrim($sidecar['raw'], "\n")),
     'structure' => $doc,
     'passages' => $passages,
+    'chunks' => $chunks,
     'stats' => [
         'passage_files' => count($passages),
         'passage_bytes' => $totalBytes,
         'file_limit_bytes' => $fileLimit,
         'total_limit_bytes' => $totalLimit,
+        'chunk_bytes' => $chunkByteLimit,
+        'chunk_files' => $chunkFileLimit,
+        'chunks' => count($chunks),
     ],
 ];
 

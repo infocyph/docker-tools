@@ -72,6 +72,9 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   composer --version --no-ansi >/dev/null
   gitx --version >/dev/null
   docstruct --help >/dev/null
+  DOCSTRUCT_BIN=/usr/local/bin/docstruct \
+  DOCSTRUCT_IMPL=/usr/local/lib/docker-tools/docstruct.php \
+  bash /etc/share/scripts/tests/docstruct-contract.sh >/dev/null
   askai --help >/dev/null
   aiops --help >/dev/null
   status --help >/dev/null

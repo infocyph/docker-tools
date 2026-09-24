@@ -91,6 +91,11 @@ Published GitHub releases are the immutable source for versioned images.
 - `zip`, `unzip`, `tree`, `ncdu`
 - `pandoc` for document conversion/structure workflows
 - `magick` (ImageMagick) for JPEG/PNG/GIF/WebP and other image conversions exposed by installed delegates
+- `ffmpeg` / `ffprobe` for audio/video transcoding, remuxing, filtering, and probing
+- `sox` / `soxi` for audio processing, effects, and inspection
+- `mkvmerge`, `mkvinfo`, `mkvextract`, `mkvpropedit` for Matroska workflows
+- `mediainfo` for media/container metadata inspection
+- `xvidcore` as explicit MPEG-4 Part 2/Xvid codec runtime support for FFmpeg
 - Default editor UX:
   - `nano` is default `EDITOR` and `VISUAL`
   - `/etc/nanorc` is configured to load syntax rules when available

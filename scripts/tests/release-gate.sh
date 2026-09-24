@@ -35,6 +35,15 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   test -x /usr/local/bin/docstruct
   command -v pandoc >/dev/null
   command -v magick >/dev/null
+  command -v ffmpeg >/dev/null
+  command -v ffprobe >/dev/null
+  command -v sox >/dev/null
+  command -v soxi >/dev/null
+  command -v mkvmerge >/dev/null
+  command -v mkvinfo >/dev/null
+  command -v mkvextract >/dev/null
+  command -v mkvpropedit >/dev/null
+  command -v mediainfo >/dev/null
   test -x /usr/local/bin/askai
   test -x /usr/local/bin/aiops
   test -r "$LDS_AI_PROVIDER_LIB"
@@ -90,6 +99,32 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   magick -list format | grep -Eq "^[[:space:]]*PNG"
   magick -list format | grep -Eq "^[[:space:]]*GIF"
   magick -list format | grep -Eq "^[[:space:]]*WEBP"
+
+  ffmpeg -hide_banner -loglevel error -f lavfi -i sine=frequency=1000:duration=0.2 -c:a pcm_s16le /tmp/lds-audio.wav
+  ffmpeg -hide_banner -loglevel error -y -i /tmp/lds-audio.wav -c:a libmp3lame /tmp/lds-audio.mp3
+  audio_codec="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nk=1:nw=1 /tmp/lds-audio.mp3)"
+  grep -qx mp3 <<<"$audio_codec"
+  soxi /tmp/lds-audio.wav >/dev/null
+  sox /tmp/lds-audio.wav /tmp/lds-audio-gain.wav gain -n -3
+  soxi /tmp/lds-audio-gain.wav >/dev/null
+
+  ffmpeg_encoders="$(ffmpeg -hide_banner -encoders 2>&1)"
+  grep -Eq "[[:space:]]libxvid[[:space:]]" <<<"$ffmpeg_encoders"
+  ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=blue:s=32x32:d=0.3 -c:v libxvid -an -y /tmp/lds-xvid.avi
+  test -e /usr/lib/libxvidcore.so.4
+  video_codec="$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nk=1:nw=1 /tmp/lds-xvid.avi)"
+  grep -qx mpeg4 <<<"$video_codec"
+
+  mkvmerge --version >/dev/null
+  mkvinfo --version >/dev/null
+  mkvextract --version >/dev/null
+  mkvpropedit --version >/dev/null
+  mkvmerge -q -o /tmp/lds-media.mkv /tmp/lds-xvid.avi /tmp/lds-audio.mp3
+  mkv_json="$(mkvmerge -J /tmp/lds-media.mkv)"
+  jq -e ".tracks | length >= 2" <<<"$mkv_json" >/dev/null
+  mkvinfo /tmp/lds-media.mkv >/dev/null
+  media_json="$(mediainfo --Output=JSON /tmp/lds-media.mkv)"
+  jq -e ".media.track | length >= 2" <<<"$media_json" >/dev/null
   DOCSTRUCT_BIN=/usr/local/bin/docstruct \
   DOCSTRUCT_IMPL=/usr/local/lib/docker-tools/docstruct.php \
   DOCSTRUCT_CONTEXT_IMPL=/usr/local/lib/docker-tools/docstruct-context.php \

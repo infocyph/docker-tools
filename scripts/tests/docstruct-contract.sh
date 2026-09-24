@@ -175,6 +175,71 @@ jq -e '
   and ([.nodes[].id] | all(test("config_[a-f0-9]{16}$") | not))
 ' "$tmp/graphify.json" >/dev/null || fail "Graphify mechanical fragment contract failed"
 
+cat >"$tmp/graphify-duplicate-input.json" <<'JSON'
+{
+  "schema": "docker-tools.docstruct/v1",
+  "root": "/workspace",
+  "files": [{"path":"dup.md","format":"markdown","parser":"pandoc"}],
+  "nodes": [
+    {
+      "id": "dup.md#document",
+      "type": "document",
+      "label": "dup.md",
+      "source_file": "dup.md",
+      "evidence": {"line_start":1,"line_end":1}
+    },
+    {
+      "id": "dup.md#repeat-a",
+      "type": "section",
+      "label": "Repeated heading",
+      "source_file": "dup.md",
+      "evidence": {"line_start":2,"line_end":2}
+    },
+    {
+      "id": "dup.md#repeat-b",
+      "type": "section",
+      "label": "Repeated heading",
+      "source_file": "dup.md",
+      "evidence": {"line_start":8,"line_end":8}
+    }
+  ],
+  "edges": [
+    {
+      "source":"dup.md#document",
+      "target":"dup.md#repeat-a",
+      "relation":"contains",
+      "source_file":"dup.md",
+      "evidence":{"line_start":2,"line_end":2}
+    },
+    {
+      "source":"dup.md#document",
+      "target":"dup.md#repeat-b",
+      "relation":"contains",
+      "source_file":"dup.md",
+      "evidence":{"line_start":8,"line_end":8}
+    }
+  ],
+  "unresolved_references": [],
+  "warnings": [],
+  "stats": {"files":1,"nodes":3,"edges":2,"unresolved_references":0}
+}
+JSON
+
+DOCSTRUCT_IMPL="$IMPL" \
+DOCSTRUCT_GRAPHIFY_IMPL="$GRAPHIFY_IMPL" \
+DOCSTRUCT_PHP_BIN="$PHP_BIN" \
+  bash "$DOCSTRUCT" graphify "$tmp/graphify-duplicate-input.json" \
+    --source-root /host/Fixture --output "$tmp/graphify-duplicate.json"
+
+jq -e '
+  ([.nodes[] | select(.source_file == "/host/Fixture/dup.md" and .label == "Repeated heading")] | length == 1)
+  and ([.nodes[].id] | index("docstruct_dup_repeat_a") != null)
+  and ([.nodes[].id] | index("docstruct_dup_repeat_b") == null)
+  and ([.edges[] | select(.target == "docstruct_dup_repeat_a" and .relation == "contains")] | length == 1)
+  and ([.edges[].source, .edges[].target] | all(. as $id | [.nodes[].id] | index($id) != null))
+' "$tmp/graphify-duplicate.json" >/dev/null ||
+  fail "Graphify same-file semantic identity canonicalization failed"
+
 base="$(cat "$tmp/one.json")"
 base_hash="$(printf '%s' "$base" | sha256sum | awk '{print $1}')"
 jq -n \

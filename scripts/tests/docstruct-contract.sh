@@ -232,11 +232,13 @@ DOCSTRUCT_PHP_BIN="$PHP_BIN" \
     --source-root /host/Fixture --output "$tmp/graphify-duplicate.json"
 
 jq -e '
-  ([.nodes[] | select(.source_file == "/host/Fixture/dup.md" and .label == "Repeated heading")] | length == 1)
+  . as $graph
+  | ([.nodes[] | select(.source_file == "/host/Fixture/dup.md" and .label == "Repeated heading")] | length == 1)
   and ([.nodes[].id] | index("docstruct_dup_repeat_a") != null)
   and ([.nodes[].id] | index("docstruct_dup_repeat_b") == null)
   and ([.edges[] | select(.target == "docstruct_dup_repeat_a" and .relation == "contains")] | length == 1)
-  and ([.edges[].source, .edges[].target] | all(. as $id | [.nodes[].id] | index($id) != null))
+  and ([.edges[].source, .edges[].target]
+    | all(. as $id | ($graph.nodes | map(.id) | index($id)) != null))
 ' "$tmp/graphify-duplicate.json" >/dev/null ||
   fail "Graphify same-file semantic identity canonicalization failed"
 

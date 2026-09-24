@@ -89,6 +89,8 @@ Published GitHub releases are the immutable source for versioned images.
 - `sqlite` + `sqlitex` (Toolset)
 - `shellcheck`
 - `zip`, `unzip`, `tree`, `ncdu`
+- `pandoc` for document conversion/structure workflows
+- `magick` (ImageMagick) for JPEG/PNG/GIF/WebP and other image conversions exposed by installed delegates
 - Default editor UX:
   - `nano` is default `EDITOR` and `VISUAL`
   - `/etc/nanorc` is configured to load syntax rules when available

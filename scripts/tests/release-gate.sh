@@ -34,6 +34,7 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   test -x /usr/local/bin/gitx
   test -x /usr/local/bin/docstruct
   command -v pandoc >/dev/null
+  command -v magick >/dev/null
   test -x /usr/local/bin/askai
   test -x /usr/local/bin/aiops
   test -r "$LDS_AI_PROVIDER_LIB"
@@ -72,6 +73,23 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   composer --version --no-ansi >/dev/null
   gitx --version >/dev/null
   docstruct --help >/dev/null
+  magick -size 2x2 xc:red /tmp/lds-image.png
+  magick /tmp/lds-image.png /tmp/lds-image.jpg
+  magick /tmp/lds-image.png /tmp/lds-image.gif
+  magick /tmp/lds-image.png /tmp/lds-image.webp
+  magick -delay 10 -size 2x2 xc:red -size 2x2 xc:blue -loop 0 /tmp/lds-animated.gif
+  magick /tmp/lds-animated.gif /tmp/lds-animated.webp
+  test "$(magick identify /tmp/lds-animated.gif | wc -l | tr -d " ")" -ge 2
+  test "$(magick identify /tmp/lds-animated.webp | wc -l | tr -d " ")" -ge 2
+  magick "/tmp/lds-animated.gif[0]" /tmp/lds-preview.jpg
+  test "$(magick identify /tmp/lds-preview.jpg | wc -l | tr -d " ")" -eq 1
+  magick identify /tmp/lds-image.jpg >/dev/null
+  magick identify /tmp/lds-image.gif >/dev/null
+  magick identify /tmp/lds-image.webp >/dev/null
+  magick -list format | grep -Eq "^[[:space:]]*JPEG"
+  magick -list format | grep -Eq "^[[:space:]]*PNG"
+  magick -list format | grep -Eq "^[[:space:]]*GIF"
+  magick -list format | grep -Eq "^[[:space:]]*WEBP"
   DOCSTRUCT_BIN=/usr/local/bin/docstruct \
   DOCSTRUCT_IMPL=/usr/local/lib/docker-tools/docstruct.php \
   DOCSTRUCT_CONTEXT_IMPL=/usr/local/lib/docker-tools/docstruct-context.php \

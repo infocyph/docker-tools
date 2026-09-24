@@ -230,7 +230,7 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
 RUN apk add --no-cache \
       curl git wget ca-certificates bash coreutils net-tools nss iputils-ping ncdu jq tree \
       nmap openssl ncurses tzdata figlet musl-locales gawk sqlite socat age sops \
-      docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax pandoc \
+      docker-cli docker-cli-compose yq ripgrep fd shellcheck zip unzip nano nano-syntax pandoc imagemagick imagemagick-webp libwebp-tools \
       bind-tools iproute2 traceroute mtr netcat-openbsd gzip flock \
       lnav multitail less php php-mbstring php-curl php-zip php-phar php-openssl php-common \
   && update-ca-certificates \

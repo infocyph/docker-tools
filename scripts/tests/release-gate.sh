@@ -117,9 +117,9 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   mkvextract --version >/dev/null
   mkvpropedit --version >/dev/null
   mkvmerge -q -o /tmp/lds-media.mkv /tmp/lds-xvid.avi /tmp/lds-audio.mp3
-  mkvmerge -J /tmp/lds-media.mkv | jq -e '.tracks | length >= 2' >/dev/null
+  mkvmerge -J /tmp/lds-media.mkv | jq -e ".tracks | length >= 2" >/dev/null
   mkvinfo /tmp/lds-media.mkv >/dev/null
-  mediainfo --Output=JSON /tmp/lds-media.mkv | jq -e '.media.track | length >= 2' >/dev/null
+  mediainfo --Output=JSON /tmp/lds-media.mkv | jq -e ".media.track | length >= 2" >/dev/null
   DOCSTRUCT_BIN=/usr/local/bin/docstruct \
   DOCSTRUCT_IMPL=/usr/local/lib/docker-tools/docstruct.php \
   DOCSTRUCT_CONTEXT_IMPL=/usr/local/lib/docker-tools/docstruct-context.php \

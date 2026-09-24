@@ -183,10 +183,13 @@ The last command exports a Graphify-compatible semantic fragment containing only
 mechanically safe non-code facts plus validated additive review nodes/edges. When
 docstruct ran inside `SERVER_TOOLS` against `/app`, `--source-root` can remap
 provenance to the host project root used by host Graphify without requiring that host
-path to exist inside the container. It does not modify `graphify-out/graph.json`,
-Graphify caches, or manifests. CI validates the emitted
-fragment with the real minimum supported Graphify (`graphifyy==0.9.65`) via
-`graphify merge-chunks`.
+path to exist inside the container. Same-file located semantic nodes are canonicalized
+to Graphify's `(source_file, label)` identity rule before export, with affected edges
+rewired and deduplicated. It does not modify `graphify-out/graph.json`, Graphify caches,
+or manifests. CI validates the emitted fragment with the real minimum supported Graphify
+(`graphifyy==0.9.65`) through both `graphify merge-chunks` and an LLM-free
+`graphify cluster-only --no-label --no-viz` round trip; the node count must remain
+stable.
 
 Current Graphify does not yet expose a supported `extract --semantic-fragment` (or
 equivalent) ingestion flag that owns incremental manifest/cache replacement semantics.
@@ -201,7 +204,9 @@ Current deterministic coverage:
 - resolution of provable local document links/includes/toctree references;
 - source evidence and explicit unresolved references;
 - bounded review context is split into small file/byte-limited chunks before any LLM call;
-- Graphify export uses a reserved `docstruct_` namespace and a safe replacement merge that preserves code nodes.
+- document-review retries one malformed structured response once before returning failure to the caller;
+- Graphify export uses a reserved `docstruct_` namespace and a safe replacement merge that preserves code nodes;
+- same-file located document identities are canonicalized before Graphify consumes the fragment.
 
 Resource controls:
 

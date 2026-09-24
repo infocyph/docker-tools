@@ -34,6 +34,7 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   test -x /usr/local/bin/gitx
   test -x /usr/local/bin/docstruct
   command -v pandoc >/dev/null
+  command -v magick >/dev/null
   test -x /usr/local/bin/askai
   test -x /usr/local/bin/aiops
   test -r "$LDS_AI_PROVIDER_LIB"
@@ -72,6 +73,17 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   composer --version --no-ansi >/dev/null
   gitx --version >/dev/null
   docstruct --help >/dev/null
+  magick -size 2x2 xc:red /tmp/lds-image.png
+  magick /tmp/lds-image.png /tmp/lds-image.jpg
+  magick /tmp/lds-image.png /tmp/lds-image.gif
+  magick /tmp/lds-image.png /tmp/lds-image.webp
+  magick identify /tmp/lds-image.jpg >/dev/null
+  magick identify /tmp/lds-image.gif >/dev/null
+  magick identify /tmp/lds-image.webp >/dev/null
+  magick -list format | grep -Eq "^[[:space:]]*JPEG"
+  magick -list format | grep -Eq "^[[:space:]]*PNG"
+  magick -list format | grep -Eq "^[[:space:]]*GIF"
+  magick -list format | grep -Eq "^[[:space:]]*WEBP"
   DOCSTRUCT_BIN=/usr/local/bin/docstruct \
   DOCSTRUCT_IMPL=/usr/local/lib/docker-tools/docstruct.php \
   DOCSTRUCT_CONTEXT_IMPL=/usr/local/lib/docker-tools/docstruct-context.php \

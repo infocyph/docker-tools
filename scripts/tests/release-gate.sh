@@ -77,6 +77,12 @@ docker run --rm --entrypoint bash "$IMAGE" -lc '
   magick /tmp/lds-image.png /tmp/lds-image.jpg
   magick /tmp/lds-image.png /tmp/lds-image.gif
   magick /tmp/lds-image.png /tmp/lds-image.webp
+  magick -delay 10 -size 2x2 xc:red -size 2x2 xc:blue -loop 0 /tmp/lds-animated.gif
+  magick /tmp/lds-animated.gif /tmp/lds-animated.webp
+  test "$(magick identify /tmp/lds-animated.gif | wc -l | tr -d " ")" -ge 2
+  test "$(magick identify /tmp/lds-animated.webp | wc -l | tr -d " ")" -ge 2
+  magick "/tmp/lds-animated.gif[0]" /tmp/lds-preview.jpg
+  test "$(magick identify /tmp/lds-preview.jpg | wc -l | tr -d " ")" -eq 1
   magick identify /tmp/lds-image.jpg >/dev/null
   magick identify /tmp/lds-image.gif >/dev/null
   magick identify /tmp/lds-image.webp >/dev/null

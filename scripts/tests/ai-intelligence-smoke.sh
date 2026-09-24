@@ -242,6 +242,20 @@ jq -e '
   and .patch.add_edges[0].source == "README.md#document"
 ' <<<"$review_patch" >/dev/null || fail 'valid document-review additive patch was not accepted'
 
+printf 'docstruct-review-invalid-json-once\n' >"$mode_file"
+before="$(wc -l <"$capture_file" | tr -d '[:space:]')"
+retry_review_patch="$(DOCSTRUCT_REVIEW_CHUNK_FILES=2 bash "$AIOPS" document-review --file "$tmp/docstruct.json")"
+after="$(wc -l <"$capture_file" | tr -d '[:space:]')"
+[[ "$((after - before))" -eq 2 ]] ||
+  fail 'document-review malformed JSON did not trigger exactly one bounded retry'
+jq -e '
+  .schema == "docker-tools.docstruct-review/v1"
+  and .review_chunks == 1
+  and (.patch.add_nodes | length == 1)
+  and (.patch.add_edges | length == 1)
+' <<<"$retry_review_patch" >/dev/null ||
+  fail 'document-review JSON retry did not recover a valid additive patch'
+
 dd if=/dev/zero bs=1000 count=600 2>/dev/null | tr '\000' x >"$tmp/sidecar-padding.txt"
 jq --rawfile padding "$tmp/sidecar-padding.txt" '. + {test_padding:$padding}'   "$tmp/docstruct.json" >"$tmp/large-docstruct.json"
 large_size="$(wc -c <"$tmp/large-docstruct.json" | tr -d '[:space:]')"

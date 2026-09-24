@@ -258,6 +258,29 @@ aiops_docstruct_bin() {
   return 69
 }
 
+aiops_generate_document_patch() {
+  local request="$1" context="$2" system="$3" think_override="$4" chunk_index="$5"
+  local patch rc retry_system
+
+  if patch="$(ai_generate_context_json "$request" "$context" "$system" "$think_override")"; then
+    printf '%s\n' "$patch"
+    return 0
+  else
+    rc=$?
+  fi
+
+  aiops_error "document-review chunk $chunk_index structured generation failed; retrying once"
+  retry_system="$(printf '%s\n%s' "$system" 'The previous response failed strict JSON validation. Return only the required JSON object with no prose, Markdown fences, or trailing text.')"
+
+  if patch="$(ai_generate_context_json "$request" "$context" "$retry_system" "$think_override")"; then
+    printf '%s\n' "$patch"
+    return 0
+  else
+    rc=$?
+  fi
+
+  return "$rc"
+}
 aiops_document_review() {
   local file="$1" context="$2" request="$3" extra_system="$4" context_only="$5" think_override="${6:-inherit}"
   local review_context docstruct_bin base_hash system structure_json passages_text review_payload redacted
@@ -342,7 +365,7 @@ aiops_document_review() {
     chunk_redacted="$(printf '%s' "$chunk_payload" | ai_redact)"
     aiops_guard_context "$chunk_redacted" || return $?
 
-    patch="$(ai_generate_context_json "$request" "$chunk_redacted" "$system" "$think_override")" || return $?
+    patch="$(aiops_generate_document_patch "$request" "$chunk_redacted" "$system" "$think_override" "$chunk_count")" || return $?
 
     if ! jq -e '
       def conf: type == "number" and . >= 0 and . <= 1;

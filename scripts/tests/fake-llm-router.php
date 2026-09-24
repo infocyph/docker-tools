@@ -99,7 +99,12 @@ if (($request['stream'] ?? false) === true) {
     return;
 }
 
-if ($mode === 'docstruct-review' || $mode === 'docstruct-review-invalid-target') {
+if ($mode === 'docstruct-review-invalid-json-once') {
+    if ($modeFile !== '') {
+        file_put_contents($modeFile, "docstruct-review\n", LOCK_EX);
+    }
+    $content = '{not-json';
+} elseif ($mode === 'docstruct-review' || $mode === 'docstruct-review-invalid-target') {
     $source = $mode === 'docstruct-review-invalid-target' ? 'missing#node' : 'README.md#document';
     $content = json_encode([
         'add_nodes' => [[

@@ -121,6 +121,21 @@ jobs:
             and (.edges | all(.confidence == "EXTRACTED"))
           ' "$tmp/merged.json" >/dev/null
 
+          mkdir -p "$tmp/roundtrip"
+          cp "$tmp/merged.json" "$tmp/roundtrip/staged.json"
+          (
+            cd "$tmp/roundtrip"
+            "$tmp/venv/bin/graphify" cluster-only \
+              --graph "$tmp/roundtrip/staged.json" --no-label --no-viz >/dev/null
+          )
+          before_nodes="$(jq '.nodes | length' "$tmp/merged.json")"
+          after_nodes="$(jq '.nodes | length' "$tmp/roundtrip/graphify-out/graph.json")"
+          [[ "$before_nodes" == "$after_nodes" ]] || {
+            printf 'Graphify round-trip changed docstruct node count: %s -> %s\n' \
+              "$before_nodes" "$after_nodes" >&2
+            exit 1
+          }
+
       - name: Env-store concurrency and corruption recovery
         run: bash scripts/tests/env-store-concurrency.sh
 

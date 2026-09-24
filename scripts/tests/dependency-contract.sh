@@ -47,7 +47,7 @@ assert_present 'lazydocker/releases/download/\$\{lazy_tag\}' Dockerfile
 assert_present 'checksums\.txt' Dockerfile
 assert_present 'def version_parts: split\("\."\) \| map\(tonumber\);' Dockerfile
 assert_present 'netcat-openbsd gzip flock' Dockerfile
-assert_present 'nano-syntax pandoc imagemagick imagemagick-webp libwebp-tools' Dockerfile
+assert_present 'nano-syntax pandoc imagemagick imagemagick-webp libwebp-tools ffmpeg sox' Dockerfile
 assert_present 'COPY scripts/php/docstruct\.php /usr/local/lib/docker-tools/docstruct\.php' Dockerfile
 assert_present 'COPY scripts/php/docstruct-context\.php /usr/local/lib/docker-tools/docstruct-context\.php' Dockerfile
 assert_present 'COPY scripts/php/docstruct-graphify\.php /usr/local/lib/docker-tools/docstruct-graphify\.php' Dockerfile

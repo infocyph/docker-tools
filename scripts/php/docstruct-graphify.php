@@ -168,6 +168,84 @@ function allowedReviewRelation(string $relation): bool
     ], true);
 }
 
+/**
+ * Canonicalize the docstruct fragment to Graphify's loaded-graph identity rule.
+ *
+ * Graphify's build_from_json() treats a located non-AST node as canonical by
+ * (source_file, label) and rewires later semantic twins onto that node. A raw
+ * fragment that keeps several such nodes is therefore larger on disk than it is
+ * after Graphify loads it, which trips Graphify's shrink guard during label.
+ *
+ * @param array<string,array<string,mixed>> $nodes
+ * @param array<string,array<string,mixed>> $edges
+ * @return array{0:array<string,array<string,mixed>>,1:array<string,array<string,mixed>>}
+ */
+function canonicalizeGraphifyLocatedIdentity(array $nodes, array $edges): array
+{
+    ksort($nodes, SORT_STRING);
+
+    $canonicalByKey = [];
+    foreach ($nodes as $id => $node) {
+        $sourceFile = trim((string)($node['source_file'] ?? ''));
+        $label = trim((string)($node['label'] ?? ''));
+        $location = trim((string)($node['source_location'] ?? ''));
+        if ($sourceFile === '' || $label === '' || $location === '') {
+            continue;
+        }
+
+        $key = $sourceFile . "\0" . $label;
+        $canonicalByKey[$key] ??= $id;
+    }
+
+    if ($canonicalByKey === []) {
+        return [$nodes, $edges];
+    }
+
+    $remap = [];
+    foreach ($nodes as $id => $node) {
+        $sourceFile = trim((string)($node['source_file'] ?? ''));
+        $label = trim((string)($node['label'] ?? ''));
+        if ($sourceFile === '' || $label === '') {
+            continue;
+        }
+
+        $key = $sourceFile . "\0" . $label;
+        $canonical = $canonicalByKey[$key] ?? null;
+        if (is_string($canonical) && $canonical !== $id) {
+            $remap[$id] = $canonical;
+            unset($nodes[$id]);
+        }
+    }
+
+    if ($remap === []) {
+        return [$nodes, $edges];
+    }
+
+    $rewired = [];
+    foreach ($edges as $edge) {
+        $source = (string)($edge['source'] ?? '');
+        $target = (string)($edge['target'] ?? '');
+        if (isset($remap[$source])) {
+            $source = $remap[$source];
+        }
+        if (isset($remap[$target])) {
+            $target = $remap[$target];
+        }
+
+        $edge['source'] = $source;
+        $edge['target'] = $target;
+        $key = implode('|', [
+            $source,
+            $target,
+            (string)($edge['relation'] ?? ''),
+            (string)($edge['source_file'] ?? ''),
+        ]);
+        $rewired[$key] = $edge;
+    }
+
+    return [$nodes, $rewired];
+}
+
 /** @param array<string,mixed> $doc
  *  @param array<string,mixed>|null $review
  *  @return array<string,mixed>
@@ -343,6 +421,7 @@ function buildGraphifyFragment(array $doc, ?array $review, ?string $sourceRootOv
         }
     }
 
+    [$nodes, $edges] = canonicalizeGraphifyLocatedIdentity($nodes, $edges);
     ksort($nodes, SORT_STRING);
     ksort($edges, SORT_STRING);
 
@@ -383,10 +462,6 @@ function parseGraphifyArgs(array $argv): array
             if ($sourceRoot === '') {
                 graphifyFail('--source-root cannot be empty');
             }
-            continue;
-        }
-        if ($arg === '--source-root') {
-            $sourceRoot = $argv[++$i] ?? graphifyFail('--source-root requires an absolute path');
             continue;
         }
         if ($arg === '--compact') {

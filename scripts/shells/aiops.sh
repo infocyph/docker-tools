@@ -597,6 +597,8 @@ main "$@"
   if patch="$(ai_generate_context_json "$request" "$context" "$retry_system" "$think_override")"; then
     printf '%s\n' "$patch"
     return 0
+  else
+    rc=$?
   fi
 
   return "$rc"
